@@ -111,6 +111,11 @@ the underlying hasher.
 Different mechanism, same concept. The `google-api-python-client` handles resumable
 uploads via `MediaFileUpload` with `resumable=True`.
 
+**Bandwidth throttling:** Both `MediaFileUpload` and `MediaIoBaseDownload` expose a
+`next_chunk()` loop. Throttle by sleeping between chunks: after each chunk, compute how
+long the transfer *should* have taken at the configured bytes/sec rate and sleep the
+difference. Granularity is one chunk (typically 256 KB–1 MB).
+
 ### 3.6 Authentication
 
 | Dropbox | Google Drive |

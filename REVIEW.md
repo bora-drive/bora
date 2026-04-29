@@ -182,15 +182,12 @@ This means the project is currently in a **broken intermediate state** where:
 
 ---
 
-## 13. Bandwidth Throttling Implementation Couples to Dropbox SDK
+## 13. ~~Bandwidth Throttling Implementation Couples to Dropbox SDK~~ (RESOLVED)
 
-The existing bandwidth throttling works by wrapping the Dropbox SDK's upload/download streams with throttled iterators. The `_DropboxSDK` subclass overrides `request_json_string()` to support streamed request bodies.
+**Decision:** Sleep between chunks. Both `MediaFileUpload` and `MediaIoBaseDownload` use a `next_chunk()` loop. After each chunk, compute how long the transfer *should* have taken at the configured bytes/sec rate and sleep the difference. Coarse-grained (chunk-size granularity) but simple and sufficient.
 
-Google's `MediaFileUpload` and `MediaIoBaseDownload` have different streaming models. The TODO mentions bandwidth throttling in Phases 5d and 5e but doesn't address how to integrate it with Google's upload/download classes.
-
-`MediaFileUpload` with `resumable=True` sends chunks in fixed sizes — throttling would need to be applied between chunks, not within them. `MediaIoBaseDownload` writes to a file-like object in chunks.
-
-**Recommendation:** Add a design note for how throttling integrates with Google's transfer classes. The `StreamHasher` pattern may work for downloads but not for `MediaFileUpload`.
+- TODO.md Phases 5d/5e: updated throttling tasks with the chunk-sleep approach
+- PLAN.md §3.5: added throttling design note
 
 ---
 
