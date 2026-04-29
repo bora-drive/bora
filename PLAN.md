@@ -295,10 +295,11 @@ Before any code runs, a Google Cloud project is required:
 | Phase | Effort | Description |
 |---|---|---|
 | Phase 1: Fork, rename, dependencies | 1 day | Mechanical renaming and project setup |
-| Phase 2: Google Drive client + path cache | 3–5 days | Core new code (~2000 LOC) |
+| Phase 2: Google Drive client + path cache | 1–2 weeks | Core new code; path cache is the hardest component (cache consistency, orphans, duplicate names, atomic moves) |
 | Phase 3: Error handling | 1 day | Map HTTP errors to exception hierarchy |
 | Phase 4: Content hashing | 0.5 day | Replace Dropbox hash with MD5 |
-| Phase 5: Adapt sync engine | 2–3 days | Path renaming, change feed adaptation, polling |
+| Phase 5: Adapt sync engine | 1–2 weeks | 230+ references in 3900-line file with subtle concurrency and conflict-resolution logic |
 | Phase 6: CLI and branding | 1 day | Update all user-facing text |
-| Phase 7: Testing | 2–3 days | Port test suite, integration testing |
-| **Total** | **~2 weeks MVP, ~4–6 weeks production** | |
+| Phase 7: Testing | 1–2 weeks | Port test suite, integration testing, path cache unit tests |
+| Integration debugging | 1–2 weeks | Path cache ↔ sync engine interaction; where most bugs will surface |
+| **Total** | **~4–6 weeks MVP, ~8–12 weeks production** | |

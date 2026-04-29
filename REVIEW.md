@@ -191,18 +191,11 @@ Phase 2 says "Download `client_secret.json`" and "Add to `src/maestral/resources
 
 ---
 
-## 15. Effort Estimate Is Likely 2-3x Too Optimistic
+## 15. ~~Effort Estimate Is Likely 2-3x Too Optimistic~~ (RESOLVED)
 
-The PLAN estimates "~2 weeks MVP, ~4-6 weeks production." Based on the scope:
+**Revised estimate:** 4–6 weeks MVP, 8–12 weeks production.
 
-- Phase 1 alone ("1 day") has already been done and is still incomplete
-- Phase 2 (Google Drive client + path cache, "3-5 days") is the hardest part and involves building a complex caching layer with no precedent in the existing codebase
-- Phase 5 (adapt sync engine, "2-3 days") involves touching 230+ references in a 3900-line file with subtle concurrency and conflict-resolution logic
-- No time is allocated for debugging the integration between the new path cache and the existing sync engine, which is where most bugs will live
-
-The path cache alone — with its cache consistency, orphan handling, duplicate name resolution, atomic moves with child updates, and concurrent access patterns — is likely a 1-2 week effort to get right.
-
-**Recommendation:** Revise the estimate. A more realistic timeline: 4-6 weeks MVP, 8-12 weeks production.
+PLAN.md §9 updated with revised per-phase estimates. Key changes: path cache bumped to 1–2 weeks, sync engine to 1–2 weeks, added 1–2 week integration debugging phase.
 
 ---
 
