@@ -104,18 +104,16 @@ Neither TODO.md Phase 10 item "Update `_connection_helper` to check Google Drive
 
 ---
 
-## 7. Case Sensitivity Mismatch Not Fully Addressed
+## 7. ~~Case Sensitivity Mismatch Not Fully Addressed~~ (RESOLVED)
 
-Dropbox is **globally case-insensitive** with a server-enforced `path_lower`. Google Drive is **case-preserving but case-insensitive in search** (the `name` field in queries is case-insensitive, but two files CAN have names differing only by case in the same folder).
+**Decision:** Enforce Dropbox-like case-insensitivity. If two files differ only by case in the same folder, the first one wins and the second is skipped with a warning.
 
-The sync engine has elaborate case-handling machinery (`correct_case()`, `_apply_case_change()`, `_case_conversion_cache`, dual `path_cased`/`path_lower` tracking). The PLAN mentions this briefly in Section 8 ("Verify case-sensitivity handling") but the TODO only has a single checkbox for it.
-
-This is actually a significant behavioral difference:
-- Dropbox prevents `File.txt` and `file.txt` in the same folder; Google Drive allows it
-- The path cache needs to handle this: `path_to_id("/folder/File.txt")` vs `path_to_id("/folder/file.txt")` could be different files
-- The `IndexEntry` uses `remote_path_lower` as primary key — this would collide for case-different files in the same folder
-
-**Recommendation:** Add a design decision to PLAN.md: either enforce Dropbox-like case-insensitivity (refuse to sync case-conflicting names) or change the index primary key. This is an architectural decision that affects the path cache and database schema.
+**Implementation (path_cache.py):**
+- `has_case_conflict(remote_path, file_id)` — checks for an existing entry at the same `remote_path_lower` with a different `file_id`.
+- `set()` returns `False` and logs a warning if a case conflict is detected.
+- `move()` returns `False` and logs a warning if the destination case-conflicts.
+- `populate_from_listing()` already detected duplicates via `(parent_id, name.lower())`; this is consistent with the new policy.
+- `IndexEntry` keeps `remote_path_lower` as PK — case-conflicting files are simply never admitted to the cache or index.
 
 ---
 
@@ -238,5 +236,5 @@ The path cache alone — with its cache consistency, orphan handling, duplicate 
 | 1 | ~~Package is broken — can't import without `dropbox` SDK~~ | **Resolved** | Stubbed `client.py` and `errorhandling.py`; removed all `dropbox` imports |
 | 2 | ~~Path↔ID cache design is under-specified~~ | **Resolved** | Implemented `path_cache.py` with design decisions documented |
 | 3 | ~~Rate limits will block normal usage without batching~~ | **Resolved** | 180s polling, quota counter with warnings, batch endpoint notes |
-| 4 | Case sensitivity differences can corrupt the index | **High** | Make architectural decision before implementing path cache |
+| 4 | ~~Case sensitivity differences can corrupt the index~~ | **Resolved** | Enforce case-insensitive uniqueness in path cache (`set`, `move`, `populate_from_listing`) |
 | 5 | Google Docs filtering needed in multiple places, not just one | **Medium** | Add explicit filter points in each affected phase |

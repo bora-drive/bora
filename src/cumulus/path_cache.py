@@ -11,9 +11,12 @@ Design decisions (see REVIEW.md Issue #2):
 * **Initial population** — a single filtered ``files.list`` call (``trashed=false``)
   retrieves all items, then the tree is reconstructed in-memory from parent
   references before bulk-inserting into SQLite.
-* **Duplicate names** — when two items in the same folder share a name, the
-  *first* (by file-ID lexicographic order) wins; the duplicate is skipped with
-  a logged warning. Users should fix duplicates in the Drive web UI.
+* **Case-insensitive uniqueness** — Cumulus enforces Dropbox-like
+  case-insensitivity: two items whose names differ only by case are treated as
+  duplicates.  During bulk population the first item (by file-ID lexicographic
+  order) wins; during incremental updates (``set`` / ``move``) the existing
+  entry wins.  Conflicts are logged as warnings; users should fix them in the
+  Google Drive web UI.
 """
 
 from __future__ import annotations
@@ -127,6 +130,24 @@ class PathIDCache:
 
     # -- Mutations ---------------------------------------------------------
 
+    def has_case_conflict(
+        self, remote_path: str, file_id: str | None = None
+    ) -> str | None:
+        """Check whether *remote_path* case-conflicts with an existing entry.
+
+        Returns the ``file_id`` of the conflicting entry, or ``None`` if there
+        is no conflict.  An entry with the same *file_id* is **not** considered
+        a conflict (that's just an update of the same file).
+        """
+        lower = remote_path.lower()
+        rows = self._table.select_sql(
+            "WHERE remote_path_lower = ?", os.fsencode(lower)
+        )
+        for row in rows:
+            if row.file_id != file_id:
+                return row.file_id
+        return None
+
     def set(
         self,
         remote_path: str,
@@ -134,8 +155,25 @@ class PathIDCache:
         parent_id: str | None,
         name: str,
         is_folder: bool,
-    ) -> None:
-        """Insert or update a cache entry."""
+    ) -> bool:
+        """Insert or update a cache entry.
+
+        Returns ``True`` if the entry was stored, ``False`` if it was rejected
+        due to a case-insensitive name conflict with a *different* file.
+        Updating an existing entry (same *file_id*) always succeeds.
+        """
+        conflict_id = self.has_case_conflict(remote_path, file_id)
+        if conflict_id is not None:
+            logger.warning(
+                "Case conflict: '%s' (id=%s) conflicts with existing "
+                "entry (id=%s). Skipping — rename one of the files in "
+                "the Google Drive web UI to fix this.",
+                remote_path,
+                file_id,
+                conflict_id,
+            )
+            return False
+
         entry = PathCacheEntry(
             file_id=file_id,
             remote_path=remote_path,
@@ -145,6 +183,7 @@ class PathIDCache:
             is_folder=int(is_folder),
         )
         self._table.update(entry)  # upsert
+        return True
 
     def remove(self, remote_path: str) -> None:
         """Remove *remote_path* and all its children from the cache."""
@@ -162,15 +201,32 @@ class PathIDCache:
         for child in children:
             self._table.delete_primary_key(child.file_id)
 
-    def move(self, old_path: str, new_path: str) -> None:
-        """Rename *old_path* → *new_path*, updating all children atomically."""
-        old_lower = old_path.lower()
-        new_lower = new_path.lower()
+    def move(self, old_path: str, new_path: str) -> bool:
+        """Rename *old_path* → *new_path*, updating all children atomically.
 
-        # Update the entry itself.
+        Returns ``False`` (and does nothing) if *new_path* case-conflicts with
+        an existing entry that isn't the item being moved.
+        """
+        # Check for a case conflict at the destination.
+        old_lower = old_path.lower()
         rows = self._table.select_sql(
             "WHERE remote_path_lower = ?", os.fsencode(old_lower)
         )
+        moving_id = rows[0].file_id if rows else None
+        conflict_id = self.has_case_conflict(new_path, moving_id)
+        if conflict_id is not None:
+            logger.warning(
+                "Case conflict on move: '%s' → '%s' conflicts with "
+                "existing entry (id=%s). Skipping move.",
+                old_path,
+                new_path,
+                conflict_id,
+            )
+            return False
+
+        new_lower = new_path.lower()
+
+        # Update the entry itself.
         for row in rows:
             row.remote_path = new_path
             row.remote_path_lower = new_lower
@@ -188,6 +244,8 @@ class PathIDCache:
             cased_suffix = child.remote_path[len(old_path) + 1:]
             child.remote_path = new_path + "/" + cased_suffix
             self._table.update(child)
+
+        return True
 
     def resolve_path(self, file_id: str) -> str | None:
         """Walk the parent chain to reconstruct the full path for *file_id*.
