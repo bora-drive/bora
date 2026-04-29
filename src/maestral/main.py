@@ -60,7 +60,7 @@ from .exceptions import (
     BusyError,
     KeyringAccessError,
     MaestralApiError,
-    NoDropboxDirError,
+    NoSyncDirError,
     NotFoundError,
     NotLinkedError,
     UnsupportedFileTypeForDiff,
@@ -544,7 +544,7 @@ class Maestral:
     def pending_dropbox_folder(self) -> bool:
         """Whether a local Dropbox directory has been configured (read only). This will
         not check if the configured directory actually exists, starting the sync may
-        still raise a :exc:`maestral.exceptions.NoDropboxDirError`."""
+        still raise a :exc:`maestral.exceptions.NoSyncDirError`."""
         return not self.sync.dropbox_path
 
     @property
@@ -735,8 +735,8 @@ class Maestral:
         Returns the account information from Dropbox and returns it as a dictionary.
 
         :returns: Dropbox account information.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -748,8 +748,8 @@ class Maestral:
         Gets the space usage from Dropbox and returns it as a dictionary.
 
         :returns: Dropbox space usage information.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -766,8 +766,8 @@ class Maestral:
 
         :returns: Path to saved profile picture or ``None`` if no profile picture was
             downloaded.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -793,8 +793,8 @@ class Maestral:
         :returns: Dropbox item metadata as dict. See :class:`dropbox.files.Metadata` for
             keys and values.
         :raises NotFoundError: if there is nothing at the given path.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -825,8 +825,8 @@ class Maestral:
             are not downloadable, i.e. Google Docs.
         :raises NotFoundError: if there is nothing at the given path.
         :raises NotAFolderError: if the given path refers to a file.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -874,8 +874,8 @@ class Maestral:
             :class:`dropbox.files.Metadata` for keys and values.
         :raises NotFoundError: if there is nothing at the given path.
         :raises NotAFolderError: if the given path refers to a file.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -906,8 +906,8 @@ class Maestral:
             :class:`dropbox.files.Metadata` for keys and values.
         :raises NotFoundError: if there never was a file at the given path.
         :raises IsAFolderError: if the given path refers to a folder
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         """
         self._check_linked()
@@ -1017,8 +1017,8 @@ class Maestral:
             :meth:`list_revisions`.
         :returns: Metadata of the returned file. See :class:`dropbox.files.FileMetadata`
             for keys and values.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         """
         self._check_linked()
@@ -1047,7 +1047,7 @@ class Maestral:
         :attr:`sync_errors` or :attr:`maestral_errors`.
 
         :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoDropboxDirError: if local Dropbox folder is not set up.
+        :raises NoSyncDirError: if local Dropbox folder is not set up.
         """
         self._check_linked()
         self._check_dropbox_dir()
@@ -1059,7 +1059,7 @@ class Maestral:
         Creates syncing threads and starts syncing.
 
         :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoDropboxDirError: if local Dropbox folder is not set up.
+        :raises NoSyncDirError: if local Dropbox folder is not set up.
         """
         self._check_linked()
         self._check_dropbox_dir()
@@ -1092,11 +1092,11 @@ class Maestral:
         :param dbx_paths: Dropbox paths of items to exclude.
         :raises NotFoundError: if there is nothing at the given path.
         :raises ConnectionError: if the connection to Dropbox fails.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoDropboxDirError: if local Dropbox folder is not set up.
+        :raises NoSyncDirError: if local Dropbox folder is not set up.
         """
         self._check_linked()
         self._check_dropbox_dir()
@@ -1163,11 +1163,11 @@ class Maestral:
 
         :param dbx_paths: Dropbox paths of items to include.
         :raises NotFoundError: if there is nothing at the given path.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoDropboxDirError: if local Dropbox folder is not set up.
+        :raises NoSyncDirError: if local Dropbox folder is not set up.
         """
         self._check_linked()
         self._check_dropbox_dir()
@@ -1249,7 +1249,7 @@ class Maestral:
             user's home directory.
         :raises OSError: if moving the directory fails.
         :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoDropboxDirError: if local Dropbox folder is not set up.
+        :raises NoSyncDirError: if local Dropbox folder is not set up.
         """
         self._check_linked()
         self._check_dropbox_dir()
@@ -1363,8 +1363,8 @@ class Maestral:
         folder will remain valid.
 
         :param url: URL of shared link to revoke.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -1381,8 +1381,8 @@ class Maestral:
         :param dbx_path: Path to item on Dropbox.
         :returns: List of shared link information as dictionaries. See
             :class:`dropbox.sharing.SharedLinkMetadata` for keys and values.
-        :raises DropboxAuthError: in case of an invalid access token.
-        :raises DropboxServerError: for internal Dropbox errors.
+        :raises AuthError: in case of an invalid access token.
+        :raises ServerError: for internal Dropbox errors.
         :raises ConnectionError: if the connection to Dropbox fails.
         :raises NotLinkedError: if no Dropbox account is linked.
         """
@@ -1399,7 +1399,7 @@ class Maestral:
         :param dbx_path: Path relative to Dropbox root.
         :returns: Corresponding path on local hard drive.
         :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoDropboxDirError: if local Dropbox folder is not set up.
+        :raises NoSyncDirError: if local Dropbox folder is not set up.
         """
 
         self._check_linked()
@@ -1488,7 +1488,7 @@ class Maestral:
 
     def _check_dropbox_dir(self) -> None:
         if self.pending_dropbox_folder:
-            raise NoDropboxDirError(
+            raise NoSyncDirError(
                 "No local Dropbox directory",
                 "Please set up a local Dropbox directory using the GUI or CLI.",
             )

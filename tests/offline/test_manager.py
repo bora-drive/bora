@@ -4,7 +4,7 @@ from unittest import mock
 import pytest
 
 from maestral.core import AccountType, FullAccount, TeamRootInfo, UserRootInfo
-from maestral.exceptions import NoDropboxDirError
+from maestral.exceptions import NoSyncDirError
 from maestral.main import Maestral
 from maestral.utils.appdirs import get_home_dir
 from maestral.utils.path import delete, generate_cc_name
@@ -274,5 +274,5 @@ def test_migrate_path_root_error(m: Maestral) -> None:
 
     # attempt to migrate folder structure without Dropbox dir
 
-    with pytest.raises(NoDropboxDirError):
+    with pytest.raises(NoSyncDirError):
         m.manager.check_and_update_path_root()

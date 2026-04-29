@@ -91,7 +91,7 @@ from .exceptions import (
     FolderConflictError,
     InvalidDbidError,
     IsAFolderError,
-    NoDropboxDirError,
+    NoSyncDirError,
     NotAFolderError,
     NotFoundError,
     PathError,
@@ -1171,9 +1171,9 @@ class SyncEngine:
         """
         Checks if the Dropbox folder still exists where we expect it to be.
 
-        :raises NoDropboxDirError: When local Dropbox directory does not exist.
+        :raises NoSyncDirError: When local Dropbox directory does not exist.
         """
-        exception = NoDropboxDirError(
+        exception = NoSyncDirError(
             "Dropbox folder missing",
             "Please move the Dropbox folder back to its original location "
             "or restart Maestral to set up a new folder.",
@@ -1197,7 +1197,7 @@ class SyncEngine:
                     "Please move the Dropbox folder back to its original location "
                     "or restart Maestral to set up a new folder."
                 )
-                raise NoDropboxDirError(title, msg)
+                raise NoSyncDirError(title, msg)
 
     def ensure_cache_dir_present(self) -> None:
         """

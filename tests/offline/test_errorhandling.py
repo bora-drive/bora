@@ -24,8 +24,8 @@ from maestral.exceptions import (
     ConflictError,
     CursorResetError,
     DataCorruptionError,
-    DropboxAuthError,
-    DropboxServerError,
+    AuthError as MaestralAuthError,
+    ServerError,
     FileConflictError,
     FileReadError,
     FileSizeError,
@@ -141,7 +141,7 @@ def test_get_session_lookup_error_msg(error, maestral_exc):
         (RelocationError.from_write(WriteError.team_folder), SyncError),
         (RelocationError.to(WriteError.team_folder), SyncError),
         (RelocationError.insufficient_quota, InsufficientSpaceError),
-        (RelocationError.internal_error, DropboxServerError),
+        (RelocationError.internal_error, ServerError),
         (RelocationError.too_many_files, SyncError),
         (
             RelocationError.cant_move_into_family(MoveIntoFamilyError.is_shared_folder),
@@ -191,7 +191,7 @@ def test_get_session_lookup_error_msg(error, maestral_exc):
         (ListFolderContinueError.other, MaestralApiError),
         (ListFolderLongpollError.reset, CursorResetError),
         (ListFolderLongpollError.other, MaestralApiError),
-        (PollError.internal_error, DropboxServerError),
+        (PollError.internal_error, ServerError),
         (PollError.other, MaestralApiError),
         (ListRevisionsError.path(LookupError.not_found), NotFoundError),
         (ListRevisionsError.other, MaestralApiError),
@@ -269,7 +269,7 @@ def test_dropbox_api_to_maestral_error(error, maestral_exc):
     [
         (exceptions.AuthError("", AuthError.expired_access_token), TokenExpiredError),
         (exceptions.AuthError("", AuthError.invalid_access_token), TokenRevokedError),
-        (exceptions.AuthError("", AuthError.user_suspended), DropboxAuthError),
+        (exceptions.AuthError("", AuthError.user_suspended), MaestralAuthError),
         (
             exceptions.AuthError(
                 "", AuthError.missing_scope(TokenScopeError(required_scope="test"))
@@ -278,7 +278,7 @@ def test_dropbox_api_to_maestral_error(error, maestral_exc):
         ),
         (exceptions.AuthError("", AuthError.other), MaestralApiError),
         (exceptions.BadInputError("", ""), BadInputError),
-        (exceptions.InternalServerError("", "", ""), DropboxServerError),
+        (exceptions.InternalServerError("", "", ""), ServerError),
         (exceptions.PathRootError("", PathRootError.no_permission), MPRE),
         (exceptions.PathRootError("", PathRootError.invalid_root(RootInfo())), MPRE),
         (exceptions.PathRootError("", PathRootError.other), MPRE),

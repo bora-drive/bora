@@ -27,12 +27,12 @@ from .constants import CONNECTED, CONNECTING, DISCONNECTED, IDLE, PAUSED, SYNCIN
 from .core import TeamRootInfo, UserRootInfo
 from .exceptions import (
     CancelledError,
-    DropboxConnectionError,
-    DropboxServerError,
+    ConnectionError,
     InotifyError,
     MaestralApiError,
-    NoDropboxDirError,
+    NoSyncDirError,
     PathRootError,
+    ServerError,
 )
 from .fsevents import Observer, ObserverType
 from .logging import scoped_logger
@@ -312,7 +312,7 @@ class SyncManager:
                 )
 
             elif exc.errno in (errno.ENOENT, errno.ENOTDIR):
-                raise NoDropboxDirError(
+                raise NoSyncDirError(
                     "Dropbox folder missing",
                     "Please move the Dropbox folder back to its original location "
                     "or restart Maestral to set up a new folder.",
@@ -449,7 +449,7 @@ class SyncManager:
                 "Please move the Dropbox folder back to its original location or "
                 "restart Maestral to set up a new folder."
             )
-            raise NoDropboxDirError(title, msg)
+            raise NoSyncDirError(title, msg)
 
         with self.sync.sync_lock:
             if new_root_type == "team" and current_root_type == "user":
@@ -761,7 +761,7 @@ class SyncManager:
         except CancelledError:
             # Shutdown will be handled externally.
             running.clear()
-        except (DropboxConnectionError, DropboxServerError):
+        except (ConnectionError, ServerError):
             self._logger.debug("Connection error", exc_info=True)
             self._logger.info(DISCONNECTED)
             self.stop()

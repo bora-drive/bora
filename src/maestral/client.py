@@ -457,7 +457,7 @@ class DropboxClient:
         credential storage.
 
         :raises KeyringAccessError: if keyring access fails.
-        :raises DropboxAuthError: if we cannot authenticate with Dropbox.
+        :raises AuthError: if we cannot authenticate with Dropbox.
         """
         self._dbx = None
         self._dbx_base = None

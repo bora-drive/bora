@@ -24,7 +24,7 @@ from maestral.errorhandling import convert_api_errors
 from maestral.exceptions import (
     FolderConflictError,
     InsufficientPermissionsError,
-    NoDropboxDirError,
+    NoSyncDirError,
     PathError,
     SymlinkError,
     SyncError,
@@ -1245,7 +1245,7 @@ def test_dropbox_dir_delete_during_sync(m: Maestral) -> None:
     wait_for_idle(m)
 
     assert len(m.fatal_errors) == 1
-    assert isinstance(m.fatal_errors[0], NoDropboxDirError)
+    assert isinstance(m.fatal_errors[0], NoSyncDirError)
 
 
 @pytest.mark.skipif(is_fs_case_sensitive(HOME), reason="file system is case sensitive")
@@ -1258,7 +1258,7 @@ def test_dropbox_dir_rename_during_sync(m: Maestral) -> None:
     wait_for_idle(m)
 
     assert len(m.fatal_errors) == 1
-    assert isinstance(m.fatal_errors[0], NoDropboxDirError)
+    assert isinstance(m.fatal_errors[0], NoSyncDirError)
 
 
 def test_dropbox_dir_delete_during_pause(m: Maestral) -> None:
@@ -1271,7 +1271,7 @@ def test_dropbox_dir_delete_during_pause(m: Maestral) -> None:
     wait_for_idle(m)
 
     assert len(m.fatal_errors) == 1
-    assert isinstance(m.fatal_errors[0], NoDropboxDirError)
+    assert isinstance(m.fatal_errors[0], NoSyncDirError)
 
 
 # ==== performance tests ===============================================================
