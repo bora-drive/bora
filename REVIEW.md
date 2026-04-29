@@ -59,13 +59,11 @@ Google Drive can have files whose parent folders have been trashed or where the 
 
 ---
 
-## 4. `rev:`-Prefixed Downloads Are Dropbox-Specific
+## 4. ~~`rev:`-Prefixed Downloads Are Dropbox-Specific~~ (RESOLVED)
 
-The sync engine downloads files via `client.download(f"rev:{event.rev}", tmp_fname)` (sync.py line ~3542). This is a Dropbox-specific URI scheme for downloading a specific revision.
+**Decision:** Replace `f"rev:{event.rev}"` with `event.change_remote_id` (the Google Drive file ID) at sync.py ~line 3542. The client's `download()` will take a file ID and call `files.get?alt=media`.
 
-Google Drive downloads by file ID, not by revision. The TODO mentions implementing `download()` but doesn't call out this specific call-site pattern that needs changing in `sync.py`. Since sync.py is listed under "Significant Modifications" but the `rev:` download pattern isn't mentioned, it could be missed.
-
-**Recommendation:** Add to Phase 8 (Sync Engine Adaptations): "Replace `rev:{event.rev}` download pattern with file-ID-based download."
+- TODO.md Phase 8: added explicit task for this callsite
 
 ---
 

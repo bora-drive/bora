@@ -195,6 +195,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Update `list_remote_changes_iterator` call site for new response format
 - [ ] Update `_clean_remote_changes` for Google Drive change semantics
 - [ ] Update `_on_remote_file` — verify MD5 instead of Dropbox content hash
+- [ ] Replace `f"rev:{event.rev}"` download call (~line 3542) with `event.change_remote_id` (file-ID-based download)
 - [ ] Update `upload_local_changes_while_inactive` — hash comparison logic
 - [ ] Handle Google Docs/Sheets/Slides in remote changes (skip or export)
 - [ ] Handle Google Drive's "file removed from folder" vs "file trashed" distinction
