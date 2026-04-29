@@ -47,8 +47,7 @@ All known tasks, roughly in dependency order. Check off as completed.
   - [ ] Set application name and branding
 - [ ] Create OAuth 2.0 Client ID (Desktop application type)
 - [ ] Download `client_secret.json`
-- [ ] Add `client_secret.json` to `src/maestral/resources/` (or a config mechanism)
-- [ ] Add `.gitignore` entry for credentials if needed
+- [ ] Commit `client_secret.json` to `src/cumulus/resources/` (Desktop app type — secret is considered public by Google for installed apps)
 - [ ] Document the Google Cloud setup for contributors
 
 ## Phase 3: Authentication
