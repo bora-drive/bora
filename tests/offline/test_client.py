@@ -6,8 +6,8 @@ import requests
 from dropbox import common, files, sharing, team_common, users, users_common
 from dropbox.oauth import DropboxOAuth2FlowNoRedirect
 
-from maestral import core
-from maestral.client import (
+from cumulus import core
+from cumulus.client import (
     DropboxClient,
     convert_account,
     convert_full_account,
@@ -15,8 +15,8 @@ from maestral.client import (
     convert_shared_link_metadata,
     convert_space_usage,
 )
-from maestral.exceptions import NotLinkedError
-from maestral.keyring import CredentialStorage
+from cumulus.exceptions import NotLinkedError
+from cumulus.keyring import CredentialStorage
 
 # ==== DropboxClient tests =============================================================
 

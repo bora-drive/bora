@@ -12,14 +12,14 @@ from dropbox.files import *
 from dropbox.sharing import *
 from dropbox.users import *
 
-from maestral.errorhandling import (
-    dropbox_to_maestral_error,
+from cumulus.errorhandling import (
+    dropbox_to_cumulus_error,
     get_lookup_error_msg,
     get_session_lookup_error_msg,
     get_write_error_msg,
-    os_to_maestral_error,
+    os_to_cumulus_error,
 )
-from maestral.exceptions import (
+from cumulus.exceptions import (
     BadInputError,
     ConflictError,
     CursorResetError,
@@ -34,14 +34,14 @@ from maestral.exceptions import (
     InsufficientSpaceError,
     InvalidDbidError,
     IsAFolderError,
-    MaestralApiError,
+    CumulusApiError,
     NotAFolderError,
     NotFoundError,
     OutOfMemoryError,
     PathError,
 )
-from maestral.exceptions import PathRootError as MPRE
-from maestral.exceptions import (
+from cumulus.exceptions import PathRootError as MPRE
+from cumulus.exceptions import (
     RestrictedContentError,
     SharedLinkError,
     SyncError,
@@ -52,7 +52,7 @@ from maestral.exceptions import (
 
 
 @pytest.mark.parametrize(
-    "number,maestral_exc",
+    "number,cumulus_exc",
     [
         (errno.EPERM, InsufficientPermissionsError),
         (errno.ENOENT, NotFoundError),
@@ -67,14 +67,14 @@ from maestral.exceptions import (
         (errno.ENOMEM, OutOfMemoryError),
     ],
 )
-def test_os_to_maestral_error(number: int, maestral_exc):
+def test_os_to_cumulus_error(number: int, cumulus_exc):
     os_error = OSError(number, "error")
-    converted = os_to_maestral_error(os_error)
-    assert isinstance(converted, maestral_exc)
+    converted = os_to_cumulus_error(os_error)
+    assert isinstance(converted, cumulus_exc)
 
 
 @pytest.mark.parametrize(
-    "error,maestral_exc",
+    "error,cumulus_exc",
     [
         (LookupError.malformed_path(None), PathError),
         (LookupError.not_file, IsAFolderError),
@@ -85,13 +85,13 @@ def test_os_to_maestral_error(number: int, maestral_exc):
         (LookupError.locked, InsufficientPermissionsError),
     ],
 )
-def test_get_lookup_error_msg(error, maestral_exc):
+def test_get_lookup_error_msg(error, cumulus_exc):
     text, err_cls = get_lookup_error_msg(error)
-    assert err_cls is maestral_exc
+    assert err_cls is cumulus_exc
 
 
 @pytest.mark.parametrize(
-    "error,maestral_exc",
+    "error,cumulus_exc",
     [
         (WriteError.conflict(WriteConflictError.file), FileConflictError),
         (WriteError.conflict(WriteConflictError.folder), FolderConflictError),
@@ -104,13 +104,13 @@ def test_get_lookup_error_msg(error, maestral_exc):
         (WriteError.too_many_write_operations, SyncError),
     ],
 )
-def test_get_write_error_msg(error, maestral_exc):
+def test_get_write_error_msg(error, cumulus_exc):
     text, err_cls = get_write_error_msg(error)
-    assert err_cls is maestral_exc
+    assert err_cls is cumulus_exc
 
 
 @pytest.mark.parametrize(
-    "error,maestral_exc",
+    "error,cumulus_exc",
     [
         (UploadSessionLookupError.closed, SyncError),
         (
@@ -123,13 +123,13 @@ def test_get_write_error_msg(error, maestral_exc):
         (UploadSessionAppendError.content_hash_mismatch, DataCorruptionError),
     ],
 )
-def test_get_session_lookup_error_msg(error, maestral_exc):
+def test_get_session_lookup_error_msg(error, cumulus_exc):
     text, err_cls = get_session_lookup_error_msg(error)
-    assert err_cls is maestral_exc
+    assert err_cls is cumulus_exc
 
 
 @pytest.mark.parametrize(
-    "error,maestral_exc",
+    "error,cumulus_exc",
     [
         (RelocationError.cant_copy_shared_folder, SyncError),
         (RelocationError.cant_move_folder_into_itself, ConflictError),
@@ -148,61 +148,61 @@ def test_get_session_lookup_error_msg(error, maestral_exc):
             SyncError,
         ),
         (RelocationError.cant_move_into_family(MoveIntoFamilyError.other), SyncError),
-        (RelocationError.other, MaestralApiError),
+        (RelocationError.other, CumulusApiError),
         (CreateFolderError.path(WriteError.team_folder), SyncError),
         (DeleteError.path_lookup(LookupError.not_found), NotFoundError),
         (DeleteError.path_write(WriteError.team_folder), SyncError),
         (DeleteError.too_many_files, SyncError),
         (DeleteError.too_many_write_operations, SyncError),
-        (DeleteError.other, MaestralApiError),
+        (DeleteError.other, CumulusApiError),
         (
             UploadError.path(
                 UploadWriteFailed(reason=WriteError.team_folder, upload_session_id="")
             ),
             SyncError,
         ),
-        (UploadError.properties_error, MaestralApiError),
+        (UploadError.properties_error, CumulusApiError),
         (UploadError.content_hash_mismatch, DataCorruptionError),
-        (UploadError.other, MaestralApiError),
+        (UploadError.other, CumulusApiError),
         (
             UploadSessionStartError.concurrent_session_close_not_allowed,
-            MaestralApiError,
+            CumulusApiError,
         ),
-        (UploadSessionStartError.concurrent_session_data_not_allowed, MaestralApiError),
-        (UploadSessionStartError.other, MaestralApiError),
+        (UploadSessionStartError.concurrent_session_data_not_allowed, CumulusApiError),
+        (UploadSessionStartError.other, CumulusApiError),
         (
             UploadSessionFinishError.lookup_failed(UploadSessionLookupError.not_found),
-            MaestralApiError,
+            CumulusApiError,
         ),
         (UploadSessionFinishError.path(WriteError.team_folder), SyncError),
-        (UploadSessionFinishError.properties_error, MaestralApiError),
+        (UploadSessionFinishError.properties_error, CumulusApiError),
         (UploadSessionFinishError.too_many_write_operations, SyncError),
         (UploadSessionFinishError.content_hash_mismatch, DataCorruptionError),
-        (UploadSessionFinishError.other, MaestralApiError),
+        (UploadSessionFinishError.other, CumulusApiError),
         (UploadSessionLookupError.too_large, FileSizeError),
-        (UploadSessionLookupError.other, MaestralApiError),
+        (UploadSessionLookupError.other, CumulusApiError),
         (DownloadError.path(LookupError.not_found), NotFoundError),
         (DownloadError.unsupported_file, UnsupportedFileError),
-        (DownloadError.other, MaestralApiError),
+        (DownloadError.other, CumulusApiError),
         (ListFolderError.path(LookupError.not_found), NotFoundError),
-        (ListFolderError.other, MaestralApiError),
+        (ListFolderError.other, CumulusApiError),
         (ListFolderContinueError.path(LookupError.not_found), NotFoundError),
         (ListFolderContinueError.reset, CursorResetError),
-        (ListFolderContinueError.other, MaestralApiError),
+        (ListFolderContinueError.other, CumulusApiError),
         (ListFolderLongpollError.reset, CursorResetError),
-        (ListFolderLongpollError.other, MaestralApiError),
+        (ListFolderLongpollError.other, CumulusApiError),
         (PollError.internal_error, ServerError),
-        (PollError.other, MaestralApiError),
+        (PollError.other, CumulusApiError),
         (ListRevisionsError.path(LookupError.not_found), NotFoundError),
-        (ListRevisionsError.other, MaestralApiError),
+        (ListRevisionsError.other, CumulusApiError),
         (RestoreError.invalid_revision, NotFoundError),
         (RestoreError.path_lookup(LookupError.not_found), NotFoundError),
         (RestoreError.path_write(WriteError.team_folder), SyncError),
         (RestoreError.in_progress, SyncError),
-        (RestoreError.other, MaestralApiError),
+        (RestoreError.other, CumulusApiError),
         (GetMetadataError.path(LookupError.not_found), NotFoundError),
         (GetAccountError.no_account, InvalidDbidError),
-        (GetAccountError.other, MaestralApiError),
+        (GetAccountError.other, CumulusApiError),
         (CreateSharedLinkWithSettingsError.access_denied, InsufficientPermissionsError),
         (CreateSharedLinkWithSettingsError.email_not_verified, SharedLinkError),
         (CreateSharedLinkWithSettingsError.path(LookupError.not_found), NotFoundError),
@@ -224,17 +224,17 @@ def test_get_session_lookup_error_msg(error, maestral_exc):
             InsufficientPermissionsError,
         ),
         (RevokeSharedLinkError("shared_link_malformed"), SharedLinkError),
-        (RevokeSharedLinkError("other"), MaestralApiError),
+        (RevokeSharedLinkError("other"), CumulusApiError),
         (ListSharedLinksError.path(LookupError.not_found), NotFoundError),
         (ListSharedLinksError.reset, SharedLinkError),
-        (ListSharedLinksError.other, MaestralApiError),
+        (ListSharedLinksError.other, CumulusApiError),
         (ShareFolderError.no_permission, InsufficientPermissionsError),
         (ShareFolderError.disallowed_shared_link_policy, InsufficientPermissionsError),
         (
             ShareFolderError.team_policy_disallows_member_policy,
             InsufficientPermissionsError,
         ),
-        (ShareFolderError.email_unverified, MaestralApiError),
+        (ShareFolderError.email_unverified, CumulusApiError),
         (ShareFolderError.bad_path(SharePathError.is_file), FileConflictError),
         (ShareFolderError.bad_path(SharePathError.inside_shared_folder), SyncError),
         (ShareFolderError.bad_path(SharePathError.contains_shared_folder), SyncError),
@@ -256,16 +256,16 @@ def test_get_session_lookup_error_msg(error, maestral_exc):
         (ShareFolderError.bad_path(SharePathError.is_vault), SyncError),
         (ShareFolderError.bad_path(SharePathError.is_vault_locked), SyncError),
         (ShareFolderError.bad_path(SharePathError.is_family), SyncError),
-        (ShareFolderError.other, MaestralApiError),
+        (ShareFolderError.other, CumulusApiError),
     ],
 )
-def test_dropbox_api_to_maestral_error(error, maestral_exc):
-    converted = dropbox_to_maestral_error(exceptions.ApiError("", error, "", ""))
-    assert isinstance(converted, maestral_exc), f"{error} was incorrectly converted"
+def test_dropbox_api_to_cumulus_error(error, cumulus_exc):
+    converted = dropbox_to_cumulus_error(exceptions.ApiError("", error, "", ""))
+    assert isinstance(converted, cumulus_exc), f"{error} was incorrectly converted"
 
 
 @pytest.mark.parametrize(
-    "exception,maestral_exc",
+    "exception,cumulus_exc",
     [
         (exceptions.AuthError("", AuthError.expired_access_token), TokenExpiredError),
         (exceptions.AuthError("", AuthError.invalid_access_token), TokenRevokedError),
@@ -276,7 +276,7 @@ def test_dropbox_api_to_maestral_error(error, maestral_exc):
             ),
             InsufficientPermissionsError,
         ),
-        (exceptions.AuthError("", AuthError.other), MaestralApiError),
+        (exceptions.AuthError("", AuthError.other), CumulusApiError),
         (exceptions.BadInputError("", ""), BadInputError),
         (exceptions.InternalServerError("", "", ""), ServerError),
         (exceptions.PathRootError("", PathRootError.no_permission), MPRE),
@@ -284,6 +284,6 @@ def test_dropbox_api_to_maestral_error(error, maestral_exc):
         (exceptions.PathRootError("", PathRootError.other), MPRE),
     ],
 )
-def test_dropbox_to_maestral_error(exception, maestral_exc):
-    converted = dropbox_to_maestral_error(exception)
-    assert isinstance(converted, maestral_exc)
+def test_dropbox_to_cumulus_error(exception, cumulus_exc):
+    converted = dropbox_to_cumulus_error(exception)
+    assert isinstance(converted, cumulus_exc)

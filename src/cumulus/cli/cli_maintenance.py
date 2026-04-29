@@ -66,7 +66,7 @@ def rebuild_index(m: Maestral, yes: bool) -> None:
         m.rebuild_index()
 
         if m.running:
-            ok("Rebuilding now. Run 'maestral status' to view progress.")
+            ok("Rebuilding now. Run 'cumulus status' to view progress.")
         else:
             ok("Sync is not running. Rebuilding scheduled for next startup.")
 
@@ -279,7 +279,7 @@ def log() -> None:
 def log_show(external: bool, config_name: str) -> None:
     from ..utils.appdirs import get_log_path
 
-    log_file = get_log_path("maestral", config_name + ".log")
+    log_file = get_log_path("cumulus", config_name + ".log")
 
     if external:
         res = click.launch(log_file)
@@ -302,7 +302,7 @@ def log_show(external: bool, config_name: str) -> None:
 def log_clear(config_name: str) -> None:
     from ..utils.appdirs import get_log_path
 
-    log_dir = get_log_path("maestral")
+    log_dir = get_log_path("cumulus")
     log_name = config_name + ".log"
 
     log_files = []
@@ -431,9 +431,9 @@ def config_set(m: Maestral, key: str, value: str) -> None:
 @click.option("--no-pager", help="Don't use a pager for output.", is_flag=True)
 @existing_config_option
 def config_show(no_pager: bool, config_name: str) -> None:
-    from ..config import MaestralConfig
+    from ..config import CumulusConfig
 
-    conf = MaestralConfig(config_name)
+    conf = CumulusConfig(config_name)
 
     with io.StringIO() as fp:
         conf.write(fp)
@@ -458,22 +458,22 @@ You can enable shell completion for all users by generating and saving the scrip
 follows:
 
 \b
-    maestral completion bash > /usr/share/bash-completion/completions/maestral
+    cumulus completion bash > /usr/share/bash-completion/completions/cumulus
 
 To enable shell completion for the current user only, save the script in a location of
-your choice, for example `~/.local/completions/maestral`, and source it in `~/.bashrc`
+your choice, for example `~/.local/completions/cumulus`, and source it in `~/.bashrc`
 by adding the line:
 
 \b
-    . ~/.local/completions/maestral
+    . ~/.local/completions/cumulus
 
 ### zsh
 
-Generate a `_maestral` completion script and put it somewhere in your `$fpath`. For
+Generate a `_cumulus` completion script and put it somewhere in your `$fpath`. For
 example:
 
 \b
-    maestral completion zsh > /usr/local/share/zsh/site-functions/_maestral
+    cumulus completion zsh > /usr/local/share/zsh/site-functions/_cumulus
 
 You can also save the completion script in a location of your choice and source it
 in `~/.zshrc`. Ensure that the following is present in your `~/.zshrc`:
@@ -483,15 +483,15 @@ in `~/.zshrc`. Ensure that the following is present in your `~/.zshrc`:
 
 ### fish
 
-Generate and save a `maestral.fish` completion script as follows. For all users:
+Generate and save a `cumulus.fish` completion script as follows. For all users:
 
 \b
-    maestral completion fish > /usr/share/fish/vendor_completions.d/maestral.fish
+    cumulus completion fish > /usr/share/fish/vendor_completions.d/cumulus.fish
 
 For the current user only:
 
 \b
-    maestral completion fish > ~/.config/fish/completions/maestral.fish
+    cumulus completion fish > ~/.config/fish/completions/cumulus.fish
 
 """,
 )
@@ -505,7 +505,7 @@ def completion(shell: str) -> None:
         warn(f"{shell} shell is currently not supported")
         return
 
-    comp = comp_cls(main, {}, "maestral", "_MAESTRAL_COMPLETE")
+    comp = comp_cls(main, {}, "cumulus", "_CUMULUS_COMPLETE")
 
     try:
         echo(comp.source())

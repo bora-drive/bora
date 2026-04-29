@@ -33,7 +33,7 @@ except ImportError:
 # local imports
 from . import __version__
 from .client import DropboxClient
-from .config import MaestralConfig, MaestralState, validate_config_name
+from .config import CumulusConfig, CumulusState, validate_config_name
 from .constants import (
     CONNECTING,
     DEFAULT_CONFIG_NAME,
@@ -59,7 +59,7 @@ from .errorhandling import CONNECTION_ERRORS, convert_api_errors
 from .exceptions import (
     BusyError,
     KeyringAccessError,
-    MaestralApiError,
+    CumulusApiError,
     NoSyncDirError,
     NotFoundError,
     NotLinkedError,
@@ -76,7 +76,7 @@ from .logging import (
 )
 from .manager import SyncManager
 from .models import SyncErrorEntry, SyncEvent, SyncStatus
-from .notify import MaestralDesktopNotifier
+from .notify import CumulusDesktopNotifier
 from .sync import SyncDirection, SyncEngine, pf_repr
 from .utils import get_newer_version
 from .utils.appdirs import get_cache_path, get_data_path
@@ -89,7 +89,7 @@ from .utils.path import (
     to_existing_unnormalized_path,
 )
 
-__all__ = ["Maestral"]
+__all__ = ["Cumulus"]
 
 
 def _sql_add_column(db: Database, table: str, column: str, affinity: str) -> None:
@@ -118,7 +118,7 @@ class Maestral:
 
     All methods and properties return objects or raise exceptions which can safely be
     serialized, i.e., pure Python types. The only exception are instances of
-    :exc:`maestral.exceptions.MaestralApiError`: they need to be registered explicitly
+    :exc:`cumulus.exceptions.CumulusApiError`: they need to be registered explicitly
     with the serpent serializer which is used for communication to frontends.
 
     Sync errors and fatal errors which occur in the sync threads can be read with the
@@ -131,7 +131,7 @@ class Maestral:
         existing remote account and set up the local sync folder. If successful,
         invoke :meth:`start_sync` to start syncing.
 
-        >>> from maestral.main import Maestral
+        >>> from cumulus.main import Maestral
         >>> m = Maestral(config_name='private')
         >>> url = m.get_auth_url()  # get token from authorization website
         >>> print(f'Please go to {url} to retrieve a authorization token.')
@@ -141,7 +141,7 @@ class Maestral:
         ...     m.create_sync_directory('~/MyDrive')
         ...     m.start_sync()
 
-    :param config_name: Name of maestral configuration to run. Must not contain any
+    :param config_name: Name of cumulus configuration to run. Must not contain any
         whitespace. If the given config file does exist, it will be created.
     :param log_to_stderr: If ``True``, Maestral will print log messages to stderr.
         When started as a systemd services, this can result in duplicate log messages
@@ -171,14 +171,14 @@ class Maestral:
 
         self._loop = event_loop
         self._config_name = validate_config_name(config_name)
-        self._conf = MaestralConfig(self.config_name)
-        self._state = MaestralState(self.config_name)
+        self._conf = CumulusConfig(self.config_name)
+        self._state = CumulusState(self.config_name)
         self._logger = scoped_logger(__name__, self.config_name)
         self.cred_storage = CredentialStorage(self.config_name)
 
         # Set up logging.
         self._log_to_stderr = log_to_stderr
-        self._root_logger = scoped_logger("maestral", self.config_name)
+        self._root_logger = scoped_logger("cumulus", self.config_name)
         self._root_logger.setLevel(min(self.log_level, logging.INFO))
         self._root_logger.handlers.clear()
         self._setup_logging_external()
@@ -188,9 +188,9 @@ class Maestral:
         self._check_and_run_post_update_scripts()
 
         # Set up desktop notifier using event loop.
-        self._dn: MaestralDesktopNotifier | None = None
+        self._dn: CumulusDesktopNotifier | None = None
         if self._loop:
-            self._dn = MaestralDesktopNotifier(self._config_name, self._loop)
+            self._dn = CumulusDesktopNotifier(self._config_name, self._loop)
 
         # Set up sync infrastructure.
         self.client = DropboxClient(
@@ -203,7 +203,7 @@ class Maestral:
         self.manager = SyncManager(self.sync, self._dn)
 
         # Create a future which will return once `shutdown_daemon` is called.
-        # This can be used by an event loop to wait until maestral has been stopped.
+        # This can be used by an event loop to wait until cumulus has been stopped.
         if shutdown_future and not shutdown_future.get_loop() is self._loop:
             raise RuntimeError("'shutdown_future' must use the passed event loop.")
 
@@ -308,7 +308,7 @@ class Maestral:
 
         try:
             self.client.unlink()
-        except (ConnectionError, MaestralApiError):
+        except (ConnectionError, CumulusApiError):
             self._logger.debug("Could not invalidate token with the remote", exc_info=True)
         except KeyringAccessError:
             self._logger.debug("Could not remove token from keyring", exc_info=True)
@@ -544,7 +544,7 @@ class Maestral:
     def pending_sync_folder(self) -> bool:
         """Whether a local sync directory has been configured (read only). This will
         not check if the configured directory actually exists, starting the sync may
-        still raise a :exc:`maestral.exceptions.NoSyncDirError`."""
+        still raise a :exc:`cumulus.exceptions.NoSyncDirError`."""
         return not self.sync.sync_path
 
     @property
@@ -597,7 +597,7 @@ class Maestral:
         return self.sync.sync_errors
 
     @property
-    def fatal_errors(self) -> list[MaestralApiError]:
+    def fatal_errors(self) -> list[CumulusApiError]:
         """
         Returns a list of fatal errors as dicts (read only). This does not include lost
         internet connections or file sync errors which only emit warnings and are
@@ -610,12 +610,12 @@ class Maestral:
         This list is populated from all log messages with level ERROR or higher that
         have ``exc_info`` attached.
         """
-        errors: list[MaestralApiError] = []
+        errors: list[CumulusApiError] = []
 
         for r in self._log_handler_error_cache.cached_records:
             if r.exc_info:
                 err = r.exc_info[1]
-                if isinstance(err, MaestralApiError):
+                if isinstance(err, CumulusApiError):
                     errors.append(err)
 
         return errors
@@ -634,7 +634,7 @@ class Maestral:
         an actual file at that path if the user did not set a profile picture or the
         picture has not yet been downloaded.
         """
-        return get_cache_path("maestral", f"{self._config_name}_profile_pic.jpeg")
+        return get_cache_path("cumulus", f"{self._config_name}_profile_pic.jpeg")
 
     def get_file_status(self, local_path: str) -> str:
         """
@@ -924,7 +924,7 @@ class Maestral:
         :returns: Diff as a list of strings (lines).
         :raises UnsupportedFileTypeForDiff: if file type is not supported.
         :raises UnsupportedFileTypeForDiff: if file content could not be decoded.
-        :raises MaestralApiError: if file could not be read for any other reason.
+        :raises CumulusApiError: if file could not be read for any other reason.
         """
 
         def str_from_date(d: datetime) -> str:
@@ -1029,10 +1029,10 @@ class Maestral:
         return res
 
     def _delete_old_profile_pics(self) -> None:
-        for file in os.listdir(get_cache_path("maestral")):
+        for file in os.listdir(get_cache_path("cumulus")):
             if file.startswith(f"{self._config_name}_profile_pic"):
                 try:
-                    os.unlink(osp.join(get_cache_path("maestral"), file))
+                    os.unlink(osp.join(get_cache_path("cumulus"), file))
                 except OSError:
                     pass
 
@@ -1044,7 +1044,7 @@ class Maestral:
         rebuild process will be queued and uploaded once rebuilding has completed.
 
         Rebuilding will be performed asynchronously and errors can be accessed through
-        :attr:`sync_errors` or :attr:`maestral_errors`.
+        :attr:`sync_errors` or :attr:`cumulus_errors`.
 
         :raises NotLinkedError: if no remote account is linked.
         :raises NoSyncDirError: if local sync folder is not set up.
@@ -1159,7 +1159,7 @@ class Maestral:
         If any children of remote_path were excluded, they will now be included.
 
         Any downloads will be carried out by the sync threads. Errors during the
-        download can be accessed through :attr:`sync_errors` or :attr:`maestral_errors`.
+        download can be accessed through :attr:`sync_errors` or :attr:`cumulus_errors`.
 
         :param remote_paths: remote paths of items to include.
         :raises NotFoundError: if there is nothing at the given path.
@@ -1498,18 +1498,9 @@ class Maestral:
     def _check_and_run_post_update_scripts(self) -> None:
         """
         Runs post-update scripts if necessary.
+
+        Legacy Dropbox-era migrations have been removed. This is a fresh fork.
         """
-        updated_from = self._state.get("app", "updated_scripts_completed")
-
-        if Version(updated_from) < Version("1.2.1"):
-            self._update_from_pre_v1_2_1()
-        if Version(updated_from) < Version("1.3.2"):
-            self._update_from_pre_v1_3_2()
-        if Version(updated_from) < Version("1.4.8"):
-            self._update_from_pre_v1_4_8()
-        if Version(updated_from) < Version("1.6.0.dev0"):
-            self._update_from_pre_v1_6_0()
-
         self._state.set("app", "updated_scripts_completed", __version__)
 
         self._conf.remove_deprecated_options()
@@ -1553,7 +1544,7 @@ class Maestral:
     def _update_from_pre_v1_6_0(self) -> None:
         self._logger.info("Scheduling reindex after update from pre v1.6.0")
 
-        db_path = get_data_path("maestral", f"{self.config_name}.db")
+        db_path = get_data_path("cumulus", f"{self.config_name}.db")
         connection = sqlite3.connect(db_path, check_same_thread=False)
         db = Database(connection)
 

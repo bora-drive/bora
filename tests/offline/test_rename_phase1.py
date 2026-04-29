@@ -9,31 +9,31 @@ import pytest
 
 
 def test_server_error_exists():
-    from maestral.exceptions import ServerError
+    from cumulus.exceptions import ServerError
     assert issubclass(ServerError, Exception)
 
 
 def test_connection_error_exists():
-    from maestral.exceptions import ConnectionError
+    from cumulus.exceptions import ConnectionError
     assert issubclass(ConnectionError, Exception)
 
 
 def test_auth_error_exists():
-    from maestral.exceptions import AuthError
+    from cumulus.exceptions import AuthError
     assert issubclass(AuthError, Exception)
 
 
 def test_no_sync_dir_error_exists():
-    from maestral.exceptions import NoSyncDirError
+    from cumulus.exceptions import NoSyncDirError
     assert issubclass(NoSyncDirError, Exception)
 
 
 def test_old_names_still_importable():
     """Backward compat: old names should still be importable as aliases."""
-    from maestral.exceptions import DropboxServerError, DropboxConnectionError
-    from maestral.exceptions import DropboxAuthError, NoDropboxDirError
-    from maestral.exceptions import ServerError, ConnectionError
-    from maestral.exceptions import AuthError, NoSyncDirError
+    from cumulus.exceptions import DropboxServerError, DropboxConnectionError
+    from cumulus.exceptions import DropboxAuthError, NoDropboxDirError
+    from cumulus.exceptions import ServerError, ConnectionError
+    from cumulus.exceptions import AuthError, NoSyncDirError
 
     assert DropboxServerError is ServerError
     assert DropboxConnectionError is ConnectionError
@@ -42,16 +42,16 @@ def test_old_names_still_importable():
 
 
 def test_token_errors_inherit_from_auth_error():
-    from maestral.exceptions import AuthError, TokenExpiredError, TokenRevokedError
+    from cumulus.exceptions import AuthError, TokenExpiredError, TokenRevokedError
     assert issubclass(TokenExpiredError, AuthError)
     assert issubclass(TokenRevokedError, AuthError)
 
 
-def test_maestral_api_error_uses_remote_path():
-    """MaestralApiError should accept remote_path instead of dbx_path."""
-    from maestral.exceptions import MaestralApiError
+def test_cumulus_api_error_uses_remote_path():
+    """CumulusApiError should accept remote_path instead of dbx_path."""
+    from cumulus.exceptions import CumulusApiError
 
-    err = MaestralApiError(
+    err = CumulusApiError(
         "title",
         "msg",
         remote_path="/test",
@@ -65,11 +65,11 @@ def test_maestral_api_error_uses_remote_path():
     assert err.local_path_from == "/local/old"
 
 
-def test_maestral_api_error_dbx_path_compat():
+def test_cumulus_api_error_dbx_path_compat():
     """Old dbx_path kwargs should still work as aliases."""
-    from maestral.exceptions import MaestralApiError
+    from cumulus.exceptions import CumulusApiError
 
-    err = MaestralApiError("title", "msg", dbx_path="/compat", dbx_path_from="/old")
+    err = CumulusApiError("title", "msg", dbx_path="/compat", dbx_path_from="/old")
     assert err.remote_path == "/compat"
     assert err.remote_path_from == "/old"
     # Old attribute names should also work
@@ -79,7 +79,7 @@ def test_maestral_api_error_dbx_path_compat():
 
 def test_sync_event_has_remote_path_field():
     """SyncEvent should use remote_path instead of dbx_path."""
-    from maestral.models import SyncEvent
+    from cumulus.models import SyncEvent
 
     assert hasattr(SyncEvent, 'remote_path')
     assert hasattr(SyncEvent, 'remote_path_lower')
@@ -89,7 +89,7 @@ def test_sync_event_has_remote_path_field():
 
 def test_index_entry_has_remote_path_field():
     """IndexEntry should use remote_path instead of dbx_path."""
-    from maestral.models import IndexEntry
+    from cumulus.models import IndexEntry
 
     assert hasattr(IndexEntry, 'remote_path_lower')
     assert hasattr(IndexEntry, 'remote_path_cased')
@@ -98,7 +98,7 @@ def test_index_entry_has_remote_path_field():
 
 def test_sync_error_entry_has_remote_path_field():
     """SyncErrorEntry should use remote_path instead of dbx_path."""
-    from maestral.models import SyncErrorEntry
+    from cumulus.models import SyncErrorEntry
 
     assert hasattr(SyncErrorEntry, 'remote_path')
     assert hasattr(SyncErrorEntry, 'remote_path_lower')
@@ -108,7 +108,7 @@ def test_sync_error_entry_has_remote_path_field():
 
 def test_core_metadata_has_remote_fields():
     """Core Metadata dataclasses should not reference 'dbx'."""
-    from maestral.core import FileMetadata, FolderMetadata, ListFolderResult
+    from cumulus.core import FileMetadata, FolderMetadata, ListFolderResult
 
     # These are dataclasses with path_lower, path_display etc - no dbx prefix.
     # Just verify they still work.
@@ -176,15 +176,47 @@ def test_pyproject_description_not_dropbox():
 
 def test_constants_no_dropbox_app_key():
     """constants should not have a DROPBOX_APP_KEY."""
-    from maestral import constants
+    from cumulus import constants
     assert not hasattr(constants, 'DROPBOX_APP_KEY')
 
 
 def test_exceptions_docstrings_no_dropbox():
     """Exception docstrings should not reference Dropbox."""
-    import maestral.exceptions as exc
+    import cumulus.exceptions as exc
     for name in dir(exc):
         obj = getattr(exc, name)
         if isinstance(obj, type) and issubclass(obj, Exception):
             doc = obj.__doc__ or ""
             assert "Dropbox" not in doc, f"{name}.__doc__ still mentions Dropbox"
+
+
+def test_package_importable_as_cumulus():
+    """The package should be importable as 'cumulus'."""
+    import cumulus
+    assert hasattr(cumulus, '__version__')
+
+
+def test_cumulus_cli_entry_point():
+    """The CLI entry point should be 'cumulus'."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        data = tomllib.load(f)
+
+    scripts = data["project"]["scripts"]
+    assert "cumulus" in scripts
+    assert "cumulus.cli" in scripts["cumulus"]
+
+
+def test_cumulus_constants():
+    """APP_NAME should be Cumulus."""
+    from cumulus.constants import APP_NAME
+    assert APP_NAME == "Cumulus"
+
+
+def test_cumulus_config_dir():
+    """Config directory should use 'cumulus' not 'maestral'."""
+    from cumulus.config.main import CONFIG_DIR_NAME
+    assert CONFIG_DIR_NAME == "cumulus"

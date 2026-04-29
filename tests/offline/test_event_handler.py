@@ -8,9 +8,9 @@ from watchdog.events import (
     FileMovedEvent,
 )
 
-from maestral.models import ChangeType, ItemType
-from maestral.sync import SyncDirection, SyncEngine
-from maestral.utils.path import move
+from cumulus.models import ChangeType, ItemType
+from cumulus.sync import SyncDirection, SyncEngine
+from cumulus.utils.path import move
 
 
 def ipath(i: int) -> str:

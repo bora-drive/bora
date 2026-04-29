@@ -2,12 +2,12 @@ import os
 from typing import List, TypeVar
 
 from ..utils.appdirs import get_conf_path, get_data_path
-from .main import MaestralConfig, MaestralState
+from .main import CumulusConfig, CumulusState
 from .user import PersistentMutableSet
 
 __all__ = [
-    "MaestralConfig",
-    "MaestralState",
+    "CumulusConfig",
+    "CumulusState",
     "PersistentMutableSet",
     "list_configs",
     "remove_configuration",
@@ -20,12 +20,12 @@ _C = TypeVar("_C", bound=str)
 
 def list_configs() -> List[str]:
     """
-    Lists all maestral configs.
+    Lists all cumulus configs.
 
     :returns: A list of all currently existing config files.
     """
     configs = []
-    for file in os.listdir(get_conf_path("maestral")):
+    for file in os.listdir(get_conf_path("cumulus")):
         if file.endswith(".ini"):
             configs.append(os.path.splitext(os.path.basename(file))[0])
 
@@ -39,10 +39,10 @@ def remove_configuration(config_name: str) -> None:
     :param config_name: The configuration to remove.
     """
 
-    MaestralConfig(config_name).cleanup()
-    MaestralState(config_name).cleanup()
+    CumulusConfig(config_name).cleanup()
+    CumulusState(config_name).cleanup()
 
-    data_path = get_data_path("maestral")
+    data_path = get_data_path("cumulus")
 
     files = []
 

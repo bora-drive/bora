@@ -9,16 +9,16 @@ import time
 import pytest
 from dropbox import files
 
-from maestral.constants import IDLE, FileStatus
-from maestral.core import FileMetadata
-from maestral.exceptions import (
+from cumulus.constants import IDLE, FileStatus
+from cumulus.core import FileMetadata
+from cumulus.exceptions import (
     InotifyError,
     NotFoundError,
     SyncError,
     UnsupportedFileTypeForDiff,
 )
-from maestral.main import Maestral
-from maestral.utils.integration import get_inotify_limits
+from cumulus.main import Maestral
+from cumulus.utils.integration import get_inotify_limits
 
 if not ("DROPBOX_ACCESS_TOKEN" in os.environ or "DROPBOX_REFRESH_TOKEN" in os.environ):
     pytest.skip("Requires auth token", allow_module_level=True)

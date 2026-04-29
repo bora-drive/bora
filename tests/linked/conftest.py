@@ -3,10 +3,10 @@ import os
 
 import pytest
 
-from maestral.client import DropboxClient
-from maestral.config import remove_configuration
-from maestral.exceptions import AuthError
-from maestral.keyring import CredentialStorage
+from cumulus.client import DropboxClient
+from cumulus.config import remove_configuration
+from cumulus.exceptions import AuthError
+from cumulus.keyring import CredentialStorage
 
 from .lock import DropboxTestLock
 

@@ -6,9 +6,9 @@ from keyring.backends.SecretService import Keyring as SecretServiceKeyring
 from keyring.errors import KeyringLocked
 from keyrings.alt.file import PlaintextKeyring
 
-from maestral.config import MaestralConfig, remove_configuration
-from maestral.exceptions import KeyringAccessError
-from maestral.keyring import CredentialStorage
+from cumulus.config import CumulusConfig, remove_configuration
+from cumulus.exceptions import KeyringAccessError
+from cumulus.keyring import CredentialStorage
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def cred_storage():
 
 def test_unlinked_state(cred_storage: CredentialStorage) -> None:
     """Test unlinked state"""
-    conf = MaestralConfig("test-config")
+    conf = CumulusConfig("test-config")
 
     assert not cred_storage.loaded
     assert cred_storage.account_id is None
@@ -36,7 +36,7 @@ def test_unlinked_state(cred_storage: CredentialStorage) -> None:
 
 def test_save_creds(cred_storage: CredentialStorage) -> None:
     """Test linked state"""
-    conf = MaestralConfig("test-config")
+    conf = CumulusConfig("test-config")
 
     cred_storage.save_creds("account_id", "token")
 
@@ -65,7 +65,7 @@ def test_load_creds(cred_storage: CredentialStorage) -> None:
 
 def test_delete_creds(cred_storage: CredentialStorage) -> None:
     """Test resetting state on `delete_creds`"""
-    conf = MaestralConfig("test-config")
+    conf = CumulusConfig("test-config")
 
     cred_storage.save_creds("account_id", "token")
     cred_storage.delete_creds()
@@ -80,7 +80,7 @@ def test_delete_creds(cred_storage: CredentialStorage) -> None:
 
 
 def test_plaintext_fallback(cred_storage: CredentialStorage) -> None:
-    conf = MaestralConfig("test-config")
+    conf = CumulusConfig("test-config")
 
     cred_storage.set_keyring_backend(SecretServiceKeyring())
 

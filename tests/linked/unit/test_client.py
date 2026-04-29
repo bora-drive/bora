@@ -5,17 +5,17 @@ import os
 import pytest
 import requests
 
-import maestral.client
-from maestral.client import DropboxClient
-from maestral.core import AccountType, FolderMetadata
-from maestral.exceptions import (
+import cumulus.client
+from cumulus.client import DropboxClient
+from cumulus.core import AccountType, FolderMetadata
+from cumulus.exceptions import (
     DataCorruptionError,
     NotFoundError,
     PathError,
     SharedLinkError,
 )
-from maestral.utils.hashing import DropboxContentHasher
-from maestral.utils.path import content_hash, normalize
+from cumulus.utils.hashing import DropboxContentHasher
+from cumulus.utils.path import content_hash, normalize
 
 if not ("DROPBOX_ACCESS_TOKEN" in os.environ or "DROPBOX_REFRESH_TOKEN" in os.environ):
     pytest.skip("Requires auth token", allow_module_level=True)
@@ -80,7 +80,7 @@ def test_upload_hash_mismatch(client: DropboxClient, monkeypatch) -> None:
     file = resources + "/file.txt"
 
     hasher = failing_content_hasher(0, 11)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     with pytest.raises(DataCorruptionError):
         client.upload(file, "/file.txt")
@@ -94,7 +94,7 @@ def test_upload_hash_mismatch_retry(client: DropboxClient, monkeypatch) -> None:
     file = resources + "/file.txt"
 
     hasher = failing_content_hasher(0, 3)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     md = client.upload(file, "/file.txt")
 
@@ -113,7 +113,7 @@ def test_upload_session_start_hash_mismatch(client: DropboxClient, monkeypatch) 
     client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
 
     hasher = failing_content_hasher(0, 11)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     with pytest.raises(DataCorruptionError):
         client.upload(large_file, "/large-file.pdf")
@@ -129,7 +129,7 @@ def test_upload_session_start_retry(client: DropboxClient, monkeypatch) -> None:
     client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
 
     hasher = failing_content_hasher(0, 3)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     md = client.upload(large_file, "/large-file.pdf")
 
@@ -147,7 +147,7 @@ def test_upload_session_append_hash_mismatch(
     client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
 
     hasher = failing_content_hasher(1, 12)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     with pytest.raises(DataCorruptionError):
         client.upload(large_file, "/large-file.pdf")
@@ -166,7 +166,7 @@ def test_upload_session_append_hash_mismatch_retry(
     client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
 
     hasher = failing_content_hasher(1, 4)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     md = client.upload(large_file, "/large-file.pdf")
     assert md.content_hash == content_hash(large_file)[0]
@@ -183,7 +183,7 @@ def test_upload_session_finish_hash_mismatch(
     client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
 
     hasher = failing_content_hasher(9, 20)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     with pytest.raises(DataCorruptionError):
         client.upload(large_file, "/large-file.pdf")
@@ -202,7 +202,7 @@ def test_upload_session_finish_hash_mismatch_retry(
     client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
 
     hasher = failing_content_hasher(9, 12)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     md = client.upload(large_file, "/large-file.pdf")
 
@@ -216,7 +216,7 @@ def test_download_hash_mismatch(client: DropboxClient, monkeypatch, tmp_path) ->
     client.upload(file, "/file.txt")
 
     hasher = failing_content_hasher(0, 11)
-    monkeypatch.setattr(maestral.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
 
     with pytest.raises(DataCorruptionError):
         client.download("/file.txt", str(tmp_path / "file.txt"))

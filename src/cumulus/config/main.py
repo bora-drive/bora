@@ -13,7 +13,7 @@ from .. import __version__
 from ..utils.appdirs import get_conf_path, get_data_path
 from .user import UserConfig, _DefaultsType
 
-CONFIG_DIR_NAME = "maestral"
+CONFIG_DIR_NAME = "cumulus"
 
 
 # =============================================================================
@@ -129,11 +129,11 @@ _config_instances: dict[str, UserConfig] = {}
 _config_lock = threading.Lock()
 
 
-def MaestralConfig(config_name: str) -> UserConfig:
+def CumulusConfig(config_name: str) -> UserConfig:
     """
     Returns an existing config instance or creates a new one.
 
-    :param config_name: Name of maestral configuration to run. A new config file will
+    :param config_name: Name of cumulus configuration to run. A new config file will
         be created if none exists for the given config_name.
     :return: Maestral config instance which saves any changes to the drive.
     """
@@ -146,11 +146,11 @@ _state_instances: dict[str, UserConfig] = {}
 _state_lock = threading.Lock()
 
 
-def MaestralState(config_name: str) -> UserConfig:
+def CumulusState(config_name: str) -> UserConfig:
     """
     Returns an existing state instance or creates a new one.
 
-    :param config_name: Name of maestral configuration to run. A new state file will
+    :param config_name: Name of cumulus configuration to run. A new state file will
         be created if none exists for the given config_name.
     :return: Maestral state instance which saves any changes to the drive.
     """

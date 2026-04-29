@@ -4,11 +4,11 @@ import time
 
 import pytest
 
-from maestral.client import DropboxClient
-from maestral.config import remove_configuration
-from maestral.exceptions import AuthError, NotFoundError
-from maestral.keyring import CredentialStorage
-from maestral.main import Maestral
+from cumulus.client import DropboxClient
+from cumulus.config import remove_configuration
+from cumulus.exceptions import AuthError, NotFoundError
+from cumulus.keyring import CredentialStorage
+from cumulus.main import Maestral
 
 fsevents_logger = logging.getLogger("fsevents")
 fsevents_logger.setLevel(logging.DEBUG)

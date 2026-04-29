@@ -19,9 +19,9 @@ from watchdog.events import (
     FileDeletedEvent,
 )
 
-from maestral.core import FileMetadata, FolderMetadata
-from maestral.errorhandling import convert_api_errors
-from maestral.exceptions import (
+from cumulus.core import FileMetadata, FolderMetadata
+from cumulus.errorhandling import convert_api_errors
+from cumulus.exceptions import (
     FolderConflictError,
     InsufficientPermissionsError,
     NoSyncDirError,
@@ -29,10 +29,10 @@ from maestral.exceptions import (
     SymlinkError,
     SyncError,
 )
-from maestral.main import Maestral
-from maestral.models import SyncDirection, SyncEvent
-from maestral.utils.appdirs import get_home_dir
-from maestral.utils.path import (
+from cumulus.main import Maestral
+from cumulus.models import SyncDirection, SyncEvent
+from cumulus.utils.appdirs import get_home_dir
+from cumulus.utils.path import (
     delete,
     fs_max_lengths_for_path,
     get_symlink_target,

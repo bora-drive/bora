@@ -3,8 +3,8 @@ requires = ["setuptools>=61.2", "build"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "maestral"
-version = "1.9.6"
+name = "cumulus"
+version = "0.1.0"
 authors = [{ name = "Sam Schott", email = "sam.schott@outlook.com" }]
 license = { text = "MIT" }
 description = "Open-source Google Drive sync client for macOS and Linux."
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3 :: Only",
 ]
-urls = { Homepage = "https://github.com/user/maestral-gdrive" }
+urls = { Homepage = "https://github.com/user/cumulus" }
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.2.0",
@@ -50,8 +50,8 @@ content-type = "text/markdown"
 
 [project.optional-dependencies]
 gui = [
-    "maestral-qt>=1.9.6;sys_platform=='linux'",
-    "maestral-cocoa>=1.9.6;sys_platform=='darwin'",
+    "cumulus-qt>=0.1.0;sys_platform=='linux'",
+    "cumulus-cocoa>=0.1.0;sys_platform=='darwin'",
 ]
 syslog = ["systemd-python"]
 lint = [
@@ -79,14 +79,14 @@ docs = [
 ]
 dev = [
     "bump2version",
-    "maestral[lint,test]",
+    "cumulus[lint,test]",
 ]
 
 [project.scripts]
-maestral = "maestral.cli:main"
+cumulus = "cumulus.cli:main"
 
 [tool.setuptools.data-files]
-"share/icons/hicolor/512x512/apps" = ["src/maestral/resources/maestral.png"]
+"share/icons/hicolor/512x512/apps" = ["src/cumulus/resources/maestral.png"]
 
 [tool.flake8]
 ignore = "E203,E501,E704,W503,H306"

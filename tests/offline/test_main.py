@@ -1,10 +1,10 @@
 import pytest
 import requests
 
-import maestral.main
-from maestral.constants import GITHUB_RELEASES_API
-from maestral.exceptions import NotLinkedError
-from maestral.main import Maestral
+import cumulus.main
+from cumulus.constants import GITHUB_RELEASES_API
+from cumulus.exceptions import NotLinkedError
+from cumulus.main import Maestral
 
 
 def test_check_for_updates(m: Maestral) -> None:
@@ -25,7 +25,7 @@ def test_check_for_updates(m: Maestral) -> None:
 
     # check that no update is offered from current (newest) version
 
-    maestral.main.__version__ = latest_stable_release
+    cumulus.main.__version__ = latest_stable_release
 
     update_res = m.check_for_updates()
 
@@ -35,7 +35,7 @@ def test_check_for_updates(m: Maestral) -> None:
 
     # check that update is offered from previous release
 
-    maestral.main.__version__ = previous_release
+    cumulus.main.__version__ = previous_release
 
     update_res = m.check_for_updates()
 

@@ -1,7 +1,7 @@
 """
 This module contains the definitions of our database tables which store the index, sync
 history and cache of content hashes. Each table is defined by a subclass of
-:class:`maestral.database.orm.Model` with properties representing database columns.
+:class:`cumulus.database.orm.Model` with properties representing database columns.
 Class instances then represent table rows.
 """
 
@@ -437,7 +437,7 @@ class SyncEvent(Model):
 
         # For file changes, update the change type based on our index. Local file system
         # events of created vs modified can be misleading for some safe save mechanisms.
-        # See https://github.com/samschott/maestral/issues/850.
+        # See https://github.com/samschott/cumulus/issues/850.
         if item_type is ItemType.File and change_type in {
             ChangeType.Added,
             ChangeType.Modified,
