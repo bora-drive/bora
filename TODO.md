@@ -200,7 +200,8 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Handle Google Docs/Sheets/Slides in remote changes (skip or export)
 - [ ] Handle Google Drive's "file removed from folder" vs "file trashed" distinction
 - [ ] Update `reset_sync_state` for new cursor format
-- [ ] Test selective sync (excluded folders) with ID-based paths
+- [ ] Selective sync: when a folder rename arrives via change feed, check if old path is in the exclusion list and update it to the new path
+- [ ] Selective sync: test that excluded folders remain excluded after rename (online and offline scenarios)
 - [ ] Verify case-sensitivity handling (Google Drive is case-insensitive in search, case-preserving in names)
 - [ ] Skip symlinks during local-to-remote upload; log a warning instead of syncing
 - [ ] Remove symlink recreation code path in `_apply_remote_file_change` (~line 3526); Google Drive never provides `symlink_target`
