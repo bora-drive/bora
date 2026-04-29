@@ -7,7 +7,7 @@ name = "maestral"
 version = "1.9.6"
 authors = [{ name = "Sam Schott", email = "sam.schott@outlook.com" }]
 license = { text = "MIT" }
-description = "Open-source Dropbox client for macOS and Linux."
+description = "Open-source Google Drive sync client for macOS and Linux."
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: Unix",
@@ -19,12 +19,15 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3 :: Only",
 ]
-urls = { Homepage = "https://maestral.app" }
+urls = { Homepage = "https://github.com/user/maestral-gdrive" }
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.2.0",
     "desktop-notifier>=5.0.0",
-    "dropbox>=11.28.0,<13.0",
+    "google-api-python-client>=2.100.0",
+    "google-auth>=2.23.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.1.1",
     "fasteners>=0.15",
     "keyring>=22",
     "keyrings.alt>=3.1.0",
