@@ -4,7 +4,7 @@ This report identifies problems, risks, and unaddressed issues in the migration 
 
 ---
 
-## 1. ~~Incomplete Phase 1 Renaming (Residual Dropbox References)~~ (RESOLVED)
+## 1. Incomplete Phase 1 Renaming (Residual Dropbox References)
 
 **Status:** Phase 1 is marked complete in TODO.md, but it isn't.
 
@@ -25,7 +25,7 @@ The TODO says Phase 1 is done, but `client.py` and `errorhandling.py` were expli
 
 ---
 
-## 2. ~~No `path_cache.py` Module Exists Yet — But Everything Depends On It~~ (RESOLVED)
+## 2. No `path_cache.py` Module Exists Yet — But Everything Depends On It
 
 The PLAN correctly identifies the path↔ID cache as the **hardest change** (Section 3.1), but neither document addresses several critical design questions:
 
@@ -49,27 +49,30 @@ Google Drive can have files whose parent folders have been trashed or where the 
 
 ---
 
-## 3. ~~Symlink Support Is Silently Lost~~ (RESOLVED — decision recorded)
+## 3. Symlink Support Is Silently Lost
 
-**Decision:** Follow symlinks on upload (upload the target as a regular file). Remote metadata will never contain `symlink_target` since Google Drive has no symlink concept. The `symlink_target` field remains in `IndexEntry` but will always be `None` for Google Drive entries.
+Dropbox stores `symlink_target` in file metadata and Maestral recreates symlinks locally. Google Drive has **no symlink concept**. The sync engine (`sync.py`) still references `symlink_target` in ~10 places for conflict detection and file creation.
 
-**Phase 8 actions needed:**
-- `sync.py` lines ~3526–3532: remove the symlink recreation code path (Google Drive will never provide `symlink_target` metadata)
-- Upload path: `os.path.realpath()` is already used for local paths, which follows symlinks — no change needed
-- `IndexEntry.symlink_target` column: keep in schema (harmless), always store `None`
-- `models.py` `FileMetadata.symlink_target`: always `None` in Google Drive metadata mapping
+Neither PLAN.md nor TODO.md mentions what happens to symlinks:
+- Should they be uploaded as regular files (follow the symlink)?
+- Should they be skipped with a warning?
+- Should the `symlink_target` field be removed from the data model?
 
----
-
-## 4. ~~`rev:`-Prefixed Downloads Are Dropbox-Specific~~ (RESOLVED — documented)
-
-**Decision:** Replace `rev:{event.rev}` with file-ID-based download in Phase 8.
-TODO comment added at `sync.py` line ~3542 marking the exact callsite.
-`event.change_remote_id` (the Google Drive file ID) should be used instead.
+**Recommendation:** Add a decision item to TODO.md: "Decide symlink handling policy (upload as regular file / skip / error)."
 
 ---
 
-## 5. ~~Rate Limits Are Severely Underestimated~~ (RESOLVED)
+## 4. `rev:`-Prefixed Downloads Are Dropbox-Specific
+
+The sync engine downloads files via `client.download(f"rev:{event.rev}", tmp_fname)` (sync.py line ~3542). This is a Dropbox-specific URI scheme for downloading a specific revision.
+
+Google Drive downloads by file ID, not by revision. The TODO mentions implementing `download()` but doesn't call out this specific call-site pattern that needs changing in `sync.py`. Since sync.py is listed under "Significant Modifications" but the `rev:` download pattern isn't mentioned, it could be missed.
+
+**Recommendation:** Add to Phase 8 (Sync Engine Adaptations): "Replace `rev:{event.rev}` download pattern with file-ID-based download."
+
+---
+
+## 5. Rate Limits Are Severely Underestimated
 
 The PLAN says Google Drive has "12k queries/day default per-user" and rates this as **Medium** risk. This is actually a **High** risk:
 
@@ -89,9 +92,16 @@ The PLAN mentions batch API calls as "out of scope for MVP" but doesn't quantify
 
 ---
 
-## 6. ~~Connection Monitoring Still Points at Dropbox~~ (RESOLVED)
+## 6. Connection Monitoring Still Points at Dropbox
 
-**Already fixed in commit 07da2e2** (Issue 3). `manager.py` now uses `GOOGLE_API_HOSTNAME` = `API_HEALTH_URL` = `"https://www.googleapis.com"` for connectivity checks. Unauthenticated HEAD request — no credentials needed.
+`manager.py` checks connectivity by pinging `https://api.dropboxapi.com` (via `DROPBOX_API_HOSTNAME`). This is used for:
+- Auto-reconnection after network outages
+- Connection status reporting to the UI
+
+Neither TODO.md Phase 10 item "Update `_connection_helper` to check Google Drive connectivity" is specific about what URL to check. Google's Drive API endpoint is `https://www.googleapis.com/drive/v3/`, but a simple connectivity check might be better aimed at `https://www.googleapis.com` or `https://accounts.google.com`.
+
+**Recommendation:** Add specificity to the TODO: decide the health-check endpoint and whether it should be authenticated or unauthenticated.
+
 ---
 
 ## 7. ~~Case Sensitivity Mismatch Not Fully Addressed~~ (RESOLVED)
@@ -128,84 +138,105 @@ The PLAN mentions batch API calls as "out of scope for MVP" but doesn't quantify
 
 ---
 
-## 9. ~~No Migration Path for Existing Users~~ (RESOLVED — decision recorded)
+## 9. No Migration Path for Existing Users
 
-**Decision:** Fresh database on first run. No migration from Dropbox schema.
+The TODO mentions database migration in Phase 11 but frames it as "Write migration from old schema (if supporting upgrades from Dropbox version) or fresh start." There's no decision recorded.
 
-Existing Maestral/Dropbox databases contain Dropbox-specific content hashes, revision strings, file IDs, and path formats. None of this data is transferable to Google Drive. On first launch, Cumulus creates a new database and performs a full sync.
+If there are any users of the original Maestral Dropbox client who might switch to this fork, their existing database has:
+- `dbx_path_lower` as primary keys (now `remote_path_lower`)
+- Dropbox content hashes (not MD5)
+- Dropbox revision strings (not Google Drive versions)
+- Dropbox file IDs (not Google Drive IDs)
+
+None of this data is transferable. A fresh start is the only viable option.
+
+**Recommendation:** Make the decision explicit: "Fresh database on first run. No migration from Dropbox schema." Remove the ambiguity.
+
 ---
 
-## 10. ~~Test Suite Still References Dropbox SDK~~ (RESOLVED — decision recorded)
+## 10. Test Suite Still References Dropbox SDK
 
-**Decision:** Tests will be rewritten in Phase 12, not ported.
+The test suite has **12 files** that import from the `dropbox` SDK and **31 test files** total. Phase 12 of TODO.md lists porting tests, but:
+- The tests can't even be *imported* until `client.py` and `errorhandling.py` are rewritten
+- No test strategy is defined for the path cache (the most complex new component)
+- Integration tests require a test Google account — no setup instructions exist
+- The TODO doesn't mention mocking strategy for Google API calls
 
-- Mocking: use `unittest.mock` to mock `googleapiclient` calls
-- Path cache tests: add as a Phase 4 deliverable (unit tests for `PathIDCache` and `native_docs`)
-- Integration tests: require a test Google account; setup instructions will be added to `tests/README.md`
-- The 12 files that `import dropbox` are dead code until Phase 12
+**Recommendation:** Add to Phase 12: "Define mocking approach for `googleapiclient` (use `unittest.mock` or `google-api-python-client`'s built-in `HttpMock`)." Add path cache testing as a Phase 4 deliverable, not Phase 12.
+
 ---
 
-## 11. ~~`dropbox` SDK Is Still a Runtime Dependency~~ (RESOLVED)
+## 11. `dropbox` SDK Is Still a Runtime Dependency
 
-**Already fixed in commit 74c8aea** (Issue 1). `client.py` and `errorhandling.py` were stubbed to remove all `dropbox` SDK imports. The package can now be imported without the `dropbox` SDK installed.
+The `pyproject.toml` has been updated to remove the `dropbox` dependency and add Google libraries. But `client.py` and `errorhandling.py` still `import dropbox`. The package **cannot be installed or run** without the `dropbox` SDK, despite it being removed from dependencies.
+
+This means the project is currently in a **broken intermediate state** where:
+- `pip install` won't pull in `dropbox`
+- But importing `cumulus.client` will fail with `ModuleNotFoundError`
+
+**Recommendation:** Either add `dropbox` back as a temporary dependency until Phase 5, or stub out `client.py` and `errorhandling.py` with placeholder implementations that don't import from `dropbox`.
+
 ---
 
-## 12. ~~Selective Sync with ID-Based Paths~~ (RESOLVED — decision recorded)
+## 12. Selective Sync with ID-Based Paths
 
-**Decision:** Keep path-based exclusions for MVP. When a rename comes through the change feed and the old path matches an exclusion, update the exclusion list entry to the new path. This keeps the config layer unchanged and handles the most common case (user renames an excluded folder in the web UI).
+The existing selective sync stores exclusions as a list of lowercased remote paths (e.g., `["/photos", "/work/old-projects"]`). With Google Drive's ID-based API:
+- A folder rename on Google Drive changes the path but not the ID
+- The exclusion list would become stale if a user renames an excluded folder via the Google Drive web UI
+- The path cache must be consulted to resolve exclusions to IDs
 
-A future version may switch to ID-based exclusions for full robustness, but that requires config format migration and UI changes.
+The TODO has a single checkbox: "Test selective sync (excluded folders) with ID-based paths." This understates the work — it's not just testing, it's a design change.
+
+**Recommendation:** Decide whether to store exclusions as paths (simpler, existing behavior, but fragile with renames) or as file IDs (robust, but requires migration of the exclusion format and changes to the config layer).
+
 ---
 
-## 13. ~~Bandwidth Throttling Implementation Couples to Dropbox SDK~~ (RESOLVED — decision recorded)
+## 13. Bandwidth Throttling Implementation Couples to Dropbox SDK
 
-**Decision:** Throttle between chunks, not within them.
+The existing bandwidth throttling works by wrapping the Dropbox SDK's upload/download streams with throttled iterators. The `_DropboxSDK` subclass overrides `request_json_string()` to support streamed request bodies.
 
-- **Downloads:** `MediaIoBaseDownload` writes in configurable chunk sizes. Insert a `time.sleep()` delay between chunks to throttle. Wrap the destination file object with a rate-limited writer.
-- **Uploads:** `MediaFileUpload(resumable=True)` sends in chunks. Insert a `time.sleep()` between `next_chunk()` calls. The existing `bandwidth_limit_up`/`bandwidth_limit_down` config values translate directly to bytes-per-second limits.
-- The `StreamHasher` pattern from the Dropbox client can be adapted for downloads but is not needed for uploads (Google computes checksums server-side).
-- Implementation deferred to Phase 5d/5e when the actual transfer methods are built.
+Google's `MediaFileUpload` and `MediaIoBaseDownload` have different streaming models. The TODO mentions bandwidth throttling in Phases 5d and 5e but doesn't address how to integrate it with Google's upload/download classes.
+
+`MediaFileUpload` with `resumable=True` sends chunks in fixed sizes — throttling would need to be applied between chunks, not within them. `MediaIoBaseDownload` writes to a file-like object in chunks.
+
+**Recommendation:** Add a design note for how throttling integrates with Google's transfer classes. The `StreamHasher` pattern may work for downloads but not for `MediaFileUpload`.
+
 ---
 
-## 14. ~~Missing: OAuth Client Secret Distribution Strategy~~ (RESOLVED — decision recorded)
+## 14. Missing: OAuth Client Secret Distribution Strategy
 
-**Decision:** Embed credentials for "Desktop" app type (OAuth client type). This is Google's recommended approach for installed/CLI applications — the client secret is considered public for this app type.
+Phase 2 says "Download `client_secret.json`" and "Add to `src/maestral/resources/`". The PLAN's risk assessment mentions OAuth verification but not the fundamental distribution problem:
 
-- `client_secret.json` committed to `src/cumulus/resources/` (Desktop app type)
-- Each user authenticates via browser-based OAuth consent flow
-- Per-project quota (12k queries/day) is shared across all users
-- If quota becomes a problem, users can provide their own Google Cloud project credentials via a config option (future enhancement)
-- Google API Console project should be configured with reasonable rate-limit alerts
+- Google requires that `client_secret.json` not be publicly exposed for web apps, but for "Desktop" app type, the secret is considered public
+- However, if the secret is committed to a public repo, anyone can impersonate the app
+- The app will be subject to Google's per-project rate limits shared across ALL users
+- Google may revoke the project if usage patterns look abusive
+
+**Recommendation:** Add a decision item: "Determine OAuth credential distribution strategy" — options include: embedded in package (simple but shared quota), user-provided (each user creates their own Google Cloud project), or server-side token exchange (complex but most robust).
+
 ---
 
-## 15. ~~Effort Estimate Is Likely 2-3x Too Optimistic~~ (RESOLVED — estimate revised)
+## 15. Effort Estimate Is Likely 2-3x Too Optimistic
 
-**Revised estimate:** 4–6 weeks MVP, 8–12 weeks production-ready.
+The PLAN estimates "~2 weeks MVP, ~4-6 weeks production." Based on the scope:
 
-Key adjustments:
-- Phase 2 (path cache): 1–2 weeks, not "3–5 days" — this is the hardest new component
-- Phase 5 (client implementation): 1–2 weeks for full API integration + testing
-- Phase 8 (sync engine): 1–2 weeks — 230+ references to update with subtle concurrency concerns
-- Integration debugging: 1–2 weeks — path cache ↔ sync engine interaction is where most bugs will surface
-- Buffer: 1 week for unforeseen issues
+- Phase 1 alone ("1 day") has already been done and is still incomplete
+- Phase 2 (Google Drive client + path cache, "3-5 days") is the hardest part and involves building a complex caching layer with no precedent in the existing codebase
+- Phase 5 (adapt sync engine, "2-3 days") involves touching 230+ references in a 3900-line file with subtle concurrency and conflict-resolution logic
+- No time is allocated for debugging the integration between the new path cache and the existing sync engine, which is where most bugs will live
+
+The path cache alone — with its cache consistency, orphan handling, duplicate name resolution, atomic moves with child updates, and concurrent access patterns — is likely a 1-2 week effort to get right.
+
+**Recommendation:** Revise the estimate. A more realistic timeline: 4-6 weeks MVP, 8-12 weeks production.
+
 ---
 
-## Summary: All 15 Issues
+## Summary: Top 5 Critical Issues
 
-| # | Issue | Status | Resolution |
+| # | Issue | Severity | Action Needed |
 |---|---|---|---|
-| 1 | ~~Package is broken — can't import without `dropbox` SDK~~ | **Resolved** | Stubbed `client.py` and `errorhandling.py`; commit 74c8aea |
-| 2 | ~~Path↔ID cache design is under-specified~~ | **Resolved** | Implemented `path_cache.py`; commit 53a97e7 |
-| 3 | ~~Rate limits will block normal usage without batching~~ | **Resolved** | 180s polling, quota counter; commit 07da2e2 |
-| 4 | ~~Case sensitivity differences can corrupt the index~~ | **Resolved** | Case-insensitive uniqueness in path cache; commit 76577f4 |
-| 5 | ~~Google Docs filtering needed in multiple places~~ | **Resolved** | `native_docs.py` module with filter function; commit 3484cc3 |
-| 6 | ~~Connection monitoring still points at Dropbox~~ | **Resolved** | Fixed in commit 07da2e2 (`API_HEALTH_URL`) |
-| 7 | ~~Case sensitivity mismatch~~ | **Resolved** | Same as Issue 4 |
-| 8 | ~~Google Docs handling deferred but pervasive~~ | **Resolved** | Same as Issue 5 |
-| 9 | ~~No migration path for existing users~~ | **Resolved** | Decision: fresh database, no migration |
-| 10 | ~~Test suite references Dropbox SDK~~ | **Resolved** | Decision: rewrite in Phase 12, not port |
-| 11 | ~~`dropbox` SDK still a runtime dependency~~ | **Resolved** | Fixed in commit 74c8aea |
-| 12 | ~~Selective sync with ID-based paths~~ | **Resolved** | Decision: keep path-based for MVP, update on rename |
-| 13 | ~~Bandwidth throttling couples to Dropbox SDK~~ | **Resolved** | Decision: throttle between chunks |
-| 14 | ~~OAuth client secret distribution~~ | **Resolved** | Decision: embed Desktop app type credentials |
-| 15 | ~~Effort estimate too optimistic~~ | **Resolved** | Revised to 4–6 weeks MVP, 8–12 weeks production |
+| 1 | ~~Package is broken — can't import without `dropbox` SDK~~ | **Resolved** | Stubbed `client.py` and `errorhandling.py`; removed all `dropbox` imports |
+| 2 | ~~Path↔ID cache design is under-specified~~ | **Resolved** | Implemented `path_cache.py` with design decisions documented |
+| 3 | ~~Rate limits will block normal usage without batching~~ | **Resolved** | 180s polling, quota counter with warnings, batch endpoint notes |
+| 4 | ~~Case sensitivity differences can corrupt the index~~ | **Resolved** | Enforce case-insensitive uniqueness in path cache (`set`, `move`, `populate_from_listing`) |
+| 5 | ~~Google Docs filtering needed in multiple places, not just one~~ | **Resolved** | `native_docs.py` module with MIME type set + filter function; 6 filter points documented |

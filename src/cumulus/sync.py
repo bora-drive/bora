@@ -3538,9 +3538,6 @@ class SyncEngine:
 
             try:
                 with self._parallel_down_semaphore:
-                    # TODO (Phase 8): Replace with file-ID-based download.
-                    # Google Drive downloads by file_id, not rev string.
-                    # Use event.change_remote_id (file ID) instead.
                     md = self.client.download(
                         f"rev:{event.rev}", tmp_fname, sync_event=event
                     )
