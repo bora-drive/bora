@@ -283,6 +283,7 @@ Before any code runs, a Google Cloud project is required:
 | OAuth verification for public distribution | **Medium** | Apply early; use restricted scopes where possible |
 | Google Docs/Sheets/Slides (not real files) | **Medium** | Skip or export as PDF/OOXML; they have no content hash or downloadable bytes |
 | Symlinks (no Google Drive equivalent) | **Low** | Skip symlinks during upload; log warning. `symlink_target` field kept in schema but always `None`. |
+| Selective sync exclusions go stale on folder rename while offline | **Low** | Update exclusion paths when rename arrives via change feed; user can re-exclude if missed |
 
 ## 9. Estimated Effort
 

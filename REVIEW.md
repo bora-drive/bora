@@ -173,16 +173,12 @@ This means the project is currently in a **broken intermediate state** where:
 
 ---
 
-## 12. Selective Sync with ID-Based Paths
+## 12. ~~Selective Sync with ID-Based Paths~~ (RESOLVED)
 
-The existing selective sync stores exclusions as a list of lowercased remote paths (e.g., `["/photos", "/work/old-projects"]`). With Google Drive's ID-based API:
-- A folder rename on Google Drive changes the path but not the ID
-- The exclusion list would become stale if a user renames an excluded folder via the Google Drive web UI
-- The path cache must be consulted to resolve exclusions to IDs
+**Decision:** Keep path-based exclusions. When a folder rename arrives via the change feed and the old path matches an exclusion entry, update the exclusion to the new path. Known limitation: if the client is offline during a rename, the exclusion may go stale (the change feed shows only the new path). Users can fix this by re-excluding the folder under its new name.
 
-The TODO has a single checkbox: "Test selective sync (excluded folders) with ID-based paths." This understates the work — it's not just testing, it's a design change.
-
-**Recommendation:** Decide whether to store exclusions as paths (simpler, existing behavior, but fragile with renames) or as file IDs (robust, but requires migration of the exclusion format and changes to the config layer).
+- TODO.md Phase 8: replaced vague "test selective sync" checkbox with specific tasks
+- PLAN.md §8: added risk row for stale exclusions
 
 ---
 
