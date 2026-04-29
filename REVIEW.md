@@ -12,7 +12,7 @@ A note has been added to TODO.md Phase 1 acknowledging this explicitly.
 
 ---
 
-## 2. No `path_cache.py` Module Exists Yet — But Everything Depends On It
+## 2. ~~No `path_cache.py` Module Exists Yet — But Everything Depends On It~~ (RESOLVED)
 
 The PLAN correctly identifies the path↔ID cache as the **hardest change** (Section 3.1), but neither document addresses several critical design questions:
 
@@ -54,7 +54,7 @@ Google Drive can have files whose parent folders have been trashed or where the 
 
 ---
 
-## 5. Rate Limits Are Severely Underestimated
+## 5. ~~Rate Limits Are Severely Underestimated~~ (RESOLVED)
 
 The PLAN says Google Drive has "12k queries/day default per-user" and rates this as **Medium** risk. This is actually a **High** risk:
 
@@ -140,15 +140,9 @@ The PLAN mentions batch API calls as "out of scope for MVP" but doesn't quantify
 
 ---
 
-## 11. `dropbox` SDK Is Still a Runtime Dependency
+## 11. ~~`dropbox` SDK Is Still a Runtime Dependency~~ (RESOLVED)
 
-The `pyproject.toml` has been updated to remove the `dropbox` dependency and add Google libraries. But `client.py` and `errorhandling.py` still `import dropbox`. The package **cannot be installed or run** without the `dropbox` SDK, despite it being removed from dependencies.
-
-This means the project is currently in a **broken intermediate state** where:
-- `pip install` won't pull in `dropbox`
-- But importing `cumulus.client` will fail with `ModuleNotFoundError`
-
-**Recommendation:** Either add `dropbox` back as a temporary dependency until Phase 5, or stub out `client.py` and `errorhandling.py` with placeholder implementations that don't import from `dropbox`.
+**Already fixed in commit 74c8aea** (Issue 1). `client.py` and `errorhandling.py` were stubbed to remove all `dropbox` SDK imports. The package can be imported without the `dropbox` SDK.
 
 ---
 
@@ -187,12 +181,23 @@ PLAN.md §9 updated with revised per-phase estimates. Key changes: path cache bu
 
 ---
 
-## Summary: Top 5 Critical Issues
+## Summary: All 15 Issues
 
-| # | Issue | Severity | Action Needed |
+| # | Issue | Status | Resolution |
 |---|---|---|---|
-| 1 | ~~Package is broken — can't import without `dropbox` SDK~~ | **Resolved** | Stubbed `client.py` and `errorhandling.py`; removed all `dropbox` imports |
-| 2 | ~~Path↔ID cache design is under-specified~~ | **Resolved** | Implemented `path_cache.py` with design decisions documented |
-| 3 | ~~Rate limits will block normal usage without batching~~ | **Resolved** | 180s polling, quota counter with warnings, batch endpoint notes |
-| 4 | ~~Case sensitivity differences can corrupt the index~~ | **Resolved** | Enforce case-insensitive uniqueness in path cache (`set`, `move`, `populate_from_listing`) |
-| 5 | ~~Google Docs filtering needed in multiple places, not just one~~ | **Resolved** | `native_docs.py` module with MIME type set + filter function; 6 filter points documented |
+| 1 | Package broken — can't import without `dropbox` SDK | **Resolved** | Stubbed `client.py` and `errorhandling.py` (74c8aea) |
+| 2 | Path↔ID cache design under-specified | **Resolved** | Implemented `path_cache.py` (53a97e7) |
+| 3 | Rate limits will block normal usage | **Resolved** | 180s polling, quota counter (07da2e2) |
+| 4 | Case sensitivity can corrupt the index | **Resolved** | Case-insensitive uniqueness in path cache (76577f4) |
+| 5 | Google Docs filtering needed in multiple places | **Resolved** | `native_docs.py` module (3484cc3) |
+| 6 | Symlinks silently lost | **Resolved** | Skip with warning; PLAN/TODO updated |
+| 7 | `rev:` download pattern is Dropbox-specific | **Resolved** | Callsite documented; TODO Phase 8 task added |
+| 8 | Selective sync fragile with ID-based paths | **Resolved** | Keep path-based, update on rename |
+| 9 | Bandwidth throttling couples to Dropbox SDK | **Resolved** | Sleep between chunks |
+| 10 | Residual Dropbox naming in Phase 1 | **Resolved** | Note added: later phases will clean up |
+| 11 | `dropbox` SDK still a runtime dependency | **Resolved** | Fixed in 74c8aea (same as #1) |
+| 12 | No migration path for existing users | **Resolved** | Fresh database, no migration |
+| 13 | OAuth secret distribution strategy missing | **Resolved** | Embed in package (Desktop app type) |
+| 14 | Test suite references Dropbox SDK | **Resolved** | HttpMock, TDD, dedicated test account |
+| 15 | Effort estimate too optimistic | **Resolved** | Revised to 4–6 wk MVP, 8–12 wk production |
+| 6\* | Connection monitoring points at Dropbox | **Resolved** | Already fixed in 07da2e2 |
