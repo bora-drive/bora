@@ -172,3 +172,19 @@ def test_pyproject_description_not_dropbox():
     desc = data["project"]["description"]
     assert "Dropbox" not in desc
     assert "Google Drive" in desc or "sync" in desc.lower()
+
+
+def test_constants_no_dropbox_app_key():
+    """constants should not have a DROPBOX_APP_KEY."""
+    from maestral import constants
+    assert not hasattr(constants, 'DROPBOX_APP_KEY')
+
+
+def test_exceptions_docstrings_no_dropbox():
+    """Exception docstrings should not reference Dropbox."""
+    import maestral.exceptions as exc
+    for name in dir(exc):
+        obj = getattr(exc, name)
+        if isinstance(obj, type) and issubclass(obj, Exception):
+            doc = obj.__doc__ or ""
+            assert "Dropbox" not in doc, f"{name}.__doc__ still mentions Dropbox"

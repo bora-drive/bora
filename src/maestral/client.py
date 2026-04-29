@@ -41,7 +41,9 @@ from typing_extensions import Concatenate, ParamSpec
 # local imports
 from . import __version__
 from .config import MaestralState
-from .constants import DROPBOX_APP_KEY
+# DROPBOX_APP_KEY removed - Google OAuth credentials loaded differently.
+# This entire client.py will be rewritten in Phase 5.
+DROPBOX_APP_KEY = "2jmbq42w7vof78h"  # legacy, kept for now until client.py rewrite
 from .core import (
     Account,
     AccountType,
