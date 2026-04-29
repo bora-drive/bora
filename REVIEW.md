@@ -74,15 +74,11 @@ The PLAN mentions batch API calls as "out of scope for MVP" but doesn't quantify
 
 ---
 
-## 6. Connection Monitoring Still Points at Dropbox
+## 6. ~~Connection Monitoring Still Points at Dropbox~~ (RESOLVED)
 
-`manager.py` checks connectivity by pinging `https://api.dropboxapi.com` (via `DROPBOX_API_HOSTNAME`). This is used for:
-- Auto-reconnection after network outages
-- Connection status reporting to the UI
+**Already fixed in commit 07da2e2.** `manager.py` now pings `https://www.googleapis.com` (unauthenticated) via `GOOGLE_API_HOSTNAME = API_HEALTH_URL`.
 
-Neither TODO.md Phase 10 item "Update `_connection_helper` to check Google Drive connectivity" is specific about what URL to check. Google's Drive API endpoint is `https://www.googleapis.com/drive/v3/`, but a simple connectivity check might be better aimed at `https://www.googleapis.com` or `https://accounts.google.com`.
-
-**Recommendation:** Add specificity to the TODO: decide the health-check endpoint and whether it should be authenticated or unauthenticated.
+- TODO.md Phase 10: updated `_connection_helper` task to note the endpoint is already wired up
 
 ---
 

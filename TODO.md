@@ -228,7 +228,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Update `SyncManager` for new client type
 - [ ] Update `_startup` to handle Google Drive-specific folder setup
 - [ ] Update `_check_and_update_path_root` for Shared Drives (or remove for MVP)
-- [ ] Update `_connection_helper` to check Google Drive connectivity
+- [x] Update `_connection_helper` to check Google Drive connectivity (done: pings `https://www.googleapis.com` via `GOOGLE_API_HOSTNAME`)
 - [ ] Update `_download_worker` loop for polling-based change detection
 - [ ] Remove Dropbox Team Space migration logic (or adapt for Shared Drives)
 - [ ] Update `ensure_dropbox_folder_present` → `ensure_drive_folder_present`
