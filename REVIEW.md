@@ -236,7 +236,7 @@ The path cache alone — with its cache consistency, orphan handling, duplicate 
 | # | Issue | Severity | Action Needed |
 |---|---|---|---|
 | 1 | ~~Package is broken — can't import without `dropbox` SDK~~ | **Resolved** | Stubbed `client.py` and `errorhandling.py`; removed all `dropbox` imports |
-| 2 | Path↔ID cache design is under-specified | **High** | Write detailed design covering concurrency, population, orphans |
+| 2 | ~~Path↔ID cache design is under-specified~~ | **Resolved** | Implemented `path_cache.py` with design decisions documented |
 | 3 | Rate limits will block normal usage without batching | **High** | Prioritize batch API support; add request budgeting |
 | 4 | Case sensitivity differences can corrupt the index | **High** | Make architectural decision before implementing path cache |
 | 5 | Google Docs filtering needed in multiple places, not just one | **Medium** | Add explicit filter points in each affected phase |
