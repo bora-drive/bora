@@ -201,6 +201,9 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Update `reset_sync_state` for new cursor format
 - [ ] Test selective sync (excluded folders) with ID-based paths
 - [ ] Verify case-sensitivity handling (Google Drive is case-insensitive in search, case-preserving in names)
+- [ ] Skip symlinks during local-to-remote upload; log a warning instead of syncing
+- [ ] Remove symlink recreation code path in `_apply_remote_file_change` (~line 3526); Google Drive never provides `symlink_target`
+- [ ] Keep `symlink_target` field in `IndexEntry` schema (always `None`)
 
 ## Phase 9: CLI Updates
 
@@ -305,3 +308,4 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Batch API calls — use sequential calls initially, optimize later
 - [ ] Files with multiple parents — pick first parent, log warning
 - [ ] GUI packages (`maestral-qt`, `maestral-cocoa`) — update separately
+- [ ] Symlinks — skip with warning; Google Drive has no symlink concept

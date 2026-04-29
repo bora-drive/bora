@@ -49,16 +49,13 @@ Google Drive can have files whose parent folders have been trashed or where the 
 
 ---
 
-## 3. Symlink Support Is Silently Lost
+## 3. ~~Symlink Support Is Silently Lost~~ (RESOLVED)
 
-Dropbox stores `symlink_target` in file metadata and Maestral recreates symlinks locally. Google Drive has **no symlink concept**. The sync engine (`sync.py`) still references `symlink_target` in ~10 places for conflict detection and file creation.
+**Decision:** Skip symlinks during upload with a logged warning. Google Drive has no symlink concept, so symlink metadata will never arrive from the remote side.
 
-Neither PLAN.md nor TODO.md mentions what happens to symlinks:
-- Should they be uploaded as regular files (follow the symlink)?
-- Should they be skipped with a warning?
-- Should the `symlink_target` field be removed from the data model?
-
-**Recommendation:** Add a decision item to TODO.md: "Decide symlink handling policy (upload as regular file / skip / error)."
+- PLAN.md risk table updated with symlink row
+- TODO.md Phase 8 updated with three specific tasks (skip on upload, remove recreation code, keep schema field)
+- TODO.md Known Limitations updated
 
 ---
 
