@@ -273,7 +273,9 @@ Before any code runs, a Google Cloud project is required:
 2. Enable the Google Drive API.
 3. Configure the OAuth consent screen (External, with drive scope).
 4. Create OAuth 2.0 credentials (Desktop application type).
-5. Download `client_secret.json` and embed/distribute with the app.
+5. Download `client_secret.json` and commit to `src/cumulus/resources/`.
+   For Desktop app type, Google considers the client secret public — embedding it
+   in the repo and distributed package is the standard approach.
 6. If distributing publicly, submit for Google's OAuth verification review.
 
 ## 8. Risk Assessment

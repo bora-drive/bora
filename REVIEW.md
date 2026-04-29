@@ -171,16 +171,12 @@ This means the project is currently in a **broken intermediate state** where:
 
 ---
 
-## 14. Missing: OAuth Client Secret Distribution Strategy
+## 14. ~~Missing: OAuth Client Secret Distribution Strategy~~ (RESOLVED)
 
-Phase 2 says "Download `client_secret.json`" and "Add to `src/maestral/resources/`". The PLAN's risk assessment mentions OAuth verification but not the fundamental distribution problem:
+**Decision:** Embed `client_secret.json` in the package (Desktop app type). Google's docs say the client secret is considered public for installed/desktop apps. Per-user quotas are what matter; project-level limits are high enough for normal use.
 
-- Google requires that `client_secret.json` not be publicly exposed for web apps, but for "Desktop" app type, the secret is considered public
-- However, if the secret is committed to a public repo, anyone can impersonate the app
-- The app will be subject to Google's per-project rate limits shared across ALL users
-- Google may revoke the project if usage patterns look abusive
-
-**Recommendation:** Add a decision item: "Determine OAuth credential distribution strategy" — options include: embedded in package (simple but shared quota), user-provided (each user creates their own Google Cloud project), or server-side token exchange (complex but most robust).
+- TODO.md Phase 2: updated to clarify credentials are committed to the repo
+- PLAN.md §7: added note about Desktop app type and embedded credentials
 
 ---
 
