@@ -28,10 +28,10 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [x] Propagate field renames through `main.py` (~213 references)
 - [x] Propagate field renames through `manager.py` (~46 references)
 - [x] Propagate field renames through `cli/*.py`
-- [ ] Update `autostart.py` — service/application names (will be done as part of full rename)
-- [ ] Update `keyring.py` — keyring service name (will be done as part of full rename)
-- [ ] Update `notify.py` — notification text (will be done as part of full rename)
-- [ ] Rename project from "maestral" to "cumulus" throughout (package name, imports, CLI entry point, config names, constants, docs, tests)
+- [x] Update `autostart.py` — service/application names
+- [x] Update `keyring.py` — keyring service name
+- [x] Update `notify.py` — notification text
+- [x] Rename project from "maestral" to "cumulus" throughout (package name, imports, CLI entry point, config names, constants, docs, tests)
 
 ## Phase 2: Google Cloud Project
 
