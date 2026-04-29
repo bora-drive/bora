@@ -9,7 +9,9 @@ The full implementation will be built in Phases 3–5.
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import (
@@ -57,8 +59,22 @@ if TYPE_CHECKING:
 
 __all__ = ["GoogleDriveClient"]
 
+logger = logging.getLogger(__name__)
+
 # Google Drive API health-check URL (used by manager for connectivity checks).
 API_HEALTH_URL = "https://www.googleapis.com"
+
+# Google Drive default per-user quota: 12,000 queries per day.
+# Warn at 80% to give the user a chance to slow down.
+_DAILY_QUOTA = 12_000
+_QUOTA_WARN_THRESHOLD = int(_DAILY_QUOTA * 0.80)  # 9,600
+_QUOTA_CRITICAL_THRESHOLD = int(_DAILY_QUOTA * 0.95)  # 11,400
+
+# Default polling interval for remote change detection (seconds).
+# Dropbox used a long-poll; Google Drive has no equivalent, so we poll.
+# 180 s keeps daily polling cost to ~480 requests, leaving headroom for
+# file operations within the 12k/day quota.
+DEFAULT_POLL_INTERVAL = 180
 
 
 def _not_implemented() -> None:
@@ -102,6 +118,58 @@ class GoogleDriveClient:
         # Throttling config.
         self.bandwidth_limit_up = bandwidth_limit_up
         self.bandwidth_limit_down = bandwidth_limit_down
+
+        # Request quota tracking.
+        self._request_count = 0
+        self._request_day: int = 0  # day-of-year when counter was last reset
+        self._warned_at_threshold = False
+        self._warned_at_critical = False
+
+    # ---- Request quota tracking -----------------------------------------------------
+
+    def _count_request(self, n: int = 1) -> None:
+        """Increment the daily request counter and warn if approaching limits.
+
+        Call this for every Google Drive API request (or pass *n* for batch
+        requests that consume multiple quota units).
+        """
+        today = time.localtime().tm_yday
+        if today != self._request_day:
+            # New day — reset counter.
+            self._request_count = 0
+            self._request_day = today
+            self._warned_at_threshold = False
+            self._warned_at_critical = False
+
+        self._request_count += n
+
+        if (
+            self._request_count >= _QUOTA_CRITICAL_THRESHOLD
+            and not self._warned_at_critical
+        ):
+            logger.warning(
+                "Google Drive API quota nearly exhausted: %d / %d requests today. "
+                "Sync operations may start failing.",
+                self._request_count,
+                _DAILY_QUOTA,
+            )
+            self._warned_at_critical = True
+        elif (
+            self._request_count >= _QUOTA_WARN_THRESHOLD
+            and not self._warned_at_threshold
+        ):
+            logger.warning(
+                "Google Drive API quota usage is high: %d / %d requests today. "
+                "Consider reducing sync frequency.",
+                self._request_count,
+                _DAILY_QUOTA,
+            )
+            self._warned_at_threshold = True
+
+    @property
+    def request_count(self) -> int:
+        """Number of API requests made today."""
+        return self._request_count
 
     # ---- Auth / linking --------------------------------------------------------------
 
@@ -279,12 +347,19 @@ class GoogleDriveClient:
         return FolderMetadata("", "", "", "", False)  # type: ignore[call-arg]  # unreachable
 
     def remove_batch(
-        self, entries: Sequence[tuple[str, str | None]], batch_size: int = 900
+        self, entries: Sequence[tuple[str, str | None]], batch_size: int = 100
     ) -> list[FileMetadata | FolderMetadata | CumulusApiError]:
         """Deletes multiple items in a batch.
 
+        .. note:: Implementation should use Google Drive's batch endpoint
+           (``POST https://www.googleapis.com/batch/drive/v3``) to group up
+           to 100 delete requests per HTTP round-trip.  This is critical for
+           staying within the 12k requests/day quota.  Each sub-request in a
+           batch counts as one quota unit, but the single HTTP call avoids
+           per-request overhead and latency.
+
         :param entries: List of (path, rev) tuples.
-        :param batch_size: Number of items per batch.
+        :param batch_size: Number of items per batch (max 100 for Google).
         :returns: List of metadata or errors.
         """
         _not_implemented()
@@ -317,6 +392,9 @@ class GoogleDriveClient:
         self, remote_paths: list[str]
     ) -> list[FolderMetadata | CumulusApiError]:
         """Creates multiple folders in a batch.
+
+        .. note:: Implementation should use Google Drive's batch endpoint
+           (up to 100 requests per batch) to minimize quota consumption.
 
         :param remote_paths: List of folder paths.
         :returns: List of metadata or errors.
@@ -392,16 +470,24 @@ class GoogleDriveClient:
         _not_implemented()
         return iter([])  # unreachable
 
-    def wait_for_remote_changes(self, last_cursor: str, timeout: int = 40) -> bool:
+    def wait_for_remote_changes(
+        self, last_cursor: str, timeout: int = DEFAULT_POLL_INTERVAL
+    ) -> bool:
         """Waits for remote changes since ``last_cursor``.
 
-        For Google Drive, this will poll ``changes.list`` periodically rather
-        than using a long-poll endpoint.
+        Google Drive has no long-poll endpoint.  Instead, we sleep for
+        :data:`DEFAULT_POLL_INTERVAL` seconds (180 s), then check
+        ``changes.list`` for new changes.  This keeps polling cost to
+        ~480 requests/day, well within the 12k daily quota.
 
-        :param last_cursor: Last change token.
-        :param timeout: Seconds to wait until timeout.
+        :param last_cursor: Last change token (``startPageToken``).
+        :param timeout: Seconds to sleep before polling.  Defaults to
+            :data:`DEFAULT_POLL_INTERVAL`.
         :returns: ``True`` if changes are available, ``False`` otherwise.
         """
+        # TODO (Phase 5g): Implement actual polling via changes.list.
+        # Sleep, then query changes.list with pageToken=last_cursor.
+        # Return True if the response contains any change entries.
         _not_implemented()
         return False  # unreachable
 

@@ -2872,14 +2872,14 @@ class SyncEngine:
     def wait_for_remote_changes(
         self,
         last_cursor: str,
-        timeout: int = 40,
+        timeout: int = 180,
     ) -> bool:
         """
         Blocks until changes to the remote are available.
 
-        :param last_cursor: Cursor form last sync.
-        :param timeout: Timeout in seconds before returning even if there are no
-            changes. The server adds random jitter of up to 90 sec to this value.
+        :param last_cursor: Cursor from last sync.
+        :param timeout: Timeout in seconds before polling for changes.
+            Defaults to 180s to stay within Google Drive's 12k req/day quota.
         :returns: ``True`` if changes are available, ``False`` otherwise.
         """
         self._logger.debug("Waiting for remote changes since cursor:\n%s", last_cursor)
