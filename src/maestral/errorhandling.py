@@ -5,6 +5,7 @@ exceptions to instances of :exc:`maestral.exceptions.MaestralApiError`.
 
 from __future__ import annotations
 
+import builtins
 import contextlib
 import errno
 
@@ -23,9 +24,9 @@ from .exceptions import (
     ConflictError,
     CursorResetError,
     DataCorruptionError,
-    DropboxAuthError,
-    DropboxConnectionError,
-    DropboxServerError,
+    AuthError,
+    ConnectionError,
+    ServerError,
     FileConflictError,
     FileReadError,
     FileSizeError,
@@ -62,7 +63,7 @@ CONNECTION_ERRORS = (
     requests.exceptions.RetryError,
     requests.exceptions.ChunkedEncodingError,
     requests.exceptions.ConnectionError,
-    ConnectionError,
+    builtins.ConnectionError,
 )
 
 LocalError = Union[MaestralApiError, OSError]
@@ -91,14 +92,14 @@ def convert_api_errors(
         raise dropbox_to_maestral_error(exc, dbx_path, local_path)
     # Catch connection errors first, they may inherit from OSError.
     except CONNECTION_ERRORS:
-        raise DropboxConnectionError(
+        raise ConnectionError(
             "Cannot connect to Dropbox",
             "Please check you internet connection and try again later.",
         )
     except OSError as exc:
         if exc.errno == errno.EPROTOTYPE:
             # Can occur on macOS, see https://bugs.python.org/issue33450.
-            raise DropboxConnectionError(
+            raise ConnectionError(
                 "Cannot connect to Dropbox",
                 "Please check your internet connection and try again later.",
             )
@@ -256,7 +257,7 @@ def dropbox_to_maestral_error(
                 err_cls = InsufficientSpaceError
             elif error.is_internal_error():
                 text = "Something went on Dropbox’s end. Please try again later."
-                err_cls = DropboxServerError
+                err_cls = ServerError
             elif error.is_to():
                 to_error = error.get_to()
                 text, err_cls = get_write_error_msg(to_error)
@@ -420,7 +421,7 @@ def dropbox_to_maestral_error(
                     "verify on the Dropbox website if the job succeeded and try "
                     "again if it failed."
                 )
-                err_cls = DropboxServerError
+                err_cls = ServerError
             else:
                 # Other tags include invalid_async_job_id.
                 # Neither should occur in our SDK usage.
@@ -559,7 +560,7 @@ def dropbox_to_maestral_error(
                     "relink to continue syncing."
                 )
             elif error.is_user_suspended():
-                err_cls = DropboxAuthError
+                err_cls = AuthError
                 title = "Authentication error"
                 text = "Your user account has been suspended."
             elif error.is_missing_scope():
@@ -575,7 +576,7 @@ def dropbox_to_maestral_error(
                 pass
 
         else:
-            err_cls = DropboxAuthError
+            err_cls = AuthError
             title = "Authentication error"
             text = "Please check if you can log in on the Dropbox website."
 
@@ -602,7 +603,7 @@ def dropbox_to_maestral_error(
 
     # ---- Internal Dropbox error ------------------------------------------------------
     elif isinstance(exc, exceptions.InternalServerError):
-        err_cls = DropboxServerError
+        err_cls = ServerError
         title = "Dropbox server error"
         text = (
             "Something went wrong on Dropbox’s end. Please check on status.dropbox.com "

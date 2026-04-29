@@ -6,7 +6,7 @@ import pytest
 
 from maestral.client import DropboxClient
 from maestral.config import remove_configuration
-from maestral.exceptions import DropboxAuthError, NotFoundError
+from maestral.exceptions import AuthError, NotFoundError
 from maestral.keyring import CredentialStorage
 from maestral.main import Maestral
 
@@ -62,7 +62,7 @@ def client(test_lock):
     res = c.link(refresh_token=refresh_token, access_token=access_token)
 
     if res == 1:
-        raise DropboxAuthError("Invalid token")
+        raise AuthError("Invalid token")
     elif res == 2:
         raise ConnectionError("Could not connect to Dropbox")
     elif res > 0:
