@@ -172,7 +172,7 @@ Map HTTP status codes to Maestral's exception hierarchy:
 
 | File | What Changes |
 |---|---|
-| `sync.py` (3961 LOC) | Rename `dbx_path` → `remote_path` throughout; adapt change feed handling; update hash comparisons |
+| `sync.py` (3961 LOC) | Rename `dbx_path` → `remote_path` throughout; adapt change feed handling; update hash comparisons; replace `rev:{event.rev}` download pattern with file-ID-based download |
 | `models.py` (574 LOC) | Rename `dbx_path`/`dbx_id` fields; update `SyncEvent.from_metadata` and `from_fs_events` |
 | `main.py` (1581 LOC) | Rename `dropbox_path` → `drive_path`; swap `DropboxClient` → `GoogleDriveClient`; update OAuth flow |
 | `manager.py` (786 LOC) | Rename references; adapt `wait_for_remote_changes` polling; update connection monitoring |
