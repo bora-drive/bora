@@ -33,6 +33,11 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [x] Update `notify.py` — notification text
 - [x] Rename project from "maestral" to "cumulus" throughout (package name, imports, CLI entry point, config names, constants, docs, tests)
 
+> **Note:** Phase 1 naming cleanup covers `models.py`, `exceptions.py`, config, and
+> branding. Residual Dropbox naming in `sync.py` (~230 `dbx_path`/`dbx_id` refs),
+> `utils/hashing.py` (`DropboxContentHasher`), and `DropboxClient` type annotations
+> will be cleaned up in their respective later phases (7, 8, etc.).
+
 ## Phase 2: Google Cloud Project
 
 - [ ] Create a Google Cloud project
