@@ -265,6 +265,10 @@ class GoogleDriveClient:
         :param remote_path: Path of file or folder.
         :param include_deleted: Whether to return data for trashed items.
         :returns: Metadata of item at the given path or ``None`` if not found.
+            Returns ``None`` for Google-native documents (Docs, Sheets, etc.)
+            since they cannot be synced as regular files.
+
+        .. note:: Filter point for native docs (see :mod:`cumulus.native_docs`).
         """
         _not_implemented()
         return None  # unreachable
@@ -306,6 +310,10 @@ class GoogleDriveClient:
         :param local_path: Path to local download destination.
         :param sync_event: If given, updated with download progress.
         :returns: Metadata of downloaded item.
+        :raises: :class:`~cumulus.exceptions.SyncError` if *remote_path*
+            points to a Google-native document (Docs, Sheets, etc.).
+
+        .. note:: Filter point for native docs (see :mod:`cumulus.native_docs`).
         """
         _not_implemented()
         return FileMetadata("", "", "", "", None, None, "", 0, None, False, False, None)  # type: ignore[call-arg]  # unreachable
@@ -465,7 +473,11 @@ class GoogleDriveClient:
         :param include_mounted_folders: Whether to include shared folders.
         :param limit: Approximate max results per page.
         :param include_non_downloadable_files: Whether to include non-downloadable files.
-        :returns: Iterator over pages of folder content.
+        :returns: Iterator over pages of folder content.  Google-native
+            documents (Docs, Sheets, etc.) should be filtered out of results
+            unless *include_non_downloadable_files* is ``True``.
+
+        .. note:: Filter point for native docs (see :mod:`cumulus.native_docs`).
         """
         _not_implemented()
         return iter([])  # unreachable
@@ -504,6 +516,10 @@ class GoogleDriveClient:
         self, last_cursor: str
     ) -> Iterator[ListFolderResult]:
         """Lists remote changes as a paginated iterator.
+
+        Google-native documents (Docs, Sheets, etc.) must be stripped from
+        results before yielding.  Use :func:`cumulus.native_docs.filter_native_docs`
+        or check :func:`cumulus.native_docs.is_google_native` per item.
 
         :param last_cursor: Last change token.
         :returns: Iterator over pages of remote changes.

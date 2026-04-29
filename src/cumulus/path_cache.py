@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from .database.orm import Column, Manager, Model, NonNullColumn
 from .database.types import SqlInt, SqlPath, SqlString
+from .native_docs import GOOGLE_FOLDER_MIME_TYPE
 
 if TYPE_CHECKING:
     from .database.core import Database
@@ -349,7 +350,7 @@ class PathIDCache:
                 name = child["name"]
                 path = f"{prefix}/{name}"
                 is_folder = (
-                    child.get("mimeType") == "application/vnd.google-apps.folder"
+                    child.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE
                 )
 
                 self.set(

@@ -117,22 +117,24 @@ Neither TODO.md Phase 10 item "Update `_connection_helper` to check Google Drive
 
 ---
 
-## 8. Google Docs/Sheets/Slides Handling Is Deferred But Pervasive
+## 8. ~~Google Docs/Sheets/Slides Handling Is Deferred But Pervasive~~ (RESOLVED)
 
-The PLAN lists Google Docs as "Out of Scope for MVP" and the TODO says "skip native Google files initially." But the impact is larger than implied:
+**Decision:** Skip all Google-native documents (Docs, Sheets, Slides, etc.) at the API client layer so the sync engine never sees them.
 
-- Google Docs appear in `files.list` and `changes.list` results — they must be **actively filtered** in the change feed processor
-- They have no `md5Checksum`, no downloadable bytes, and special MIME types
-- If a user converts a regular file to a Google Doc, it will appear as a "modification" in the change feed that the sync engine can't handle
-- If not filtered, they'll cause errors in: download, hash comparison, conflict detection, and index tracking
-
-The TODO has a single checkbox "Handle Google Docs/Sheets/Slides in remote changes (skip or export)" in Phase 8, but this needs to be handled in multiple places:
-- Phase 5c (metadata operations) — return what for a Google Doc?
-- Phase 5d (download) — skip or error?
-- Phase 5g (change detection) — filter from results?
-- Phase 7 (content hashing) — handle missing `md5Checksum`
-
-**Recommendation:** Add explicit handling decisions for Google Docs in each affected phase, not just Phase 8. At minimum, define a filter in the change feed processor that strips Google Docs from results before the sync engine sees them.
+**Implementation:**
+- New module `src/cumulus/native_docs.py` defines:
+  - `GOOGLE_NATIVE_MIME_TYPES` — frozenset of all non-downloadable MIME types
+  - `is_google_native(mime_type)` — returns True for Docs/Sheets/Slides/etc.
+  - `filter_native_docs(items)` — strips native docs from a list of Drive API dicts
+- Six filter points documented in the module docstring:
+  1. `list_folder_iterator` / `list_folder` — strip from results
+  2. `list_remote_changes_iterator` — strip from change entries
+  3. `get_metadata` — return None for native docs
+  4. `download` — raise error if somehow reached
+  5. `populate_from_listing` — excluded from cache
+  6. `_apply_remote_changes` — secondary guard
+- Client stub docstrings annotated with filter-point notes
+- `path_cache.py` updated to use `GOOGLE_FOLDER_MIME_TYPE` constant instead of hardcoded string
 
 ---
 
@@ -237,4 +239,4 @@ The path cache alone — with its cache consistency, orphan handling, duplicate 
 | 2 | ~~Path↔ID cache design is under-specified~~ | **Resolved** | Implemented `path_cache.py` with design decisions documented |
 | 3 | ~~Rate limits will block normal usage without batching~~ | **Resolved** | 180s polling, quota counter with warnings, batch endpoint notes |
 | 4 | ~~Case sensitivity differences can corrupt the index~~ | **Resolved** | Enforce case-insensitive uniqueness in path cache (`set`, `move`, `populate_from_listing`) |
-| 5 | Google Docs filtering needed in multiple places, not just one | **Medium** | Add explicit filter points in each affected phase |
+| 5 | ~~Google Docs filtering needed in multiple places, not just one~~ | **Resolved** | `native_docs.py` module with MIME type set + filter function; 6 filter points documented |
