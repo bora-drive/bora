@@ -235,7 +235,7 @@ The path cache alone — with its cache consistency, orphan handling, duplicate 
 
 | # | Issue | Severity | Action Needed |
 |---|---|---|---|
-| 1 | Package is broken — can't import without `dropbox` SDK | **Critical** | Stub `client.py`/`errorhandling.py` or restore dependency |
+| 1 | ~~Package is broken — can't import without `dropbox` SDK~~ | **Resolved** | Stubbed `client.py` and `errorhandling.py`; removed all `dropbox` imports |
 | 2 | Path↔ID cache design is under-specified | **High** | Write detailed design covering concurrency, population, orphans |
 | 3 | Rate limits will block normal usage without batching | **High** | Prioritize batch API support; add request budgeting |
 | 4 | Case sensitivity differences can corrupt the index | **High** | Make architectural decision before implementing path cache |

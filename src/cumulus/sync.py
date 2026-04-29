@@ -61,7 +61,7 @@ from watchdog.events import (
 
 # local imports
 from . import notify
-from .client import DropboxClient  # noqa: will be renamed later
+from .client import GoogleDriveClient as DropboxClient  # TODO: rename all usages
 from .config import CumulusConfig, CumulusState
 from .constants import (
     EXCLUDED_DIR_NAMES,

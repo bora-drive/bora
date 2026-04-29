@@ -20,7 +20,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 # local imports
 from . import __url__, notify
-from .client import API_HOST
+from .client import API_HEALTH_URL
 from .config import CumulusConfig, CumulusState, PersistentMutableSet
 from .config.user import UserConfig
 from .constants import CONNECTED, CONNECTING, DISCONNECTED, IDLE, PAUSED, SYNCING
@@ -44,7 +44,7 @@ from .utils.path import delete, is_child, is_equal_or_child, move, normalize
 
 __all__ = ["SyncManager"]
 
-DROPBOX_API_HOSTNAME = "https://" + API_HOST
+GOOGLE_API_HOSTNAME = API_HEALTH_URL
 
 
 P = ParamSpec("P")
@@ -178,7 +178,7 @@ class SyncManager:
         if self.running.is_set():
             return
 
-        if not check_connection(DROPBOX_API_HOSTNAME, logger=self._logger):
+        if not check_connection(GOOGLE_API_HOSTNAME, logger=self._logger):
             # Schedule autostart when connection becomes available.
             self.autostart.set()
             self._logger.info(CONNECTING)
@@ -570,7 +570,7 @@ class SyncManager:
         the user.
         """
         while self._connection_helper_running:
-            connected = check_connection(DROPBOX_API_HOSTNAME)
+            connected = check_connection(GOOGLE_API_HOSTNAME)
 
             if connected != self.connected:
                 # Log the status change.
