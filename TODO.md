@@ -110,7 +110,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 
 - [ ] `download(remote_path, dst_path)` → resolve ID, use `MediaIoBaseDownload`
 - [ ] Stream to temp file, verify MD5 checksum, then move to destination
-- [ ] Handle bandwidth throttling during download
+- [ ] Handle bandwidth throttling during download (sleep between `MediaIoBaseDownload.next_chunk()` calls to enforce `bandwidth_limit_down` bytes/sec)
 - [ ] Handle Google Docs/Sheets/Slides (skip or export)
 - [ ] Return `FileMetadata` with correct fields
 
@@ -124,7 +124,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Handle `WriteMode.Overwrite` → `files.update` without revision check
 - [ ] Verify content hash (MD5) after upload
 - [ ] Update path cache after successful upload
-- [ ] Handle bandwidth throttling during upload
+- [ ] Handle bandwidth throttling during upload (sleep between `MediaFileUpload.next_chunk()` calls to enforce `bandwidth_limit_up` bytes/sec)
 
 ### 5f: File/folder operations
 
