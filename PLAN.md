@@ -289,6 +289,7 @@ Before any code runs, a Google Cloud project is required:
 | Google Docs/Sheets/Slides (not real files) | **Medium** | Skip or export as PDF/OOXML; they have no content hash or downloadable bytes |
 | Symlinks (no Google Drive equivalent) | **Low** | Skip symlinks during upload; log warning. `symlink_target` field kept in schema but always `None`. |
 | Selective sync exclusions go stale on folder rename while offline | **Low** | Update exclusion paths when rename arrives via change feed; user can re-exclude if missed |
+| No migration from Dropbox schema | **None** | Fresh database on first run. Dropbox hashes, revisions, and IDs are not transferable. |
 
 ## 9. Estimated Effort
 

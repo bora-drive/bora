@@ -120,19 +120,12 @@ Neither TODO.md Phase 10 item "Update `_connection_helper` to check Google Drive
 
 ---
 
-## 9. No Migration Path for Existing Users
+## 9. ~~No Migration Path for Existing Users~~ (RESOLVED)
 
-The TODO mentions database migration in Phase 11 but frames it as "Write migration from old schema (if supporting upgrades from Dropbox version) or fresh start." There's no decision recorded.
+**Decision:** Fresh database on first run. No migration from Dropbox schema. Dropbox content hashes, revision strings, and file IDs are not transferable.
 
-If there are any users of the original Maestral Dropbox client who might switch to this fork, their existing database has:
-- `dbx_path_lower` as primary keys (now `remote_path_lower`)
-- Dropbox content hashes (not MD5)
-- Dropbox revision strings (not Google Drive versions)
-- Dropbox file IDs (not Google Drive IDs)
-
-None of this data is transferable. A fresh start is the only viable option.
-
-**Recommendation:** Make the decision explicit: "Fresh database on first run. No migration from Dropbox schema." Remove the ambiguity.
+- TODO.md Phase 11: replaced ambiguous migration checkbox with explicit fresh-start decision
+- PLAN.md §8: added risk row confirming no migration needed
 
 ---
 

@@ -240,7 +240,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Update `IndexEntry` model for renamed fields
 - [ ] Update `SyncEvent` model for renamed fields
 - [ ] Update `SyncErrorEntry` model for renamed fields
-- [ ] Write migration from old schema (if supporting upgrades from Dropbox version) or fresh start
+- [ ] Fresh database on first run — no migration from Dropbox schema (Dropbox content hashes, revision strings, and file IDs are not transferable)
 - [ ] Update `HashCacheEntry` to store MD5 instead of Dropbox hash
 
 ## Phase 12: Testing
