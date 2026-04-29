@@ -1,32 +1,21 @@
-[![PyPi Release](https://img.shields.io/pypi/v/maestral.svg)](https://pypi.org/project/maestral/)
-[![Pyversions](https://img.shields.io/pypi/pyversions/maestral.svg)](https://pypi.org/pypi/maestral/)
-[![Documentation Status](https://readthedocs.org/projects/maestral/badge/?version=latest)](https://maestral.readthedocs.io/en/latest/?badge=latest)
-[![codecov](https://codecov.io/gh/SamSchott/maestral/branch/master/graph/badge.svg?token=V0C7IQ1MAU)](https://codecov.io/gh/SamSchott/maestral)
+# Maestral (Google Drive Fork)
 
-# Maestral <img src="https://raw.githubusercontent.com/SamSchott/maestral/master/src/maestral/resources/maestral.png" align="right" title="Maestral" width="110" height="110">
-
-A light-weight and open-source Dropbox client for macOS and Linux.
+A light-weight and open-source Google Drive sync client for macOS and Linux.
 
 ## About
 
-Maestral is an open-source Dropbox client written in Python. The project's main goal is to
-provide a client for platforms and file systems that are no longer directly supported by
-Dropbox.
+This is a fork of [Maestral](https://github.com/samschott/maestral), an open-source
+file sync client written in Python, adapted to work with Google Drive instead of Dropbox.
 
-Maestral currently does not support Dropbox Paper, the management of Dropbox teams, and
-the management of shared folder settings. If you need any of this functionality, please
-use the Dropbox website or the official client. Maestral does support syncing
-multiple Dropbox accounts and excluding local files from sync with a ".mignore" file.
+Maestral supports syncing multiple Google Drive accounts and excluding local files from
+sync with a ".mignore" file.
 
 The focus on "simple" file syncing does come with advantages: on macOS, the Maestral App
-bundle is significantly smaller than the official Dropbox app and uses less memory. The
-exact memory usage will depend on the size of your synced Dropbox folder and can be further
-reduced when running Maestral without a GUI.
+bundle is lightweight and uses minimal memory. The exact memory usage will depend on the
+size of your synced folder and can be further reduced when running Maestral without a GUI.
 
-Maestral uses the public Dropbox API which, unlike the official client, does not support
-transferring only those parts of a file which changed ("binary diff"). Maestral may
-therefore use more bandwidth that the official client. However, it will avoid uploading
-or downloading a file if it already exists with the same content locally or in the cloud.
+Maestral uses the public Google Drive API. It will avoid uploading or downloading a file
+if it already exists with the same content locally or in the cloud.
 
 ## Warning
 

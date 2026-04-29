@@ -140,7 +140,7 @@ class RestrictedContentError(SyncError):
 
 class UnsupportedFileError(SyncError):
     """Raised when this file type cannot be downloaded but only exported. This is the
-    case for G-suite files."""
+    case for certain cloud-native file types."""
 
 
 class FileSizeError(SyncError):

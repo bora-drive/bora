@@ -96,7 +96,8 @@ IS_MACOS = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
 
 # keys
-DROPBOX_APP_KEY = "2jmbq42w7vof78h"
+# Google OAuth client ID / secret will be loaded from config or resources.
 
 # urls
+# TODO: Update to point to the fork's releases URL.
 GITHUB_RELEASES_API = "https://api.github.com/repos/samschott/maestral/releases"
