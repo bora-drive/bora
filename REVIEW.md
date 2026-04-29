@@ -4,24 +4,11 @@ This report identifies problems, risks, and unaddressed issues in the migration 
 
 ---
 
-## 1. Incomplete Phase 1 Renaming (Residual Dropbox References)
+## 1. ~~Incomplete Phase 1 Renaming (Residual Dropbox References)~~ (RESOLVED)
 
-**Status:** Phase 1 is marked complete in TODO.md, but it isn't.
+`client.py` and `errorhandling.py` were stubbed in commit 74c8aea (removing all `import dropbox` statements). Remaining Dropbox *naming* (~230 refs in sync.py, `DropboxContentHasher` in hashing.py, backward-compat aliases in exceptions.py) will be cleaned up in later phases.
 
-The codebase still has **~200 residual Dropbox SDK references** that haven't been touched:
-
-| File | Problem |
-|---|---|
-| `client.py` | Still `import dropbox`, class is still `DropboxClient`, references `_DropboxSDK`, `DropboxOAuth2FlowNoRedirect`, `API_HOST` from Dropbox SDK |
-| `errorhandling.py` | Still `from dropbox import async_, auth, common, exceptions, files, sharing, users` |
-| `utils/hashing.py` | Still `DropboxContentHasher` class name, Dropbox block-hash algorithm |
-| `sync.py` | Still `from .client import DropboxClient` (line 64), uses `DropboxClient` type |
-| `manager.py` | Still references `API_HOST`, `DROPBOX_API_HOSTNAME`, checks connectivity against `api.dropboxapi.com` |
-| `exceptions.py` | Backward-compat aliases (`DropboxServerError`, `DropboxConnectionError`, etc.) and `dbx_path`/`dbx_path_from` properties on `CumulusApiError` |
-
-The TODO says Phase 1 is done, but `client.py` and `errorhandling.py` were explicitly marked for **complete rewrite** in later phases. The problem is that Phase 1 claims field renames are done while these core files remain entirely Dropbox-coupled. This creates a false sense of progress — you can't even import the package without the `dropbox` SDK installed.
-
-**Recommendation:** Either un-check Phase 1 items that depend on Phases 5-6, or add an explicit note that Phase 1 is "complete except for files scheduled for full rewrite."
+A note has been added to TODO.md Phase 1 acknowledging this explicitly.
 
 ---
 
