@@ -4,15 +4,15 @@ import os.path as osp
 
 import pytest
 
-from maestral.client import DropboxClient
-from maestral.config import list_configs, remove_configuration
-from maestral.daemon import Stop, stop_maestral_daemon_process
-from maestral.fsevents import Observer
-from maestral.keyring import CredentialStorage
-from maestral.main import Maestral
-from maestral.sync import SyncEngine
-from maestral.utils.appdirs import get_home_dir
-from maestral.utils.path import delete
+from cumulus.client import DropboxClient
+from cumulus.config import list_configs, remove_configuration
+from cumulus.daemon import Stop, stop_cumulus_daemon_process
+from cumulus.fsevents import Observer
+from cumulus.keyring import CredentialStorage
+from cumulus.main import Maestral
+from cumulus.sync import SyncEngine
+from cumulus.utils.appdirs import get_home_dir
+from cumulus.utils.path import delete
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def config_name(prefix: str = "test-config"):
 
     yield config_name
 
-    res = stop_maestral_daemon_process(config_name)
+    res = stop_cumulus_daemon_process(config_name)
 
     if res is Stop.Failed:
         raise RuntimeError("Could not stop test daemon")

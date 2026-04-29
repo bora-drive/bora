@@ -1,5 +1,5 @@
 """
-This module provides constants used throughout the maestral, the GUI and CLI. It should
+This module provides constants used throughout cumulus, the GUI and CLI. It should
 be kept free of memory heavy imports.
 """
 
@@ -22,10 +22,10 @@ FROZEN = getattr(sys, "frozen", False)
 
 for package in (
     __package__,
-    "maestral",
-    "maestral-cocoa",
-    "maestral-qt",
-    "maestral-gui",
+    "cumulus",
+    "cumulus-cocoa",
+    "cumulus-qt",
+    "cumulus-gui",
 ):
     try:
         FROZEN = "Briefcase-Version" in metadata(package) or FROZEN
@@ -33,16 +33,16 @@ for package in (
         pass
 
 # app
-APP_NAME = "Maestral"
-BUNDLE_ID = "com.samschott.maestral"
-APP_ICON_PATH = resource_path("maestral.resources", "maestral.png").__enter__()
+APP_NAME = "Cumulus"
+BUNDLE_ID = "com.cumulus.app"
+APP_ICON_PATH = resource_path("cumulus.resources", "maestral.png").__enter__()
 ENV = {"PYTHONOPTIMIZE": "2", "LC_CTYPE": "UTF-8"}
-DEFAULT_CONFIG_NAME = "maestral"
+DEFAULT_CONFIG_NAME = "cumulus"
 
 # sync
-OLD_REV_FILE = ".maestral"
+OLD_REV_FILE = ".cumulus"
 MIGNORE_FILE = ".mignore"
-FILE_CACHE = ".maestral.cache"
+FILE_CACHE = ".cumulus.cache"
 
 EXCLUDED_FILE_NAMES = frozenset(
     [
@@ -100,4 +100,4 @@ IS_LINUX = platform.system() == "Linux"
 
 # urls
 # TODO: Update to point to the fork's releases URL.
-GITHUB_RELEASES_API = "https://api.github.com/repos/samschott/maestral/releases"
+GITHUB_RELEASES_API = "https://api.github.com/repos/samschott/cumulus/releases"

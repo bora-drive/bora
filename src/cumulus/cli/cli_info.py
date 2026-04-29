@@ -284,8 +284,8 @@ def ls(m: Maestral, long: bool, sync_path: str, include_deleted: bool) -> None:
 )
 def config_files(clean: bool) -> None:
     from ..config import (
-        MaestralConfig,
-        MaestralState,
+        CumulusConfig,
+        CumulusState,
         list_configs,
         remove_configuration,
     )
@@ -294,7 +294,7 @@ def config_files(clean: bool) -> None:
     if clean:
         # Clean up stale config files.
         for name in list_configs():
-            conf = MaestralConfig(name)
+            conf = CumulusConfig(name)
             dbid = conf.get("auth", "account_id")
 
             if dbid == "" and not is_running(name):
@@ -305,8 +305,8 @@ def config_files(clean: bool) -> None:
         # Display config files.
         table = rich_table("Config name", "Account", "Path")
         for name in list_configs():
-            conf = MaestralConfig(name)
-            state = MaestralState(name)
+            conf = CumulusConfig(name)
+            state = CumulusState(name)
 
             table.add_row(
                 name,

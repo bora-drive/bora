@@ -1,5 +1,5 @@
 """
-This module handles starting the maestral daemon on user login and supports multiple
+This module handles starting the cumulus daemon on user login and supports multiple
 platform specific backends such as launchd or systemd.
 
 Note that launchd agents will not show as "login items" in macOS system preferences. As
@@ -29,7 +29,7 @@ from typing import Any
 from importlib.metadata import PackageNotFoundError, files
 
 from .constants import BUNDLE_ID, ENV, FROZEN, IS_LINUX, IS_MACOS
-from .exceptions import MaestralApiError
+from .exceptions import CumulusApiError
 
 # local imports
 from .utils.appdirs import get_conf_path, get_data_path, get_home_dir
@@ -118,13 +118,13 @@ class AutoStartSystemd(AutoStartBase):
         res = subprocess.run(["systemctl", "--user", "enable", self.service_name])
 
         if res.returncode != 0:
-            raise MaestralApiError("Could not enable autostart", str(res.stderr))
+            raise CumulusApiError("Could not enable autostart", str(res.stderr))
 
     def disable(self) -> None:
         res = subprocess.run(["systemctl", "--user", "disable", self.service_name])
 
         if res.returncode != 0:
-            raise MaestralApiError("Could not disable autostart", str(res.stderr))
+            raise CumulusApiError("Could not disable autostart", str(res.stderr))
 
     @property
     def enabled(self) -> bool:
@@ -226,7 +226,7 @@ class AutoStartXDGDesktop(AutoStartBase):
             os.chmod(self.destination, st.st_mode | stat.S_IEXEC)
 
         except Exception as exc:
-            raise MaestralApiError("Could not enable autostart", exc.args[0])
+            raise CumulusApiError("Could not enable autostart", exc.args[0])
 
     def disable(self) -> None:
         try:
@@ -234,7 +234,7 @@ class AutoStartXDGDesktop(AutoStartBase):
         except (FileNotFoundError, NotADirectoryError):
             pass
         except Exception as exc:
-            raise MaestralApiError("Could not enable autostart", exc.args[0])
+            raise CumulusApiError("Could not enable autostart", exc.args[0])
 
     @property
     def enabled(self) -> bool:
@@ -318,7 +318,7 @@ class AutoStart:
             ]
             stop_cmd = [sys.executable, "--cli", "stop", "--config-name", config_name]
         else:
-            command_location = get_command_path("maestral", "maestral")
+            command_location = get_command_path("cumulus", "cumulus")
             start_cmd = [
                 command_location,
                 "start",
@@ -344,7 +344,7 @@ class AutoStart:
             )
 
             self._impl = AutoStartSystemd(
-                service_name="maestral-daemon@maestral.service",
+                service_name="cumulus-daemon@cumulus.service",
                 start_cmd=" ".join(start_cmd),
                 unit_dict={"Description": "Maestral daemon for the config %i"},
                 service_dict={

@@ -40,7 +40,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 # local imports
 from . import __version__
-from .config import MaestralState
+from .config import CumulusState
 # DROPBOX_APP_KEY removed - Google OAuth credentials loaded differently.
 # This entire client.py will be rewritten in Phase 5.
 DROPBOX_APP_KEY = "2jmbq42w7vof78h"  # legacy, kept for now until client.py rewrite
@@ -69,12 +69,12 @@ from .core import (
 from .errorhandling import (
     CONNECTION_ERRORS,
     convert_api_errors,
-    dropbox_to_maestral_error,
+    dropbox_to_cumulus_error,
 )
 from .exceptions import (
     DataChangedError,
     DataCorruptionError,
-    MaestralApiError,
+    CumulusApiError,
     NotFoundError,
     NotLinkedError,
     PathError,
@@ -184,15 +184,15 @@ class DropboxClient:
 
     All Dropbox SDK exceptions, OSErrors from the local file system API and connection
     errors will be caught and reraised as a subclass of
-    :exc:`maestral.exceptions.MaestralApiError`.
+    :exc:`cumulus.exceptions.CumulusApiError`.
 
     This class can be used as a context manager to clean up any network resources from
     the API requests.
 
     :Example:
 
-        >>> from maestral.client import DropboxClient
-        >>> with DropboxClient("maestral") as client:
+        >>> from cumulus.client import DropboxClient
+        >>> with DropboxClient("cumulus") as client:
         ...     res = client.list_folder("/")
         >>> print(res.entries)
 
@@ -229,9 +229,9 @@ class DropboxClient:
         self._auth_flow: DropboxOAuth2FlowNoRedirect | None = None
         self._cred_storage = cred_storage
 
-        self._state = MaestralState(config_name)
+        self._state = CumulusState(config_name)
         self._logger = scoped_logger(__name__, self.config_name)
-        self._dropbox_sdk_logger = scoped_logger("maestral.dropbox", self.config_name)
+        self._dropbox_sdk_logger = scoped_logger("cumulus.dropbox", self.config_name)
         self._dropbox_sdk_logger.info = self._dropbox_sdk_logger.debug  # type: ignore
 
         self._timeout = timeout
@@ -566,7 +566,7 @@ class DropboxClient:
 
         The root namespace will change when the user joins or leaves a Dropbox Team with
         Team Spaces. If this happens, API calls using the old root namespace will raise
-        a :exc:`maestral.exceptions.PathRootError`. Use this method to update to the new
+        a :exc:`cumulus.exceptions.PathRootError`. Use this method to update to the new
         root namespace.
 
         See https://developers.dropbox.com/dbx-team-files-guide and
@@ -575,7 +575,7 @@ class DropboxClient:
 
         .. note:: We don't automatically switch root namespaces because API users may
             want to take action when the path root has changed before making further API
-            calls. Be prepared to handle :exc:`maestral.exceptions.PathRootError`
+            calls. Be prepared to handle :exc:`cumulus.exceptions.PathRootError`
             and act accordingly for all methods.
 
         :param root_info: :class:`core.RootInfo` describing the path root. Use
@@ -594,7 +594,7 @@ class DropboxClient:
             actual_root_type = "team"
             actual_home_path = root_info.home_path
         else:
-            raise MaestralApiError(
+            raise CumulusApiError(
                 "Unknown root namespace type",
                 f"Got {root_info!r} but expected UserRootInfo or TeamRootInfo.",
             )
@@ -1085,7 +1085,7 @@ class DropboxClient:
 
     def remove_batch(
         self, entries: Sequence[tuple[str, str | None]], batch_size: int = 900
-    ) -> list[FileMetadata | FolderMetadata | MaestralApiError]:
+    ) -> list[FileMetadata | FolderMetadata | CumulusApiError]:
         """
         Deletes multiple items on Dropbox in a batch job.
 
@@ -1100,7 +1100,7 @@ class DropboxClient:
         batch_size = clamp(batch_size, 1, 1000)
 
         res_entries = []
-        result_list: list[FileMetadata | FolderMetadata | MaestralApiError] = []
+        result_list: list[FileMetadata | FolderMetadata | CumulusApiError] = []
 
         # Up two ~ 1,000 entries allowed per batch:
         # https://www.dropbox.com/developers/reference/data-ingress-guide
@@ -1153,7 +1153,7 @@ class DropboxClient:
                     user_message_locale="",
                     request_id="",
                 )
-                sync_err = dropbox_to_maestral_error(exc, remote_path=entries[i][0])
+                sync_err = dropbox_to_cumulus_error(exc, remote_path=entries[i][0])
                 result_list.append(sync_err)
 
         return result_list
@@ -1201,7 +1201,7 @@ class DropboxClient:
         batch_size: int = 900,
         autorename: bool = False,
         force_async: bool = False,
-    ) -> list[FolderMetadata | MaestralApiError]:
+    ) -> list[FolderMetadata | CumulusApiError]:
         """
         Creates multiple folders on Dropbox in a batch job.
 
@@ -1217,7 +1217,7 @@ class DropboxClient:
         batch_size = clamp(batch_size, 1, 1000)
 
         entries = []
-        result_list: list[FolderMetadata | MaestralApiError] = []
+        result_list: list[FolderMetadata | CumulusApiError] = []
 
         with convert_api_errors():
             # Up two ~ 1,000 entries allowed per batch:
@@ -1261,7 +1261,7 @@ class DropboxClient:
                     user_message_locale="",
                     request_id="",
                 )
-                sync_err = dropbox_to_maestral_error(exc, remote_path=remote_paths[i])
+                sync_err = dropbox_to_cumulus_error(exc, remote_path=remote_paths[i])
                 result_list.append(sync_err)
 
         return result_list
@@ -1312,15 +1312,15 @@ class DropboxClient:
                     user_message_text="",
                     request_id="",
                 )
-                raise dropbox_to_maestral_error(exc)
+                raise dropbox_to_cumulus_error(exc)
             else:
-                raise MaestralApiError(
+                raise CumulusApiError(
                     "Could not create shared folder",
                     "Unexpected response from sharing/check_share_job_status "
                     f"endpoint: {res}.",
                 )
         else:
-            raise MaestralApiError(
+            raise CumulusApiError(
                 "Could not create shared folder",
                 f"Unexpected response from sharing/share_folder endpoint: {res}.",
             )

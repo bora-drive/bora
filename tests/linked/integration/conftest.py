@@ -4,13 +4,13 @@ import time
 
 import pytest
 
-import maestral.manager
-from maestral.client import DropboxClient
-from maestral.config import remove_configuration
-from maestral.exceptions import AuthError, NotFoundError
-from maestral.main import Maestral
-from maestral.utils.appdirs import get_home_dir
-from maestral.utils.path import delete, generate_cc_name
+import cumulus.manager
+from cumulus.client import DropboxClient
+from cumulus.config import remove_configuration
+from cumulus.exceptions import AuthError, NotFoundError
+from cumulus.main import Maestral
+from cumulus.utils.appdirs import get_home_dir
+from cumulus.utils.path import delete, generate_cc_name
 
 fsevents_logger = logging.getLogger("fsevents")
 fsevents_logger.setLevel(logging.DEBUG)
@@ -63,19 +63,19 @@ def m(pytestconfig, test_lock):
     if pytestconfig.option.OBSERVER == "inotify":
         from watchdog.observers.inotify import InotifyObserver
 
-        maestral.manager.Observer = InotifyObserver
+        cumulus.manager.Observer = InotifyObserver
     elif pytestconfig.option.OBSERVER == "fsevents":
         from watchdog.observers.fsevents import FSEventsObserver
 
-        maestral.manager.Observer = FSEventsObserver
+        cumulus.manager.Observer = FSEventsObserver
     elif pytestconfig.option.OBSERVER == "kqueue":
         from watchdog.observers.kqueue import KqueueObserver
 
-        maestral.manager.Observer = KqueueObserver
+        cumulus.manager.Observer = KqueueObserver
     elif pytestconfig.option.OBSERVER == "polling":
-        from maestral.fsevents.polling import OrderedPollingObserver
+        from cumulus.fsevents.polling import OrderedPollingObserver
 
-        maestral.manager.Observer = OrderedPollingObserver
+        cumulus.manager.Observer = OrderedPollingObserver
 
     config_name = "test-config"
 

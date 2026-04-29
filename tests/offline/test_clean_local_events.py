@@ -9,10 +9,10 @@ from watchdog.events import (
     FileMovedEvent,
 )
 
-from maestral.client import DropboxClient
-from maestral.config import remove_configuration
-from maestral.keyring import CredentialStorage
-from maestral.sync import SyncEngine
+from cumulus.client import DropboxClient
+from cumulus.config import remove_configuration
+from cumulus.keyring import CredentialStorage
+from cumulus.sync import SyncEngine
 
 
 @pytest.fixture

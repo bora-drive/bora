@@ -4,9 +4,9 @@ import stat
 import pytest
 import xattr
 
-from maestral.constants import IS_LINUX
-from maestral.utils.appdirs import get_home_dir
-from maestral.utils.path import (
+from cumulus.constants import IS_LINUX
+from cumulus.utils.appdirs import get_home_dir
+from cumulus.utils.path import (
     get_existing_equivalent_paths,
     is_child,
     is_fs_case_sensitive,

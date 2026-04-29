@@ -8,17 +8,17 @@ import uuid
 import pytest
 from Pyro5.api import Proxy
 
-from maestral.daemon import (
+from cumulus.daemon import (
     CommunicationError,
     Lock,
     MaestralProxy,
     Start,
     Stop,
-    start_maestral_daemon_process,
-    stop_maestral_daemon_process,
+    start_cumulus_daemon_process,
+    stop_cumulus_daemon_process,
 )
-from maestral.exceptions import NotLinkedError
-from maestral.main import Maestral
+from cumulus.exceptions import NotLinkedError
+from cumulus.main import Maestral
 
 # locking tests
 
@@ -106,7 +106,7 @@ def test_locking_multiprocess(tmp_path):
     # acquire lock from different process
 
     cmd = (
-        "import time; from maestral.daemon import Lock; "
+        "import time; from cumulus.daemon import Lock; "
         f"l = Lock.singleton({path!r}); l.acquire(); "
         "time.sleep(60);"
     )
@@ -141,20 +141,20 @@ def test_locking_multiprocess(tmp_path):
 
 def test_lifecycle(config_name: str) -> None:
     # start daemon process
-    res_start = start_maestral_daemon_process(config_name, timeout=20)
+    res_start = start_cumulus_daemon_process(config_name, timeout=20)
 
     assert res_start is Start.Ok
 
     # retry start daemon process
-    res_start = start_maestral_daemon_process(config_name, timeout=20)
+    res_start = start_cumulus_daemon_process(config_name, timeout=20)
     assert res_start is Start.AlreadyRunning
 
     # stop daemon
-    res_stop = stop_maestral_daemon_process(config_name)
+    res_stop = stop_cumulus_daemon_process(config_name)
     assert res_stop is Stop.Ok
 
     # retry stop daemon
-    res_stop = stop_maestral_daemon_process(config_name)
+    res_stop = stop_cumulus_daemon_process(config_name)
     assert res_stop is Stop.NotRunning
 
 
@@ -163,7 +163,7 @@ def test_lifecycle(config_name: str) -> None:
 
 def test_connection(config_name: str) -> None:
     # start daemon process
-    res_start = start_maestral_daemon_process(config_name, timeout=20)
+    res_start = start_cumulus_daemon_process(config_name, timeout=20)
     assert res_start is Start.Ok
 
     # create proxy
@@ -173,7 +173,7 @@ def test_connection(config_name: str) -> None:
         assert isinstance(m._m, Proxy)
 
     # stop daemon
-    res_stop = stop_maestral_daemon_process(config_name)
+    res_stop = stop_cumulus_daemon_process(config_name)
     assert res_stop is Stop.Ok
 
 
@@ -191,7 +191,7 @@ def test_fallback(config_name: str) -> None:
 
 def test_remote_exceptions(config_name: str) -> None:
     # start daemon process
-    start_maestral_daemon_process(config_name, timeout=20)
+    start_cumulus_daemon_process(config_name, timeout=20)
 
     # create proxy and call a remote method which raises an error
     with MaestralProxy(config_name) as m:
@@ -199,4 +199,4 @@ def test_remote_exceptions(config_name: str) -> None:
             m.get_account_info()
 
     # stop daemon
-    stop_maestral_daemon_process(config_name)
+    stop_cumulus_daemon_process(config_name)

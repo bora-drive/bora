@@ -32,6 +32,6 @@ def freeze_support():
     if parsed_args.cli:
         from .cli_main import main
 
-        sys.argv = ["maestral"] + remaining
-        main(prog_name="maestral")
+        sys.argv = ["cumulus"] + remaining
+        main(prog_name="cumulus")
         sys.exit()

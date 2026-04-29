@@ -2,22 +2,22 @@
 This module defines Maestral's error classes. It should be kept free of memory heavy
 imports.
 
-All errors inherit from :exc:`MaestralApiError` which has title and message attributes
+All errors inherit from :exc:`CumulusApiError` which has title and message attributes
 to display the error to the user. Errors which are related to syncing a specific
-file or folder inherit from :exc:`SyncError`, a subclass of :exc:`MaestralApiError`.
+file or folder inherit from :exc:`SyncError`, a subclass of :exc:`CumulusApiError`.
 """
 
 from __future__ import annotations
 
 
-class MaestralApiError(Exception):
+class CumulusApiError(Exception):
     """Base class for Maestral errors
 
-    MaestralApiError provides attributes that can be used to generate human-readable
+    CumulusApiError provides attributes that can be used to generate human-readable
     error messages and metadata regarding affected file paths (if any).
 
     Errors originating from the remote API or the 'local API' both inherit from
-    MaestralApiError.
+    CumulusApiError.
 
     :param title: A short description of the error type. This can be used in a CLI or
         GUI to give a short error summary.
@@ -76,7 +76,7 @@ class MaestralApiError(Exception):
 # ==== regular sync errors =============================================================
 
 
-class SyncError(MaestralApiError):
+class SyncError(CumulusApiError):
     """Base class for recoverable sync issues."""
 
 
@@ -160,53 +160,53 @@ class SymlinkError(SyncError):
 # ==== errors which are not related to a specific sync event ===========================
 
 
-class ConnectionError(MaestralApiError):
+class ConnectionError(CumulusApiError):
     """Raised when the connection to the remote server fails."""
 
 
 DropboxConnectionError = ConnectionError  # backward compat
 
 
-class CancelledError(MaestralApiError):
+class CancelledError(CumulusApiError):
     """Raised when syncing is cancelled by the user."""
 
 
-class NotLinkedError(MaestralApiError):
+class NotLinkedError(CumulusApiError):
     """Raised when no remote account is linked."""
 
 
-class InvalidDbidError(MaestralApiError):
+class InvalidDbidError(CumulusApiError):
     """Raised when the given ID does not correspond to an existing account."""
 
 
-class KeyringAccessError(MaestralApiError):
+class KeyringAccessError(CumulusApiError):
     """Raised when retrieving a saved auth token from the user keyring fails."""
 
 
-class NoSyncDirError(MaestralApiError):
+class NoSyncDirError(CumulusApiError):
     """Raised when the local sync folder cannot be found."""
 
 
 NoDropboxDirError = NoSyncDirError  # backward compat
 
 
-class CacheDirError(MaestralApiError):
+class CacheDirError(CumulusApiError):
     """Raised when creating the cache directory fails."""
 
 
-class InotifyError(MaestralApiError):
+class InotifyError(CumulusApiError):
     """Raised when the local sync folder is too large to monitor with inotify."""
 
 
-class OutOfMemoryError(MaestralApiError):
+class OutOfMemoryError(CumulusApiError):
     """Raised when there is insufficient memory to complete an operation."""
 
 
-class DatabaseError(MaestralApiError):
+class DatabaseError(CumulusApiError):
     """Raised when reading or writing to the database fails."""
 
 
-class AuthError(MaestralApiError):
+class AuthError(CumulusApiError):
     """Raised when authentication fails."""
 
 
@@ -221,34 +221,34 @@ class TokenRevokedError(AuthError):
     """Raised when authentication fails because the user's token has been revoked."""
 
 
-class CursorResetError(MaestralApiError):
+class CursorResetError(CumulusApiError):
     """Raised when the cursor used for a longpoll or list-folder request has been
     invalidated. The server will very rarely invalidate a cursor. If this happens, a new
     cursor for the respective folder has to be obtained through files_list_folder. This
     may require re-syncing the entire sync folder."""
 
 
-class BadInputError(MaestralApiError):
+class BadInputError(CumulusApiError):
     """Raised when an API request is made with bad input. This should not happen
     during syncing but only in case of manual API calls."""
 
 
-class BusyError(MaestralApiError):
+class BusyError(CumulusApiError):
     """Raised when trying to perform an action which is only possible in the idle
     state and we cannot block or queue the job."""
 
 
-class UnsupportedFileTypeForDiff(MaestralApiError):
+class UnsupportedFileTypeForDiff(CumulusApiError):
     """Raised when a diff for an unsupported file type was issued."""
 
 
-class SharedLinkError(MaestralApiError):
+class SharedLinkError(CumulusApiError):
     """Raised when creating a shared link fails."""
 
 
-class PathRootError(MaestralApiError):
+class PathRootError(CumulusApiError):
     """Raised when making an API call with an invalid path root header."""
 
 
-class UpdateCheckError(MaestralApiError):
+class UpdateCheckError(CumulusApiError):
     """Raised when checking for updates fails."""

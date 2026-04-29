@@ -63,7 +63,7 @@ class RemotePath(click.ParamType):
     ) -> list[CompletionItem]:
         from click.shell_completion import CompletionItem
 
-        from ..config import MaestralConfig
+        from ..config import CumulusConfig
         from ..utils import removeprefix
 
         matches: list[str] = []
@@ -74,12 +74,12 @@ class RemotePath(click.ParamType):
         incomplete = incomplete.lstrip("/")
 
         # get the Maestral config for which to complete paths
-        config_name = ctx.params.get("config_name", "maestral") if ctx else "maestral"
+        config_name = ctx.params.get("config_name", "cumulus") if ctx else "cumulus"
 
         # get all matching paths in our local sync folder
         # TODO: query from server if not too slow
 
-        config = MaestralConfig(config_name)
+        config = CumulusConfig(config_name)
         sync_dir = config.get("sync", "path")
         local_incomplete = osp.join(sync_dir, incomplete)
         local_dirname = osp.dirname(local_incomplete)
@@ -171,7 +171,7 @@ class ConfigName(click.ParamType):
             else:
                 raise CliException(
                     f"Configuration '{value}' does not exist. "
-                    f"Use 'maestral config-files' to list all configurations."
+                    f"Use 'cumulus config-files' to list all configurations."
                 )
 
     def shell_complete(

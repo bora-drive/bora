@@ -53,16 +53,16 @@ __all__ = [
     "Stop",
     "Start",
     "Lock",
-    "maestral_lock",
-    "get_maestral_pid",
+    "cumulus_lock",
+    "get_cumulus_pid",
     "sockpath_for_config",
     "lockpath_for_config",
     "wait_for_startup",
     "is_running",
     "freeze_support",
-    "start_maestral_daemon",
-    "start_maestral_daemon_process",
-    "stop_maestral_daemon_process",
+    "start_cumulus_daemon",
+    "start_cumulus_daemon_process",
+    "stop_cumulus_daemon_process",
     "MaestralProxy",
     "CommunicationError",
 ]
@@ -75,7 +75,7 @@ WATCHDOG_PID = os.getenv("WATCHDOG_PID")
 IS_WATCHDOG = WATCHDOG_PID is None or WATCHDOG_PID == str(os.getpid())
 
 
-URI = "PYRO:maestral.{0}@{1}"
+URI = "PYRO:cumulus.{0}@{1}"
 Pyro5.config.THREADPOOL_SIZE_MIN = 2
 
 
@@ -90,11 +90,11 @@ def freeze_support() -> None:
     parsed_args, _ = parser.parse_known_args()
 
     if parsed_args.c:
-        template = r'.*start_maestral_daemon\("(?P<config_name>\S+)"\).*'
+        template = r'.*start_cumulus_daemon\("(?P<config_name>\S+)"\).*'
         match = re.match(template, parsed_args.c)
 
         if match:
-            start_maestral_daemon(match["config_name"])
+            start_cumulus_daemon(match["config_name"])
             sys.exit()
 
 
@@ -134,9 +134,9 @@ def serialize_api_types(obj: Any) -> dict[str, Any]:
 def deserialize_api_types(class_name: str, d: dict[str, Any]) -> Any:
     """
     Deserializes an API type. Allowed classes are defined in:
-        * :mod:`maestral.core`
-        * :mod:`maestral.model`
-        * :mod:`maestral.exceptions`
+        * :mod:`cumulus.core`
+        * :mod:`cumulus.model`
+        * :mod:`cumulus.exceptions`
 
     :param class_name: Name of class to deserialize.
     :param d: Dictionary of serialized class.
@@ -270,7 +270,7 @@ def _send_signal(pid: int, sig: int) -> None:
         pass
 
 
-def maestral_lock(config_name: str) -> Lock:
+def cumulus_lock(config_name: str) -> Lock:
     """
     Returns an inter-process and inter-thread lock for Maestral. This is a wrapper
     around :class:`Lock` which fills out the appropriate lockfile path for the given
@@ -280,7 +280,7 @@ def maestral_lock(config_name: str) -> Lock:
     :returns: Lock instance for the config name
     """
     name = f"{config_name}.lock"
-    path = get_runtime_path("maestral")
+    path = get_runtime_path("cumulus")
     return Lock.singleton(os.path.join(path, name))
 
 
@@ -292,7 +292,7 @@ def sockpath_for_config(config_name: str) -> str:
     :param config_name: The name of the Maestral configuration.
     :returns: Socket path.
     """
-    return get_runtime_path("maestral", f"{config_name}.sock")
+    return get_runtime_path("cumulus", f"{config_name}.sock")
 
 
 def lockpath_for_config(config_name: str) -> str:
@@ -303,17 +303,17 @@ def lockpath_for_config(config_name: str) -> str:
     :param config_name: The name of the Maestral configuration.
     :returns: Path of lock file to use.
     """
-    return get_runtime_path("maestral", f"{config_name}.lock")
+    return get_runtime_path("cumulus", f"{config_name}.lock")
 
 
-def get_maestral_pid(config_name: str) -> int | None:
+def get_cumulus_pid(config_name: str) -> int | None:
     """
     Returns the PID of the daemon if it is running, ``None`` otherwise.
 
     :param config_name: The name of the Maestral configuration.
     :returns: The daemon's PID.
     """
-    return maestral_lock(config_name).locking_pid()
+    return cumulus_lock(config_name).locking_pid()
 
 
 def is_running(config_name: str) -> bool:
@@ -323,12 +323,12 @@ def is_running(config_name: str) -> bool:
     :param config_name: The name of the Maestral configuration.
     :returns: Whether the daemon is running.
     """
-    return maestral_lock(config_name).locked()
+    return cumulus_lock(config_name).locked()
 
 
 def wait_for_startup(config_name: str, timeout: float = 30) -> None:
     """
-    Waits until we can communicate with the maestral daemon for ``config_name``.
+    Waits until we can communicate with the cumulus daemon for ``config_name``.
 
     :param config_name: Configuration to connect to.
     :param timeout: Timeout it seconds until we raise an error.
@@ -336,13 +336,13 @@ def wait_for_startup(config_name: str, timeout: float = 30) -> None:
         given timeout.
     """
     sock_name = sockpath_for_config(config_name)
-    maestral_daemon = Proxy(URI.format(config_name, "./u:" + sock_name))
+    cumulus_daemon = Proxy(URI.format(config_name, "./u:" + sock_name))
 
     t0 = time.time()
 
     while True:
         try:
-            maestral_daemon._pyroBind()
+            cumulus_daemon._pyroBind()
             return
         except Exception as exc:
             if time.time() - t0 > timeout:
@@ -350,20 +350,20 @@ def wait_for_startup(config_name: str, timeout: float = 30) -> None:
             else:
                 time.sleep(0.2)
         finally:
-            maestral_daemon._pyroRelease()
+            cumulus_daemon._pyroRelease()
 
 
 # ==== main functions to manage daemon =================================================
 
 
-def start_maestral_daemon(
-    config_name: str = "maestral", log_to_stderr: bool = False
+def start_cumulus_daemon(
+    config_name: str = "cumulus", log_to_stderr: bool = False
 ) -> None:
     """
     Starts the Maestral daemon with event loop in the current thread.
 
     Startup is race free: there will never be more than one daemon running with the same
-    config name. The daemon is a :class:`maestral.main.Maestral` instance which is
+    config name. The daemon is a :class:`cumulus.main.Maestral` instance which is
     exposed as Pyro daemon object and listens for requests on a unix domain socket. This
     call starts an asyncio event loop to process client requests and blocks until the
     event loop shuts down. On macOS, the event loop is integrated with Cocoa's
@@ -395,7 +395,7 @@ def start_maestral_daemon(
     dlogger.debug("Environment:\n%s", pformat(os.environ.copy()))
 
     # Acquire PID lock file.
-    lock = maestral_lock(config_name)
+    lock = cumulus_lock(config_name)
 
     if lock.acquire():
         dlogger.debug("Acquired daemon lock: %r", lock.path)
@@ -452,11 +452,11 @@ def start_maestral_daemon(
         except (FileNotFoundError, NotADirectoryError):
             pass
 
-        # Expose maestral as Pyro server.
+        # Expose cumulus as Pyro server.
         dlogger.debug("Creating Pyro daemon")
 
         shutdown_future = loop.create_future()
-        maestral_daemon = expose(Maestral)(
+        cumulus_daemon = expose(Maestral)(
             config_name,
             log_to_stderr=log_to_stderr,
             event_loop=loop,
@@ -466,7 +466,7 @@ def start_maestral_daemon(
         dlogger.debug("Starting event loop")
 
         with Daemon(unixsocket=sockpath) as daemon:
-            daemon.register(maestral_daemon, f"maestral.{config_name}")
+            daemon.register(cumulus_daemon, f"cumulus.{config_name}")
 
             # Reduce Pyro's housekeeping frequency from 2 sec to 20 sec.
             # This avoids constantly waking the CPU when we are idle.
@@ -479,7 +479,7 @@ def start_maestral_daemon(
             # Handle sigterm gracefully.
             signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
             for s in signals:
-                loop.add_signal_handler(s, maestral_daemon.shutdown_daemon)
+                loop.add_signal_handler(s, cumulus_daemon.shutdown_daemon)
 
             loop.run_until_complete(shutdown_future)
 
@@ -498,11 +498,11 @@ def start_maestral_daemon(
         lock.release()
 
 
-def start_maestral_daemon_process(
-    config_name: str = "maestral", timeout: float = 30
+def start_cumulus_daemon_process(
+    config_name: str = "cumulus", timeout: float = 30
 ) -> Start:
     """
-    Starts the Maestral daemon in a new process by calling :func:`start_maestral_daemon`.
+    Starts the Maestral daemon in a new process by calling :func:`start_cumulus_daemon`.
 
     Startup is race free: there will never be more than one daemon running for the same
     config name. This function will use :obj:`sys.executable` as a Python executable to
@@ -524,7 +524,7 @@ def start_maestral_daemon_process(
     # Protect against injection.
     cc = quote(config_name).strip("'")
 
-    script = f'import maestral.daemon; maestral.daemon.start_maestral_daemon("{cc}")'
+    script = f'import cumulus.daemon; cumulus.daemon.start_cumulus_daemon("{cc}")'
 
     env = os.environ.copy()
     env.update(ENV)
@@ -555,10 +555,10 @@ def start_maestral_daemon_process(
         return Start.Ok
 
 
-def stop_maestral_daemon_process(
-    config_name: str = "maestral", timeout: float = 10
+def stop_cumulus_daemon_process(
+    config_name: str = "cumulus", timeout: float = 10
 ) -> Stop:
-    """Stops a maestral daemon process by finding its PID and shutting it down.
+    """Stops a cumulus daemon process by finding its PID and shutting it down.
 
     This function first tries to shut down Maestral gracefully. If this fails and we
     know its PID, it will send SIGTERM. If that fails as well, it will send SIGKILL to
@@ -573,7 +573,7 @@ def stop_maestral_daemon_process(
     if not is_running(config_name):
         return Stop.NotRunning
 
-    pid = get_maestral_pid(config_name)
+    pid = get_cumulus_pid(config_name)
 
     if not pid:
         # Cannot send SIGTERM to process if we don't know its pid.
@@ -604,15 +604,15 @@ class MaestralProxy(ContextManager["MaestralProxy"]):
 
         Use MaestralProxy as a context manager:
 
-        >>> import src.maestral.cli.cli_info
+        >>> import cumulus.cli.cli_info
         >>> with MaestralProxy() as m:
-        ...     print(src.maestral.cli.cli_info.status)
+        ...     print(cumulus.cli.cli_info.status)
 
         Use MaestralProxy directly:
 
-        >>> import src.maestral.cli.cli_info
+        >>> import cumulus.cli.cli_info
         >>> m = MaestralProxy()
-        >>> print(src.maestral.cli.cli_info.status)
+        >>> print(cumulus.cli.cli_info.status)
         >>> m._disconnect()
 
     :ivar _is_fallback: Whether we are using an actual Maestral instance as fallback
@@ -627,7 +627,7 @@ class MaestralProxy(ContextManager["MaestralProxy"]):
 
     _m: Maestral | Proxy
 
-    def __init__(self, config_name: str = "maestral", fallback: bool = False) -> None:
+    def __init__(self, config_name: str = "cumulus", fallback: bool = False) -> None:
         self._config_name = config_name
         self._is_fallback = False
 

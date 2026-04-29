@@ -3,7 +3,7 @@ import configparser as cp
 import pytest
 from packaging.version import Version
 
-from maestral.config.user import UserConfig
+from cumulus.config.user import UserConfig
 
 from .conftest import CONF_VERSION, DEFAULTS_CONFIG
 

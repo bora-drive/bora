@@ -1,8 +1,8 @@
 from datetime import datetime
 from queue import Queue
 
-from maestral.models import ChangeType, ItemType, SyncDirection, SyncEvent, SyncStatus
-from maestral.sync import ActivityNode, ActivityTree
+from cumulus.models import ChangeType, ItemType, SyncDirection, SyncEvent, SyncStatus
+from cumulus.sync import ActivityNode, ActivityTree
 
 EVENT1 = SyncEvent(
     remote_path="/d0/file1.txt",

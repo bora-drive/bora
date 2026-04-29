@@ -33,13 +33,13 @@ KILLED = click.style("[KILLED]", fg="red")
 
 
 def stop_daemon_with_cli_feedback(config_name: str) -> None:
-    """Wrapper around :meth:`daemon.stop_maestral_daemon_process`
+    """Wrapper around :meth:`daemon.stop_cumulus_daemon_process`
     with command line feedback."""
 
-    from ..daemon import Stop, stop_maestral_daemon_process
+    from ..daemon import Stop, stop_cumulus_daemon_process
 
     echo("Stopping Maestral...", nl=False)
-    res = stop_maestral_daemon_process(config_name)
+    res = stop_cumulus_daemon_process(config_name)
     if res == Stop.Ok:
         echo("\rStopping Maestral...        " + OK)
     elif res == Stop.NotRunning:
@@ -168,8 +168,8 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         MaestralProxy,
         Start,
         is_running,
-        start_maestral_daemon,
-        start_maestral_daemon_process,
+        start_cumulus_daemon,
+        start_cumulus_daemon_process,
         wait_for_startup,
     )
 
@@ -232,12 +232,12 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         setup_thread = threading.Thread(target=startup_dialog, daemon=True)
         setup_thread.start()
 
-        start_maestral_daemon(config_name, log_to_stderr=verbose)
+        start_cumulus_daemon(config_name, log_to_stderr=verbose)
 
     else:
         echo("Starting Maestral...", nl=False)
 
-        res = start_maestral_daemon_process(config_name)
+        res = start_cumulus_daemon_process(config_name)
 
         if res == Start.Ok:
             echo("\rStarting Maestral...        " + OK)
@@ -265,14 +265,14 @@ def gui(config_name: str) -> None:
     from packaging.requirements import Requirement
     from packaging.version import Version
 
-    from ..daemon import start_maestral_daemon_process
+    from ..daemon import start_cumulus_daemon_process
 
-    # Find all entry points for "maestral_gui" registered by other packages.
-    gui_entry_points = entry_points(group="maestral_gui")
+    # Find all entry points for "cumulus_gui" registered by other packages.
+    gui_entry_points = entry_points(group="cumulus_gui")
 
     if len(gui_entry_points) == 0:
         raise CliException(
-            "No maestral GUI installed. Please run 'pip3 install maestral[gui]'."
+            "No cumulus GUI installed. Please run 'pip3 install cumulus[gui]'."
         )
 
     entry_point_names = [e.name for e in gui_entry_points]
@@ -289,10 +289,10 @@ def gui(config_name: str) -> None:
 
     entry_point = gui_entry_points[entry_point_names[index]]
 
-    if entry_point.name in {"maestral_cocoa", "maestral_qt"}:
-        # For 1st party GUIs "maestral_cocoa" or "maestral_qt", check if the installed
-        # version fulfills requirements in maestral's gui extra.
-        requirement_names = requires("maestral")
+    if entry_point.name in {"cumulus_cocoa", "cumulus_qt"}:
+        # For 1st party GUIs "cumulus_cocoa" or "cumulus_qt", check if the installed
+        # version fulfills requirements in cumulus's gui extra.
+        requirement_names = requires("cumulus")
         if requirement_names is not None:
             for name in requirement_names:
                 r = Requirement(name)
@@ -303,7 +303,7 @@ def gui(config_name: str) -> None:
                             f"{r.name}{r.specifier} required but you have {version_str}"
                         )
     # Start the daemon
-    res = start_maestral_daemon_process(config_name)
+    res = start_cumulus_daemon_process(config_name)
 
     # Run the GUI.
     run = entry_point.load()
@@ -395,10 +395,10 @@ def auth_unlink(yes: bool, config_name: str) -> None:
 @auth.command(name="status", help="View authentication status.")
 @existing_config_option
 def auth_status(config_name: str) -> None:
-    from ..config import MaestralConfig, MaestralState
+    from ..config import CumulusConfig, CumulusState
 
-    conf = MaestralConfig(config_name)
-    state = MaestralState(config_name)
+    conf = CumulusConfig(config_name)
+    state = CumulusState(config_name)
 
     dbid = conf.get("auth", "account_id")
     email = state.get("account", "email")

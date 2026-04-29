@@ -2,13 +2,13 @@ import logging
 
 from click.testing import CliRunner
 
-from maestral.autostart import AutoStart
-from maestral.cli import main
-from maestral.daemon import MaestralProxy, Start, start_maestral_daemon_process
-from maestral.logging import scoped_logger
-from maestral.main import Maestral
-from maestral.notify import level_name_to_number, level_number_to_name
-from maestral.utils.appdirs import get_log_path
+from cumulus.autostart import AutoStart
+from cumulus.cli import main
+from cumulus.daemon import MaestralProxy, Start, start_cumulus_daemon_process
+from cumulus.logging import scoped_logger
+from cumulus.main import Maestral
+from cumulus.notify import level_name_to_number, level_number_to_name
+from cumulus.utils.appdirs import get_log_path
 
 TEST_TIMEOUT = 60
 
@@ -68,12 +68,12 @@ def test_invalid_config() -> None:
         assert result.exit_code == 1, command
         assert (
             result.output == "! Configuration 'non-existent-config' does not exist. "
-            "Use 'maestral config-files' to list all configurations.\n"
+            "Use 'cumulus config-files' to list all configurations.\n"
         )
 
 
 def test_start_already_running(config_name: str) -> None:
-    res = start_maestral_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    res = start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
 
     assert res is Start.Ok
 
@@ -85,7 +85,7 @@ def test_start_already_running(config_name: str) -> None:
 
 
 def test_stop(config_name: str) -> None:
-    res = start_maestral_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    res = start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
     assert res is Start.Ok
 
     runner = CliRunner()
@@ -164,7 +164,7 @@ def test_excluded_remove_raises_not_running_error(m: Maestral) -> None:
 
 
 def test_notify_level(config_name: str) -> None:
-    start_maestral_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
     m = MaestralProxy(config_name)
 
     runner = CliRunner()
@@ -190,7 +190,7 @@ def test_notify_level(config_name: str) -> None:
 
 
 def test_notify_snooze(config_name: str) -> None:
-    start_maestral_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
     m = MaestralProxy(config_name)
 
     runner = CliRunner()
@@ -225,7 +225,7 @@ def test_log_level(m: Maestral) -> None:
 
 def test_log_show(m: Maestral) -> None:
     # log a message
-    logger = scoped_logger("maestral", m.config_name)
+    logger = scoped_logger("cumulus", m.config_name)
     logger.info("Hello from pytest!")
     runner = CliRunner()
     result = runner.invoke(main, ["log", "show", "-c", m.config_name])
@@ -236,7 +236,7 @@ def test_log_show(m: Maestral) -> None:
 
 def test_log_clear(m: Maestral) -> None:
     # log a message
-    logger = scoped_logger("maestral", m.config_name)
+    logger = scoped_logger("cumulus", m.config_name)
     logger.info("Hello from pytest!")
     runner = CliRunner()
     result = runner.invoke(main, ["log", "show", "-c", m.config_name])
@@ -252,7 +252,7 @@ def test_log_clear(m: Maestral) -> None:
     result = runner.invoke(main, ["log", "clear", "-c", m.config_name])
     assert result.exit_code == 0, result.output
 
-    logfile = get_log_path("maestral", f"{m.config_name}.log")
+    logfile = get_log_path("cumulus", f"{m.config_name}.log")
     with open(logfile) as f:
         log_content = f.read()
 

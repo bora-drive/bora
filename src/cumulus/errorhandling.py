@@ -1,6 +1,6 @@
 """
 This module contains methods and decorators to convert OSErrors and remote SDK
-exceptions to instances of :exc:`maestral.exceptions.MaestralApiError`.
+exceptions to instances of :exc:`cumulus.exceptions.CumulusApiError`.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from .exceptions import (
     InsufficientSpaceError,
     InvalidDbidError,
     IsAFolderError,
-    MaestralApiError,
+    CumulusApiError,
     NotAFolderError,
     NotFoundError,
     OutOfMemoryError,
@@ -53,8 +53,8 @@ from .utils.path import fs_max_lengths_for_path
 
 __all__ = [
     "CONNECTION_ERRORS",
-    "dropbox_to_maestral_error",
-    "os_to_maestral_error",
+    "dropbox_to_cumulus_error",
+    "os_to_cumulus_error",
     "convert_api_errors",
 ]
 
@@ -66,7 +66,7 @@ CONNECTION_ERRORS = (
     builtins.ConnectionError,
 )
 
-LocalError = Union[MaestralApiError, OSError]
+LocalError = Union[CumulusApiError, OSError]
 
 FT = TypeVar("FT", bound=Callable[..., Any])
 
@@ -81,7 +81,7 @@ def convert_api_errors(
     """
     A context manager that catches and re-raises instances of :exc:`OSError` and
     :exc:`dropbox.exceptions.DropboxException` as
-    :exc:`maestral.exceptions.MaestralApiError` or :exc:`ConnectionError`.
+    :exc:`cumulus.exceptions.CumulusApiError` or :exc:`ConnectionError`.
 
     :param remote_path: remote path associated with the error.
     :param local_path: Local path associated with the error.
@@ -89,7 +89,7 @@ def convert_api_errors(
     try:
         yield
     except (exceptions.DropboxException, ValidationError) as exc:
-        raise dropbox_to_maestral_error(exc, remote_path, local_path)
+        raise dropbox_to_cumulus_error(exc, remote_path, local_path)
     # Catch connection errors first, they may inherit from OSError.
     except CONNECTION_ERRORS:
         raise ConnectionError(
@@ -104,14 +104,14 @@ def convert_api_errors(
                 "Please check your internet connection and try again later.",
             )
         else:
-            raise os_to_maestral_error(exc, remote_path, local_path)
+            raise os_to_cumulus_error(exc, remote_path, local_path)
 
 
-def os_to_maestral_error(
+def os_to_cumulus_error(
     exc: OSError, remote_path: str | None = None, local_path: str | None = None
 ) -> LocalError:
     """
-    Converts a :exc:`OSError` to a :exc:`maestral.exceptions.MaestralApiError` and
+    Converts a :exc:`OSError` to a :exc:`cumulus.exceptions.CumulusApiError` and
     tries to add a reasonably informative error title and message.
 
     :param exc: Original OSError.
@@ -120,7 +120,7 @@ def os_to_maestral_error(
     :returns: Converted exception.
     """
     title = "Could not sync file or folder"
-    err_cls: type[MaestralApiError]
+    err_cls: type[CumulusApiError]
 
     if isinstance(exc, PermissionError):
         err_cls = InsufficientPermissionsError  # subclass of SyncError
@@ -174,30 +174,30 @@ def os_to_maestral_error(
         title = "Could not download file"
         text = "There is not enough space left on the selected drive."
     elif exc.errno == errno.ENOMEM:
-        err_cls = OutOfMemoryError  # subclass of MaestralApiError
+        err_cls = OutOfMemoryError  # subclass of CumulusApiError
         text = "Out of memory. Please reduce the number of memory consuming processes."
     elif exc.errno is not None:
         err_cls = FileReadError
         text = f"Could not access file. Errno {exc.errno}: {os.strerror(exc.errno)}."
     else:
-        err_cls = MaestralApiError
+        err_cls = CumulusApiError
         text = str(exc)
 
     local_path = local_path or exc.filename
 
-    maestral_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
-    maestral_exc.__cause__ = exc
+    cumulus_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
+    cumulus_exc.__cause__ = exc
 
-    return maestral_exc
+    return cumulus_exc
 
 
-def dropbox_to_maestral_error(
+def dropbox_to_cumulus_error(
     exc: exceptions.DropboxException | ValidationError | requests.HTTPError,
     remote_path: str | None = None,
     local_path: str | None = None,
-) -> MaestralApiError:
+) -> CumulusApiError:
     """
-    Converts a remote SDK exception to a :exc:`maestral.exceptions.MaestralApiError`
+    Converts a remote SDK exception to a :exc:`cumulus.exceptions.CumulusApiError`
     and tries to add a reasonably informative error title and message.
 
     :param exc: remote SDK exception..
@@ -207,7 +207,7 @@ def dropbox_to_maestral_error(
     """
     title = "An unexpected error occurred"
     text = "Please contact the developer with the traceback information from the logs."
-    err_cls = MaestralApiError
+    err_cls = CumulusApiError
 
     # ---- remote API Errors ----------------------------------------------------------
     if isinstance(exc, exceptions.ApiError):
@@ -315,7 +315,7 @@ def dropbox_to_maestral_error(
                 write_error = error.get_path().reason  # Returns UploadWriteFailed.
                 text, err_cls = get_write_error_msg(write_error)
             elif error.is_properties_error():
-                # Occurs only for programming error in maestral.
+                # Occurs only for programming error in cumulus.
                 text = "Invalid property group provided."
             elif error.is_payload_too_large():
                 text = "Can only upload in chunks of at most 150 MB."
@@ -327,10 +327,10 @@ def dropbox_to_maestral_error(
         elif isinstance(error, files.UploadSessionStartError):
             title = "Could not upload file"
             if error.is_concurrent_session_close_not_allowed():
-                # Occurs only for programming error in maestral.
+                # Occurs only for programming error in cumulus.
                 text = "Can not start a closed concurrent upload session."
             elif error.is_concurrent_session_data_not_allowed():
-                # Occurs only for programming error in maestral.
+                # Occurs only for programming error in cumulus.
                 text = (
                     "Uploading data not allowed when starting concurrent upload "
                     "session."
@@ -351,7 +351,7 @@ def dropbox_to_maestral_error(
                 write_error = error.get_path()
                 text, err_cls = get_write_error_msg(write_error)
             elif error.is_properties_error():
-                # Occurs only for programming error in maestral.
+                # Occurs only for programming error in cumulus.
                 text = "Invalid property group provided."
             elif error.is_too_many_write_operations():
                 text = (
@@ -613,10 +613,10 @@ def dropbox_to_maestral_error(
     elif isinstance(exc, exceptions.HttpError):
         text = exc.body
 
-    maestral_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
-    maestral_exc.__cause__ = exc
+    cumulus_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
+    cumulus_exc.__cause__ = exc
 
-    return maestral_exc
+    return cumulus_exc
 
 
 def get_write_error_msg(write_error: files.WriteError) -> tuple[str, type[SyncError]]:

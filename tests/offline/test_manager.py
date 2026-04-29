@@ -3,11 +3,11 @@ from unittest import mock
 
 import pytest
 
-from maestral.core import AccountType, FullAccount, TeamRootInfo, UserRootInfo
-from maestral.exceptions import NoSyncDirError
-from maestral.main import Maestral
-from maestral.utils.appdirs import get_home_dir
-from maestral.utils.path import delete, generate_cc_name
+from cumulus.core import AccountType, FullAccount, TeamRootInfo, UserRootInfo
+from cumulus.exceptions import NoSyncDirError
+from cumulus.main import Maestral
+from cumulus.utils.appdirs import get_home_dir
+from cumulus.utils.path import delete, generate_cc_name
 
 
 def fake_linked(m: Maestral, account_info: FullAccount) -> None:
