@@ -129,15 +129,18 @@ Neither TODO.md Phase 10 item "Update `_connection_helper` to check Google Drive
 
 ---
 
-## 10. Test Suite Still References Dropbox SDK
+## 10. ~~Test Suite Still References Dropbox SDK~~ (RESOLVED)
 
-The test suite has **12 files** that import from the `dropbox` SDK and **31 test files** total. Phase 12 of TODO.md lists porting tests, but:
-- The tests can't even be *imported* until `client.py` and `errorhandling.py` are rewritten
-- No test strategy is defined for the path cache (the most complex new component)
-- Integration tests require a test Google account — no setup instructions exist
-- The TODO doesn't mention mocking strategy for Google API calls
+**Decisions:**
+- Mocking: use `google-api-python-client`'s built-in `HttpMock` for canned HTTP responses
+- Path cache tests: Phase 4 deliverable (red/green TDD alongside implementation)
+- All new code developed with red/green TDD
+- Integration tests: dedicated test Google account (user will set up)
+- Existing 12 test files that `import dropbox` will be rewritten in Phase 12
 
-**Recommendation:** Add to Phase 12: "Define mocking approach for `googleapiclient` (use `unittest.mock` or `google-api-python-client`'s built-in `HttpMock`)." Add path cache testing as a Phase 4 deliverable, not Phase 12.
+- TODO.md Phase 4: path cache tests already present, added TDD note
+- TODO.md Phase 12: added `HttpMock` mocking strategy, TDD requirement, integration test account setup
+- PLAN.md: no change needed (testing approach is a TODO-level detail)
 
 ---
 
