@@ -129,3 +129,46 @@ def test_core_metadata_has_remote_fields():
         content_hash="abc123",
     )
     assert fm.name == "test.txt"
+
+
+def test_pyproject_has_no_dropbox_dependency():
+    """pyproject.toml should not list dropbox as a dependency."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        data = tomllib.load(f)
+
+    deps = data["project"]["dependencies"]
+    for dep in deps:
+        assert not dep.startswith("dropbox"), f"Found dropbox dependency: {dep}"
+
+
+def test_pyproject_has_google_dependencies():
+    """pyproject.toml should list google API dependencies."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        data = tomllib.load(f)
+
+    deps = " ".join(data["project"]["dependencies"])
+    assert "google-api-python-client" in deps
+    assert "google-auth" in deps
+    assert "google-auth-oauthlib" in deps
+
+
+def test_pyproject_description_not_dropbox():
+    """Project description should not mention Dropbox."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        data = tomllib.load(f)
+
+    desc = data["project"]["description"]
+    assert "Dropbox" not in desc
+    assert "Google Drive" in desc or "sync" in desc.lower()
