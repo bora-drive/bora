@@ -25,12 +25,12 @@ if not ("DROPBOX_ACCESS_TOKEN" in os.environ or "DROPBOX_REFRESH_TOKEN" in os.en
 
 
 def _create_file_with_content(
-    m: Maestral, dbx_path: str, content: str | bytes
+    m: Maestral, remote_path: str, content: str | bytes
 ) -> FileMetadata:
     if isinstance(content, str):
         content = content.encode()
 
-    return m.client.dbx.files_upload(content, dbx_path, mode=files.WriteMode.overwrite)
+    return m.client.dbx.files_upload(content, remote_path, mode=files.WriteMode.overwrite)
 
 
 def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
@@ -51,7 +51,7 @@ def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
 
 def test_status_properties(m: Maestral) -> None:
     assert not m.pending_link
-    assert not m.pending_dropbox_folder
+    assert not m.pending_sync_folder
 
     assert m.status == IDLE
     assert m.running
@@ -66,7 +66,7 @@ def test_status_properties(m: Maestral) -> None:
 
 def test_file_status(m: Maestral) -> None:
     # test synced Dropbox folder
-    file_status = m.get_file_status(m.dropbox_path)
+    file_status = m.get_file_status(m.sync_path)
     assert file_status == FileStatus.Synced.value
 
     # test synced file
@@ -95,19 +95,19 @@ def test_file_status(m: Maestral) -> None:
     m.stop_sync()
     wait_for_idle(m)
 
-    file_status = m.get_file_status(m.dropbox_path)
+    file_status = m.get_file_status(m.sync_path)
     assert file_status == FileStatus.Unwatched.value
 
     m.start_sync()
     wait_for_idle(m)
 
     # test error status
-    invalid_local_folder = m.dropbox_path + "/test_folder\\"
+    invalid_local_folder = m.sync_path + "/test_folder\\"
     os.mkdir(invalid_local_folder)
     wait_for_idle(m)
 
     file_status = m.get_file_status(invalid_local_folder)
-    file_status_parent = m.get_file_status(m.dropbox_path)
+    file_status_parent = m.get_file_status(m.sync_path)
 
     assert file_status == FileStatus.Error.value
     assert file_status_parent == FileStatus.Error.value
@@ -117,9 +117,9 @@ def test_move_dropbox_folder(m: Maestral) -> None:
     new_dir_short = "~/New Dropbox"
     new_dir = osp.realpath(osp.expanduser(new_dir_short))
 
-    m.move_dropbox_directory(new_dir_short)
+    m.move_sync_directory(new_dir_short)
     assert osp.isdir(new_dir)
-    assert m.dropbox_path == new_dir
+    assert m.sync_path == new_dir
 
     wait_for_idle(m)
 
@@ -128,7 +128,7 @@ def test_move_dropbox_folder(m: Maestral) -> None:
 
 
 def test_move_dropbox_folder_to_itself(m: Maestral) -> None:
-    m.move_dropbox_directory(m.dropbox_path)
+    m.move_sync_directory(m.sync_path)
 
     # assert that sync is still running
     assert m.running
@@ -139,7 +139,7 @@ def test_move_dropbox_folder_to_existing(m: Maestral, tmp_path) -> None:
     new_dir.mkdir()
 
     with pytest.raises(FileExistsError):
-        m.move_dropbox_directory(str(new_dir))
+        m.move_sync_directory(str(new_dir))
 
     # assert that sync is still running
     assert m.running
@@ -160,7 +160,7 @@ def test_exclude_items(m: Maestral) -> None:
         "/selective_sync_test_folder/subfolder_1",
     ]
 
-    local_dirs = [m.to_local_path(dbx_path) for dbx_path in dbx_dirs]
+    local_dirs = [m.to_local_path(remote_path) for remote_path in dbx_dirs]
 
     # create folder structure
     for path in local_dirs:
@@ -185,9 +185,9 @@ def test_exclude_items(m: Maestral) -> None:
     assert m.excluded_status("") == "partially excluded"
     assert m.excluded_status("/independent_folder") == "included"
 
-    for dbx_path in dbx_dirs:
-        if dbx_path != "/independent_folder":
-            assert m.excluded_status(dbx_path) == "excluded"
+    for remote_path in dbx_dirs:
+        if remote_path != "/independent_folder":
+            assert m.excluded_status(remote_path) == "excluded"
 
 
 def test_include_items(m: Maestral) -> None:
@@ -212,8 +212,8 @@ def test_include_items(m: Maestral) -> None:
     assert osp.exists(m.to_local_path("/selective_sync_test_folder"))
     assert "/selective_sync_test_folder" not in m.excluded_items
 
-    for dbx_path in dbx_dirs:
-        assert m.excluded_status(dbx_path) == "included"
+    for remote_path in dbx_dirs:
+        assert m.excluded_status(remote_path) == "included"
 
     # check for fatal errors
     assert not m.fatal_errors
@@ -259,7 +259,7 @@ def test_selective_sync_global(m: Maestral) -> None:
         "/selective_sync_test_folder/subfolder_1",
     ]
 
-    local_dirs = [m.to_local_path(dbx_path) for dbx_path in dbx_dirs]
+    local_dirs = [m.to_local_path(remote_path) for remote_path in dbx_dirs]
 
     # create folder structure
     for path in local_dirs:
@@ -293,10 +293,10 @@ def test_selective_sync_global(m: Maestral) -> None:
 
 
 def test_get_file_diff(m: Maestral) -> None:
-    dbx_path = "/test.txt"
+    remote_path = "/test.txt"
 
-    md_old = _create_file_with_content(m, dbx_path, "old")
-    md_new = _create_file_with_content(m, dbx_path, "new")
+    md_old = _create_file_with_content(m, remote_path, "old")
+    md_new = _create_file_with_content(m, remote_path, "new")
     diff = m.get_file_diff(md_old.rev, md_new.rev)
 
     assert diff[2] == "@@ -1 +1 @@\n"
@@ -305,13 +305,13 @@ def test_get_file_diff(m: Maestral) -> None:
 
 
 def test_get_file_diff_local(m: Maestral) -> None:
-    dbx_path = "/test.txt"
-    local_path = m.to_local_path(dbx_path)
+    remote_path = "/test.txt"
+    local_path = m.to_local_path(remote_path)
 
     m.stop_sync()
     wait_for_idle(m)
 
-    md_old = _create_file_with_content(m, dbx_path, "old")
+    md_old = _create_file_with_content(m, remote_path, "old")
 
     with open(local_path, "w") as f:
         f.write("new")
@@ -324,9 +324,9 @@ def test_get_file_diff_local(m: Maestral) -> None:
 
 
 def test_get_file_diff_not_found(m: Maestral) -> None:
-    dbx_path = "/test.txt"
+    remote_path = "/test.txt"
 
-    md_new = _create_file_with_content(m, dbx_path, "new")
+    md_new = _create_file_with_content(m, remote_path, "new")
 
     with pytest.raises(NotFoundError):
         m.get_file_diff("015db1e6dec9da000000001f7709020", md_new.rev)
@@ -335,9 +335,9 @@ def test_get_file_diff_not_found(m: Maestral) -> None:
 def test_get_file_diff_unsupported_ext(m: Maestral) -> None:
     """Tests file diffs for unsupported file types."""
 
-    dbx_path = "/test.pdf"
-    md_old = _create_file_with_content(m, dbx_path, "old")
-    md_new = _create_file_with_content(m, dbx_path, "new")
+    remote_path = "/test.pdf"
+    md_old = _create_file_with_content(m, remote_path, "old")
+    md_new = _create_file_with_content(m, remote_path, "new")
 
     with pytest.raises(UnsupportedFileTypeForDiff):
         m.get_file_diff(md_old.rev, md_new.rev)
@@ -346,23 +346,23 @@ def test_get_file_diff_unsupported_ext(m: Maestral) -> None:
 def test_get_file_diff_unsupported_content(m: Maestral) -> None:
     """Tests file diffs for unsupported file types."""
 
-    dbx_path = "/test.txt"
+    remote_path = "/test.txt"
     # Upload a compiled c file with .txt extension
-    md_old = _create_file_with_content(m, dbx_path, b"\xcf\xfa\xed\xfe\x07")
-    md_new = _create_file_with_content(m, dbx_path, "new")
+    md_old = _create_file_with_content(m, remote_path, b"\xcf\xfa\xed\xfe\x07")
+    md_new = _create_file_with_content(m, remote_path, "new")
 
     with pytest.raises(UnsupportedFileTypeForDiff):
         m.get_file_diff(md_old.rev, md_new.rev)
 
 
 def test_get_file_diff_unsupported_content_local(m: Maestral) -> None:
-    dbx_path = "/test.txt"
-    local_path = m.to_local_path(dbx_path)
+    remote_path = "/test.txt"
+    local_path = m.to_local_path(remote_path)
 
     m.stop_sync()
     wait_for_idle(m)
 
-    md_old = _create_file_with_content(m, dbx_path, "old")
+    md_old = _create_file_with_content(m, remote_path, "old")
 
     with open(local_path, "wb") as f:
         f.write("möglich".encode("cp273"))
@@ -374,8 +374,8 @@ def test_get_file_diff_unsupported_content_local(m: Maestral) -> None:
 def test_restore(m: Maestral) -> None:
     """Tests restoring an old revision"""
 
-    dbx_path = "/file.txt"
-    local_path = m.to_local_path(dbx_path)
+    remote_path = "/file.txt"
+    local_path = m.to_local_path(remote_path)
 
     # create a local file and sync it, remember its rev
     with open(local_path, "w") as f:
@@ -383,7 +383,7 @@ def test_restore(m: Maestral) -> None:
 
     wait_for_idle(m)
 
-    old_md = m.client.get_metadata(dbx_path)
+    old_md = m.client.get_metadata(remote_path)
     assert isinstance(old_md, FileMetadata)
 
     # modify the file and sync it
@@ -392,14 +392,14 @@ def test_restore(m: Maestral) -> None:
 
     wait_for_idle(m)
 
-    new_md = m.client.get_metadata(dbx_path)
+    new_md = m.client.get_metadata(remote_path)
     assert isinstance(new_md, FileMetadata)
     assert new_md.content_hash == m.sync.get_local_hash(local_path)
 
     # restore the old rev
 
     try:
-        m.restore(dbx_path, old_md.rev)
+        m.restore(remote_path, old_md.rev)
     except SyncError as exc:
         # catch all error for restore in progress, raise otherwise
         if "in progress" not in exc.title:
@@ -435,9 +435,9 @@ def test_inotify_error(m: Maestral) -> None:
         wait_for_idle(m)
 
         # create some folders for us to watch
-        os.mkdir(m.dropbox_path + "/folder 1")
-        os.mkdir(m.dropbox_path + "/folder 2")
-        os.mkdir(m.dropbox_path + "/folder 3")
+        os.mkdir(m.sync_path + "/folder 1")
+        os.mkdir(m.sync_path + "/folder 2")
+        os.mkdir(m.sync_path + "/folder 3")
 
         m.start_sync()
 

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import click
 
 from .common import convert_api_errors, existing_config_option, inject_proxy
-from .core import CliException, DropboxPath
+from .core import CliException, RemotePath
 from .output import echo, ok
 
 if TYPE_CHECKING:
@@ -70,15 +70,15 @@ def excluded_list(m: Maestral) -> None:
     name="add",
     help="Add files or folders to the excluded list and re-sync.",
 )
-@click.argument("dropbox_paths", type=DropboxPath(), nargs=-1)
+@click.argument("sync_paths", type=RemotePath(), nargs=-1)
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def excluded_add(m: Maestral, dropbox_paths: list[str]) -> None:
-    if any(p == "/" for p in dropbox_paths):
+def excluded_add(m: Maestral, sync_paths: list[str]) -> None:
+    if any(p == "/" for p in sync_paths):
         raise CliException("Cannot exclude the root directory.")
 
-    m.exclude_items(*dropbox_paths)
-    for path in dropbox_paths:
+    m.exclude_items(*sync_paths)
+    for path in sync_paths:
         ok(f"Excluded '{path}'")
 
 
@@ -92,15 +92,15 @@ not be downloaded again. If the given path lies inside an excluded folder, the p
 folder will be included as well (but no other items inside it).
 """,
 )
-@click.argument("dropbox_paths", type=DropboxPath(), nargs=-1)
+@click.argument("sync_paths", type=RemotePath(), nargs=-1)
 @inject_proxy(fallback=False, existing_config=True)
 @convert_api_errors
-def excluded_remove(m: Maestral, dropbox_paths: str) -> None:
-    if any(p == "/" for p in dropbox_paths):
+def excluded_remove(m: Maestral, sync_paths: str) -> None:
+    if any(p == "/" for p in sync_paths):
         return echo("The root directory is always included")
 
-    m.include_items(*dropbox_paths)
-    for path in dropbox_paths:
+    m.include_items(*sync_paths)
+    for path in sync_paths:
         ok(f"Included '{path}'")
     ok("Downloading...")
 

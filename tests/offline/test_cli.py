@@ -152,7 +152,7 @@ def test_excluded_add_raises_not_linked_error(m: Maestral) -> None:
     result = runner.invoke(main, ["excluded", "add", "test", "-c", m.config_name])
 
     assert result.exit_code == 1
-    assert "No Dropbox account linked" in result.output
+    assert "No remote account linked" in result.output
 
 
 def test_excluded_remove_raises_not_running_error(m: Maestral) -> None:

@@ -127,18 +127,18 @@ class Maestral:
     :Example:
 
         First create an instance with a new config_name. In this example, we choose
-        "private" to sync a private Dropbox account. Then link the created config to an
-        existing Dropbox account and set up the local Dropbox folder. If successful,
+        "private" to sync a private remote account. Then link the created config to an
+        existing remote account and set up the local sync folder. If successful,
         invoke :meth:`start_sync` to start syncing.
 
         >>> from maestral.main import Maestral
         >>> m = Maestral(config_name='private')
-        >>> url = m.get_auth_url()  # get token from Dropbox website
-        >>> print(f'Please go to {url} to retrieve a Dropbox authorization token.')
+        >>> url = m.get_auth_url()  # get token from authorization website
+        >>> print(f'Please go to {url} to retrieve a authorization token.')
         >>> token = input('Enter auth token: ')
         >>> res = m.link(token)
         >>> if res == 0:
-        ...     m.create_dropbox_directory('~/Dropbox (Private)')
+        ...     m.create_sync_directory('~/MyDrive')
         ...     m.start_sync()
 
     :param config_name: Name of maestral configuration to run. Must not contain any
@@ -251,7 +251,7 @@ class Maestral:
 
     def get_auth_url(self) -> str:
         """
-        Returns a URL to authorize access to a Dropbox account. To link a Dropbox
+        Returns a URL to authorize access to a remote account. To link a remote
         account, retrieve an authorization code from the URL and link Maestral by
         calling :meth:`link` with the provided code.
 
@@ -266,8 +266,8 @@ class Maestral:
         access_token: str | None = None,
     ) -> int:
         """
-        Links Maestral with a Dropbox account using the given authorization code. The
-        code will be exchanged for an access token and a refresh token with Dropbox
+        Links Maestral with a remote account using the given authorization code. The
+        code will be exchanged for an access token and a refresh token with the remote
         servers. The refresh token will be stored for future usage as documented in the
         :mod:`oauth` module. Supported keyring backends are, in order of preference:
 
@@ -279,7 +279,7 @@ class Maestral:
 
         For testing, it is also possible to directly provide a long-lived refresh token
         or a short-lived access token. Note that the tokens must be issued for Maestral,
-        with the required scopes, and will be validated with Dropbox servers as part of
+        with the required scopes, and will be validated with remote servers as part of
         this call.
 
         :param code: Authorization code.
@@ -296,12 +296,12 @@ class Maestral:
 
     def unlink(self) -> None:
         """
-        Unlinks the configured Dropbox account but leaves all downloaded files in place.
+        Unlinks the configured remote account but leaves all downloaded files in place.
         All syncing metadata will be removed as well. Connection and API errors will be
-        handled silently but the Dropbox access key will always be removed from the
+        handled silently but the access key will always be removed from the
         user's PC.
 
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
         self.stop_sync()
@@ -309,7 +309,7 @@ class Maestral:
         try:
             self.client.unlink()
         except (ConnectionError, MaestralApiError):
-            self._logger.debug("Could not invalidate token with Dropbox", exc_info=True)
+            self._logger.debug("Could not invalidate token with the remote", exc_info=True)
         except KeyringAccessError:
             self._logger.debug("Could not remove token from keyring", exc_info=True)
 
@@ -324,7 +324,7 @@ class Maestral:
         self.sync.reset_sync_state()
         self.sync.reload_cached_config()
 
-        self._logger.info("Unlinked Dropbox account.")
+        self._logger.info("Unlinked remote account.")
 
     # ==== Methods to access config and saved state ====================================
 
@@ -376,19 +376,19 @@ class Maestral:
     # ==== Getters / setters for config with side effects ==============================
 
     @property
-    def dropbox_path(self) -> str:
+    def sync_path(self) -> str:
         """
-        Returns the path to the local Dropbox folder (read only). This will be an empty
-        string if not Dropbox folder has been set up yet. Use
-        :meth:`create_dropbox_directory` or :meth:`move_dropbox_directory` to set or
-        change the Dropbox directory location instead.
+        Returns the path to the local sync folder (read only). This will be an empty
+        string if not sync folder has been set up yet. Use
+        :meth:`create_sync_directory` or :meth:`move_sync_directory` to set or
+        change the sync directory location instead.
 
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         if self.pending_link:
             return ""
         else:
-            return self.sync.dropbox_path
+            return self.sync.sync_path
 
     @property
     def excluded_items(self) -> set[str]:
@@ -536,16 +536,16 @@ class Maestral:
 
     @property
     def pending_link(self) -> bool:
-        """Whether Maestral is linked to a Dropbox account (read only). This will block
+        """Whether Maestral is linked to a remote account (read only). This will block
         until the user's keyring is unlocked to load the saved auth token."""
         return not self.client.linked
 
     @property
-    def pending_dropbox_folder(self) -> bool:
-        """Whether a local Dropbox directory has been configured (read only). This will
+    def pending_sync_folder(self) -> bool:
+        """Whether a local sync directory has been configured (read only). This will
         not check if the configured directory actually exists, starting the sync may
         still raise a :exc:`maestral.exceptions.NoSyncDirError`."""
-        return not self.sync.dropbox_path
+        return not self.sync.sync_path
 
     @property
     def pending_first_download(self) -> bool:
@@ -562,12 +562,12 @@ class Maestral:
     def running(self) -> bool:
         """Whether sync threads are running (read only). This is similar to
         :attr:`paused` but also returns False if syncing is paused because we cannot
-        connect to Dropbox servers.."""
+        connect to remote servers.."""
         return self.manager.running.is_set() or self.sync.busy()
 
     @property
     def connected(self) -> bool:
-        """Whether Dropbox servers can be reached (read only)."""
+        """Whether remote servers can be reached (read only)."""
         if self.pending_link:
             return False
         else:
@@ -590,9 +590,9 @@ class Maestral:
         A list of current sync errors as dicts (read only). This list is populated by
         the sync threads. The following keys will always be present but may contain
         empty values: "type", "inherits", "title", "traceback", "title", "message",
-        "local_path", "dbx_path".
+        "local_path", "remote_path".
 
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         return self.sync.sync_errors
 
@@ -646,7 +646,7 @@ class Maestral:
         * "error" if any item inside the folder failed to sync and none are currently
           being uploaded or downloaded.
         * "up to date" if all items are successfully synced.
-        * "unwatched" if syncing is paused or for items outside the Dropbox directory.
+        * "unwatched" if syncing is paused or for items outside the sync directory.
 
         .. versionadded:: 1.4.4
            Recursive behavior. Previous versions would return "up to date" for a folder,
@@ -663,16 +663,16 @@ class Maestral:
         local_path = osp.realpath(local_path)
 
         try:
-            dbx_path_cased = self.sync.to_dbx_path(local_path)
+            remote_path_cased = self.sync.to_remote_path(local_path)
         except ValueError:
             return FileStatus.Unwatched.value
 
         # Find any sync activity for the local path.
-        node = self.sync.activity.get_node(dbx_path_cased)
+        node = self.sync.activity.get_node(remote_path_cased)
 
         if not node:
             # Always return synced for the root folder in the absense of sync activity.
-            if dbx_path_cased == "/":
+            if remote_path_cased == "/":
                 return FileStatus.Synced.value
 
             # Check if the path is in our index. If yes, it is fully synced, otherwise
@@ -706,52 +706,52 @@ class Maestral:
             returned.
         :returns: A lists of all sync events currently queued for or being uploaded or
             downloaded with the events the furthest up in the queue coming first.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
         return list(self.sync.activity.sync_events)[:limit]
 
     def get_history(
-        self, dbx_path: str | None = None, limit: int | None = 100
+        self, remote_path: str | None = None, limit: int | None = 100
     ) -> list[SyncEvent]:
         """
         Returns the historic upload / download activity. Up to 1,000 sync events are
         kept in the database. Any events which occurred before the interval specified by
         the ``keep_history`` config value are discarded.
 
-        :param dbx_path: If given, show sync history for the specified Dropbox path only.
+        :param remote_path: If given, show sync history for the specified remote path only.
         :param limit: Maximum number of items to return. If None, all entries will be
             returned.
         :returns: A lists of all sync events since ``keep_history`` sorted by time with
             the oldest event first.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
-        events = self.sync.get_history(dbx_path=dbx_path)
+        events = self.sync.get_history(remote_path=remote_path)
         return events[-limit:] if limit else events
 
     def get_account_info(self) -> FullAccount:
         """
-        Returns the account information from Dropbox and returns it as a dictionary.
+        Returns the account information from the remote and returns it as a dictionary.
 
-        :returns: Dropbox account information.
+        :returns: remote account information.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
         return self.client.get_account_info()
 
     def get_space_usage(self) -> PersonalSpaceUsage:
         """
-        Gets the space usage from Dropbox and returns it as a dictionary.
+        Gets the space usage from the remote and returns it as a dictionary.
 
-        :returns: Dropbox space usage information.
+        :returns: remote space usage information.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
         return self.client.get_space_usage()
@@ -760,16 +760,16 @@ class Maestral:
 
     def get_profile_pic(self) -> str | None:
         """
-        Attempts to download the user's profile picture from Dropbox. The picture is
+        Attempts to download the user's profile picture from the remote. The picture is
         saved in Maestral's cache directory for retrieval when there is no internet
         connection. Check :attr:`account_profile_pic_path` for cached profile pics.
 
         :returns: Path to saved profile picture or ``None`` if no profile picture was
             downloaded.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
 
@@ -785,35 +785,35 @@ class Maestral:
             self._delete_old_profile_pics()
             return None
 
-    def get_metadata(self, dbx_path: str) -> Metadata | None:
+    def get_metadata(self, remote_path: str) -> Metadata | None:
         """
-        Returns metadata for a file or folder on Dropbox.
+        Returns metadata for a file or folder on the remote.
 
-        :param dbx_path: Path to file or folder on Dropbox.
-        :returns: Dropbox item metadata as dict. See :class:`dropbox.files.Metadata` for
+        :param remote_path: Path to file or folder on the remote.
+        :returns: Item metadata as dict. See :class:`Metadata` for
             keys and values.
         :raises NotFoundError: if there is nothing at the given path.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
-        return self.client.get_metadata(dbx_path)
+        return self.client.get_metadata(remote_path)
 
     def list_folder(
         self,
-        dbx_path: str,
+        remote_path: str,
         recursive: bool = False,
         include_deleted: bool = False,
         include_mounted_folders: bool = True,
         include_non_downloadable_files: bool = False,
     ) -> list[Metadata]:
         """
-        List all items inside the folder given by ``dbx_path``. Keyword arguments are
+        List all items inside the folder given by ``remote_path``. Keyword arguments are
         passed on the Dropbox API call :meth:`client.DropboxClient.list_folder`.
 
-        :param dbx_path: Path to folder on Dropbox.
+        :param remote_path: Path to folder on the remote.
         :param recursive: If true, the list folder operation will be applied recursively
             to all subfolders and the response will contain contents of all subfolders.
         :param include_deleted: If true, the results will include entries for files and
@@ -826,14 +826,14 @@ class Maestral:
         :raises NotFoundError: if there is nothing at the given path.
         :raises NotAFolderError: if the given path refers to a file.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
 
         res = self.client.list_folder(
-            dbx_path,
+            remote_path,
             recursive=recursive,
             include_deleted=include_deleted,
             include_mounted_folders=include_mounted_folders,
@@ -843,7 +843,7 @@ class Maestral:
 
     def list_folder_iterator(
         self,
-        dbx_path: str,
+        remote_path: str,
         recursive: bool = False,
         include_deleted: bool = False,
         include_mounted_folders: bool = True,
@@ -851,13 +851,13 @@ class Maestral:
         include_non_downloadable_files: bool = False,
     ) -> Iterator[list[Metadata]]:
         """
-        Returns an iterator over items inside the folder given by ``dbx_path``. Keyword
+        Returns an iterator over items inside the folder given by ``remote_path``. Keyword
         arguments are passed on the client call
         :meth:`client.DropboxClient.list_folder_iterator`. Each iteration will yield a
         list of approximately 500 entries, depending on the number of entries returned
         by an individual API call.
 
-        :param dbx_path: Path to folder on Dropbox.
+        :param remote_path: Path to folder on the remote.
         :param recursive: If true, the list folder operation will be applied recursively
             to all subfolders and the response will contain contents of all subfolders.
         :param include_deleted: If true, the results will include entries for files and
@@ -870,19 +870,19 @@ class Maestral:
             slightly more entries returned in some cases.
         :param bool include_non_downloadable_files: If true, include files that
             are not downloadable, i.e. Google Docs.
-        :returns: Iterator over list of Dropbox item metadata as dicts. See
-            :class:`dropbox.files.Metadata` for keys and values.
+        :returns: Iterator over list of Item metadata as dicts. See
+            :class:`Metadata` for keys and values.
         :raises NotFoundError: if there is nothing at the given path.
         :raises NotAFolderError: if the given path refers to a file.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
 
         res_iter = self.client.list_folder_iterator(
-            dbx_path,
+            remote_path,
             recursive=recursive,
             include_deleted=include_deleted,
             include_mounted_folders=include_mounted_folders,
@@ -895,23 +895,23 @@ class Maestral:
             del res
             gc.collect()
 
-    def list_revisions(self, dbx_path: str, limit: int = 10) -> list[FileMetadata]:
+    def list_revisions(self, remote_path: str, limit: int = 10) -> list[FileMetadata]:
         """
-        List revisions of old files at the given path ``dbx_path``. This will also
+        List revisions of old files at the given path ``remote_path``. This will also
         return revisions if the file has already been deleted.
 
-        :param dbx_path: Path to file on Dropbox.
+        :param remote_path: Path to file on the remote.
         :param limit: Maximum number of revisions to list.
-        :returns: List of Dropbox file metadata as dicts. See
-            :class:`dropbox.files.Metadata` for keys and values.
+        :returns: List of File metadata as dicts. See
+            :class:`Metadata` for keys and values.
         :raises NotFoundError: if there never was a file at the given path.
         :raises IsAFolderError: if the given path refers to a folder
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
         """
         self._check_linked()
-        return self.client.list_revisions(dbx_path, limit=limit)
+        return self.client.list_revisions(remote_path, limit=limit)
 
     def get_file_diff(self, old_rev: str, new_rev: str | None = None) -> list[str]:
         """
@@ -962,13 +962,13 @@ class Maestral:
                 "Use 'list_revisions' to list past revisions of a file.",
             )
 
-        dbx_path = self.sync.correct_case(md_old.path_display)
+        remote_path = self.sync.correct_case(md_old.path_display)
         local_path = self.sync.to_local_path(md_old.path_display)
 
         # Check if a diff is possible.
         # If mime is None, proceed because most files without
         # an extension are just text files.
-        mime, _ = mimetypes.guess_type(dbx_path)
+        mime, _ = mimetypes.guess_type(remote_path)
         if mime is not None and not mime.startswith("text/"):
             raise UnsupportedFileTypeForDiff(
                 f"Bad file type: '{mime}'", "Only files of type 'text/*' are supported."
@@ -981,7 +981,7 @@ class Maestral:
             # Use the local file if new_rev is None.
             new_rev = "local version"
             try:
-                with convert_api_errors(dbx_path=dbx_path, local_path=local_path):
+                with convert_api_errors(remote_path=remote_path, local_path=local_path):
                     mtime = time.localtime(osp.getmtime(local_path))
                     date_str_new = time.strftime("%d %b %Y at %H:%M", mtime)
 
@@ -1001,30 +1001,30 @@ class Maestral:
             difflib.unified_diff(
                 content_old,
                 content_new,
-                fromfile=f"{dbx_path} ({old_rev})",
-                tofile=f"{dbx_path} ({new_rev})",
+                fromfile=f"{remote_path} ({old_rev})",
+                tofile=f"{remote_path} ({new_rev})",
                 fromfiledate=date_str_old,
                 tofiledate=date_str_new,
             )
         )
 
-    def restore(self, dbx_path: str, rev: str) -> FileMetadata:
+    def restore(self, remote_path: str, rev: str) -> FileMetadata:
         """
         Restore an old revision of a file.
 
-        :param dbx_path: The path to save the restored file.
+        :param remote_path: The path to save the restored file.
         :param rev: The revision to restore. Old revisions can be listed with
             :meth:`list_revisions`.
-        :returns: Metadata of the returned file. See :class:`dropbox.files.FileMetadata`
+        :returns: Metadata of the returned file. See :class:`FileMetadata`
             for keys and values.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
         """
         self._check_linked()
-        self._logger.info(f"Restoring '{dbx_path} to {rev}'")
-        res = self.client.restore(dbx_path, rev)
-        self._logger.info(f"Restored '{dbx_path} to {rev}'")
+        self._logger.info(f"Restoring '{remote_path} to {rev}'")
+        res = self.client.restore(remote_path, rev)
+        self._logger.info(f"Restored '{remote_path} to {rev}'")
         self._logger.info(IDLE)
         return res
 
@@ -1039,18 +1039,18 @@ class Maestral:
     def rebuild_index(self) -> None:
         """
         Rebuilds the rev file by comparing remote with local files and updating rev
-        numbers from the Dropbox server. Files are compared by their content hashes and
+        numbers from the remote server. Files are compared by their content hashes and
         conflicting copies are created if the contents differ. File changes during the
         rebuild process will be queued and uploaded once rebuilding has completed.
 
         Rebuilding will be performed asynchronously and errors can be accessed through
         :attr:`sync_errors` or :attr:`maestral_errors`.
 
-        :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoSyncDirError: if local Dropbox folder is not set up.
+        :raises NotLinkedError: if no remote account is linked.
+        :raises NoSyncDirError: if local sync folder is not set up.
         """
         self._check_linked()
-        self._check_dropbox_dir()
+        self._check_sync_dir()
 
         self.manager.rebuild_index()
 
@@ -1058,11 +1058,11 @@ class Maestral:
         """
         Creates syncing threads and starts syncing.
 
-        :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoSyncDirError: if local Dropbox folder is not set up.
+        :raises NotLinkedError: if no remote account is linked.
+        :raises NoSyncDirError: if local sync folder is not set up.
         """
         self._check_linked()
-        self._check_dropbox_dir()
+        self._check_sync_dir()
 
         self.manager.start()
 
@@ -1076,37 +1076,37 @@ class Maestral:
     def reset_sync_state(self) -> None:
         """
         Resets the sync index and state. Only call this to clean up leftover state
-        information if a Dropbox was improperly unlinked (e.g., auth token has been
+        information if the remote was improperly unlinked (e.g., auth token has been
         manually deleted). Otherwise, leave state management to Maestral.
 
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
         self.manager.reset_sync_state()
 
-    def exclude_items(self, *dbx_paths: str) -> None:
+    def exclude_items(self, *remote_paths: str) -> None:
         """
         Excludes files or folders from sync and deletes it locally. It is safe to call
         this method with items which have already been excluded.
 
-        :param dbx_paths: Dropbox paths of items to exclude.
+        :param remote_paths: remote paths of items to exclude.
         :raises NotFoundError: if there is nothing at the given path.
-        :raises ConnectionError: if the connection to Dropbox fails.
+        :raises ConnectionError: if the connection to the remote fails.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoSyncDirError: if local Dropbox folder is not set up.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
+        :raises NoSyncDirError: if local sync folder is not set up.
         """
         self._check_linked()
-        self._check_dropbox_dir()
+        self._check_sync_dir()
 
-        dbx_paths_lower = {normalize(p.rstrip("/")) for p in dbx_paths}
+        remote_paths_lower = {normalize(p.rstrip("/")) for p in remote_paths}
 
         # ---- input cleanup -----------------------------------------------------------
         excluded_items_old = self.sync.excluded_items
         excluded_items_new = self.sync.clean_excluded_items_list(
-            excluded_items_old | dbx_paths_lower
+            excluded_items_old | remote_paths_lower
         )
 
         excluded_items_added = excluded_items_new - excluded_items_old
@@ -1119,9 +1119,9 @@ class Maestral:
             try:
                 self.sync.excluded_items = excluded_items_new
 
-                for dbx_path_lower in excluded_items_added:
-                    self._remove_after_excluded(dbx_path_lower)
-                    self._logger.info("Excluded %s", dbx_path_lower)
+                for remote_path_lower in excluded_items_added:
+                    self._remove_after_excluded(remote_path_lower)
+                    self._logger.info("Excluded %s", remote_path_lower)
 
                 self._logger.info(IDLE)
             finally:
@@ -1130,13 +1130,13 @@ class Maestral:
         else:
             raise BusyError("Cannot add excluded items", "Please try again when idle.")
 
-    def _remove_after_excluded(self, dbx_path_lower: str) -> None:
+    def _remove_after_excluded(self, remote_path_lower: str) -> None:
         # Perform housekeeping.
-        self.sync.remove_node_from_index(dbx_path_lower)
-        self.sync.clear_sync_errors_for_path(dbx_path_lower, recursive=True)
+        self.sync.remove_node_from_index(remote_path_lower)
+        self.sync.clear_sync_errors_for_path(remote_path_lower, recursive=True)
 
         # Remove item from local drive.
-        local_path_uncased = f"{self.dropbox_path}{dbx_path_lower}"
+        local_path_uncased = f"{self.sync_path}{remote_path_lower}"
 
         try:
             local_path = to_existing_unnormalized_path(local_path_uncased)
@@ -1147,7 +1147,7 @@ class Maestral:
         with self.manager.sync.fs_events.ignore(event_cls(local_path)):
             delete(local_path)
 
-    def include_items(self, *dbx_paths: str) -> None:
+    def include_items(self, *remote_paths: str) -> None:
         """
         Includes files or folders in sync and downloads it in the background. It is safe
         to call this method with items which have already been included, they will not
@@ -1156,28 +1156,28 @@ class Maestral:
         If the path lies inside an excluded folder, all its immediate parents will be
         included. Other children of the excluded folder will remain excluded.
 
-        If any children of dbx_path were excluded, they will now be included.
+        If any children of remote_path were excluded, they will now be included.
 
         Any downloads will be carried out by the sync threads. Errors during the
         download can be accessed through :attr:`sync_errors` or :attr:`maestral_errors`.
 
-        :param dbx_paths: Dropbox paths of items to include.
+        :param remote_paths: remote paths of items to include.
         :raises NotFoundError: if there is nothing at the given path.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoSyncDirError: if local Dropbox folder is not set up.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
+        :raises NoSyncDirError: if local sync folder is not set up.
         """
         self._check_linked()
-        self._check_dropbox_dir()
+        self._check_sync_dir()
 
-        dbx_paths_lower = {normalize(p.rstrip("/")) for p in dbx_paths}
+        remote_paths_lower = {normalize(p.rstrip("/")) for p in remote_paths}
 
         # ---- input validation --------------------------------------------------------
         excluded_items = self.sync.excluded_items
         newly_included_items = {
-            p for p in dbx_paths_lower if self.sync.is_excluded_by_user(p)
+            p for p in remote_paths_lower if self.sync.is_excluded_by_user(p)
         }
         if len(newly_included_items) == 0:
             return
@@ -1186,82 +1186,82 @@ class Maestral:
         excluded_items.difference_update(newly_included_items)
 
         # Find parent folders that should also be newly included.
-        for dbx_path_lower in newly_included_items.copy():
+        for remote_path_lower in newly_included_items.copy():
             for folder in excluded_items.copy():
-                # Include all parents which are required to download dbx_path_lower.
-                if is_child(dbx_path_lower, folder):
+                # Include all parents which are required to download remote_path_lower.
+                if is_child(remote_path_lower, folder):
                     # Remove parent folder from excluded list.
                     excluded_items.discard(folder)
-                    # Re-add their children (except parents of dbx_path_lower).
+                    # Re-add their children (except parents of remote_path_lower).
                     for res in self.client.list_folder_iterator(folder):
                         for entry in res.entries:
-                            if not is_equal_or_child(dbx_path_lower, entry.path_lower):
+                            if not is_equal_or_child(remote_path_lower, entry.path_lower):
                                 excluded_items.add(entry.path_lower)
 
                     # Add the parent to the download list.
                     newly_included_items.add(folder)
 
-                # Include all children of dbx_path_lower.
-                if is_child(folder, dbx_path_lower):
+                # Include all children of remote_path_lower.
+                if is_child(folder, remote_path_lower):
                     excluded_items.discard(folder)
 
-        # ---- download items from Dropbox ---------------------------------------------
+        # ---- download items from the remote ---------------------------------------------
         if self.sync.sync_lock.acquire(blocking=False):
             self._logger.debug("Excluded items old: %s", pf_repr(self.excluded_items))
             self._logger.debug("Excluded items new: %s", pf_repr(excluded_items))
             try:
                 self.sync.excluded_items = excluded_items
-                for dbx_path_lower in newly_included_items:
-                    self._logger.info("Included '%s'", dbx_path_lower)
-                    self.manager.download_queue.put(dbx_path_lower)
+                for remote_path_lower in newly_included_items:
+                    self._logger.info("Included '%s'", remote_path_lower)
+                    self.manager.download_queue.put(remote_path_lower)
             finally:
                 self.sync.sync_lock.release()
 
         else:
             raise BusyError("Cannot include item", "Please try again when idle.")
 
-    def excluded_status(self, dbx_path: str) -> str:
+    def excluded_status(self, remote_path: str) -> str:
         """
         Returns 'excluded', 'partially excluded' or 'included'. This function will not
-        check if the item actually exists on Dropbox.
+        check if the item actually exists on the remote.
 
-        :param dbx_path: Path to item on Dropbox.
+        :param remote_path: Path to item on the remote.
         :returns: Excluded status.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
 
-        dbx_path_lower = normalize(dbx_path.rstrip("/"))
+        remote_path_lower = normalize(remote_path.rstrip("/"))
 
-        if any(is_equal_or_child(dbx_path_lower, f) for f in self.sync.excluded_items):
+        if any(is_equal_or_child(remote_path_lower, f) for f in self.sync.excluded_items):
             return "excluded"
-        elif any(is_child(f, dbx_path_lower) for f in self.sync.excluded_items):
+        elif any(is_child(f, remote_path_lower) for f in self.sync.excluded_items):
             return "partially excluded"
         else:
             return "included"
 
-    def move_dropbox_directory(self, new_path: str) -> None:
+    def move_sync_directory(self, new_path: str) -> None:
         """
-        Sets the local Dropbox directory. This moves all local files to the new location
+        Sets the local sync directory. This moves all local files to the new location
         and resumes syncing afterwards.
 
-        :param new_path: Full path to local Dropbox folder. "~" will be expanded to the
+        :param new_path: Full path to local sync folder. "~" will be expanded to the
             user's home directory.
         :raises OSError: if moving the directory fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoSyncDirError: if local Dropbox folder is not set up.
+        :raises NotLinkedError: if no remote account is linked.
+        :raises NoSyncDirError: if local sync folder is not set up.
         """
         self._check_linked()
-        self._check_dropbox_dir()
+        self._check_sync_dir()
 
-        self._logger.info("Moving Dropbox folder...")
+        self._logger.info("Moving sync folder...")
 
-        old_path = self.sync.dropbox_path
+        old_path = self.sync.sync_path
         new_path = osp.realpath(osp.expanduser(new_path))
 
         try:
             if osp.samefile(old_path, new_path):
-                self._logger.info(f'Dropbox folder moved to "{new_path}"')
+                self._logger.info(f'sync folder moved to "{new_path}"')
                 return
         except FileNotFoundError:
             pass
@@ -1280,22 +1280,22 @@ class Maestral:
             os.makedirs(new_path)
 
         # Update config file and client.
-        self.sync.dropbox_path = new_path
+        self.sync.sync_path = new_path
 
-        self._logger.info(f'Dropbox folder moved to "{new_path}"')
+        self._logger.info(f'sync folder moved to "{new_path}"')
 
         # Resume syncing.
         if was_syncing:
             self.start_sync()
 
-    def create_dropbox_directory(self, path: str) -> None:
+    def create_sync_directory(self, path: str) -> None:
         """
-        Creates a new Dropbox directory. Only call this during setup.
+        Creates a new sync directory. Only call this during setup.
 
-        :param path: Full path to local Dropbox folder. "~" will be expanded to the
+        :param path: Full path to local sync folder. "~" will be expanded to the
             user's home directory.
         :raises OSError: if creation fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
 
@@ -1313,7 +1313,7 @@ class Maestral:
         os.makedirs(path, exist_ok=True)
 
         # Update config file and client.
-        self.sync.dropbox_path = path
+        self.sync.sync_path = path
 
         # Resume syncing.
         if resume:
@@ -1321,7 +1321,7 @@ class Maestral:
 
     def create_shared_link(
         self,
-        dbx_path: str,
+        remote_path: str,
         visibility: LinkAudience = LinkAudience.Public,
         access_level: LinkAccessLevel = LinkAccessLevel.Viewer,
         allow_download: bool | None = None,
@@ -1329,12 +1329,12 @@ class Maestral:
         expires: datetime | None = None,
     ) -> SharedLinkMetadata:
         """
-        Creates a shared link for the given ``dbx_path``. Returns a dictionary with
+        Creates a shared link for the given ``remote_path``. Returns a dictionary with
         information regarding the link, including the URL, access permissions, expiry
         time, etc. The shared link will grant read / download access only. Note that
         basic accounts do not support password protection or expiry times.
 
-        :param dbx_path: Dropbox path to file or folder to share.
+        :param remote_path: remote path to file or folder to share.
         :param visibility: The visibility of the shared link. Can be public, team-only,
             or no-one. In case of the latter, the link merely points the user to the
             content and does not grant additional rights to the user. Users of this link
@@ -1349,7 +1349,7 @@ class Maestral:
         """
         self._check_linked()
         return self.client.create_shared_link(
-            dbx_path=dbx_path,
+            remote_path=remote_path,
             visibility=visibility,
             password=password,
             access_level=access_level,
@@ -1364,48 +1364,48 @@ class Maestral:
 
         :param url: URL of shared link to revoke.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
         self.client.revoke_shared_link(url)
 
     def list_shared_links(
-        self, dbx_path: str | None = None
+        self, remote_path: str | None = None
     ) -> list[SharedLinkMetadata]:
         """
-        Returns a list of all shared links for the given Dropbox path. If no path is
+        Returns a list of all shared links for the given remote path. If no path is
         given, return all shared links for the account, up to a maximum of 1,000 links.
 
-        :param dbx_path: Path to item on Dropbox.
+        :param remote_path: Path to item on the remote.
         :returns: List of shared link information as dictionaries. See
-            :class:`dropbox.sharing.SharedLinkMetadata` for keys and values.
+            :class:`SharedLinkMetadata` for keys and values.
         :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal Dropbox errors.
-        :raises ConnectionError: if the connection to Dropbox fails.
-        :raises NotLinkedError: if no Dropbox account is linked.
+        :raises ServerError: for internal server errors.
+        :raises ConnectionError: if the connection to the remote fails.
+        :raises NotLinkedError: if no remote account is linked.
         """
         self._check_linked()
-        return self.client.list_shared_links(dbx_path)
+        return self.client.list_shared_links(remote_path)
 
     # ==== Utility methods for front ends ==============================================
 
-    def to_local_path(self, dbx_path: str) -> str:
+    def to_local_path(self, remote_path: str) -> str:
         """
-        Converts a path relative to the Dropbox folder to a correctly cased local file
+        Converts a path relative to the sync folder to a correctly cased local file
         system path.
 
-        :param dbx_path: Path relative to Dropbox root.
+        :param remote_path: Path relative to remote root.
         :returns: Corresponding path on local hard drive.
-        :raises NotLinkedError: if no Dropbox account is linked.
-        :raises NoSyncDirError: if local Dropbox folder is not set up.
+        :raises NotLinkedError: if no remote account is linked.
+        :raises NoSyncDirError: if local sync folder is not set up.
         """
 
         self._check_linked()
-        self._check_dropbox_dir()
+        self._check_sync_dir()
 
-        return self.sync.to_local_path(dbx_path)
+        return self.sync.to_local_path(remote_path)
 
     def check_for_updates(self) -> UpdateCheckResult:
         """
@@ -1482,15 +1482,15 @@ class Maestral:
     def _check_linked(self) -> None:
         if not self.client.linked:
             raise NotLinkedError(
-                "No Dropbox account linked",
+                "No remote account linked",
                 "Please link an account using the GUI or CLI.",
             )
 
-    def _check_dropbox_dir(self) -> None:
-        if self.pending_dropbox_folder:
+    def _check_sync_dir(self) -> None:
+        if self.pending_sync_folder:
             raise NoSyncDirError(
-                "No local Dropbox directory",
-                "Please set up a local Dropbox directory using the GUI or CLI.",
+                "No local sync directory",
+                "Please set up a local sync directory using the GUI or CLI.",
             )
 
     # ==== Housekeeping on update  =====================================================

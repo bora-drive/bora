@@ -688,67 +688,67 @@ class DropboxClient:
         return convert_space_usage(res)
 
     def get_metadata(
-        self, dbx_path: str, include_deleted: bool = False
+        self, remote_path: str, include_deleted: bool = False
     ) -> Metadata | None:
         """
         Gets metadata for an item on Dropbox or returns ``False`` if no metadata is
         available. Keyword arguments are passed on to Dropbox SDK files_get_metadata
         call.
 
-        :param dbx_path: Path of folder on Dropbox.
+        :param remote_path: Path of folder on Dropbox.
         :param include_deleted: Whether to return data for deleted items.
         :returns: Metadata of item at the given path or ``None`` if item cannot be found.
         """
         try:
-            with convert_api_errors(dbx_path=dbx_path):
+            with convert_api_errors(remote_path=remote_path):
                 res = self.dbx.files_get_metadata(
-                    dbx_path, include_deleted=include_deleted
+                    remote_path, include_deleted=include_deleted
                 )
                 return convert_metadata(res)
         except (NotFoundError, PathError):
             return None
 
     def list_revisions(
-        self, dbx_path: str, mode: str = "path", limit: int = 10
+        self, remote_path: str, mode: str = "path", limit: int = 10
     ) -> list[FileMetadata]:
         """
         Lists all file revisions for the given file.
 
-        :param dbx_path: Path to file on Dropbox.
+        :param remote_path: Path to file on Dropbox.
         :param mode: Must be 'path' or 'id'. If 'id', specify the Dropbox file ID
             instead of the file path to get revisions across move and rename events.
         :param limit: Maximum number of revisions to list.
         :returns: File revision history.
         """
-        with convert_api_errors(dbx_path=dbx_path):
+        with convert_api_errors(remote_path=remote_path):
             dbx_mode = files.ListRevisionsMode(mode)
-            res = self.dbx.files_list_revisions(dbx_path, mode=dbx_mode, limit=limit)
+            res = self.dbx.files_list_revisions(remote_path, mode=dbx_mode, limit=limit)
         return [convert_metadata(entry) for entry in res.entries]
 
-    def restore(self, dbx_path: str, rev: str) -> FileMetadata:
+    def restore(self, remote_path: str, rev: str) -> FileMetadata:
         """
         Restore an old revision of a file.
 
-        :param dbx_path: The path to save the restored file.
+        :param remote_path: The path to save the restored file.
         :param rev: The revision to restore. Old revisions can be listed with
             :meth:`list_revisions`.
         :returns: Metadata of restored file.
         """
-        with convert_api_errors(dbx_path=dbx_path):
-            res = self.dbx.files_restore(dbx_path, rev)
+        with convert_api_errors(remote_path=remote_path):
+            res = self.dbx.files_restore(remote_path, rev)
         return convert_metadata(res)
 
     @_retry_on_error(DataCorruptionError, MAX_TRANSFER_RETRIES)
     def download(
         self,
-        dbx_path: str,
+        remote_path: str,
         local_path: str,
         sync_event: SyncEvent | None = None,
     ) -> FileMetadata:
         """
         Downloads a file from Dropbox to given local path.
 
-        :param dbx_path: Path to file on Dropbox or rev number.
+        :param remote_path: Path to file on Dropbox or rev number.
         :param local_path: Path to local download destination.
         :param sync_event: If given, the sync event will be updated with the number of
             downloaded bytes.
@@ -756,8 +756,8 @@ class DropboxClient:
         :raises DataCorruptionError: if data is corrupted during download.
         """
 
-        with convert_api_errors(dbx_path=dbx_path):
-            md, http_resp = self.dbx.files_download(dbx_path)
+        with convert_api_errors(remote_path=remote_path):
+            md, http_resp = self.dbx.files_download(remote_path)
 
             with closing(http_resp):
                 with open(local_path, "wb", opener=opener_no_symlink) as f:
@@ -797,7 +797,7 @@ class DropboxClient:
     def upload(
         self,
         local_path: str,
-        dbx_path: str,
+        remote_path: str,
         write_mode: WriteMode = WriteMode.Add,
         update_rev: str | None = None,
         autorename: bool = False,
@@ -810,7 +810,7 @@ class DropboxClient:
         this will raise a :exc:`DataChangedError`.
 
         :param local_path: Path of local file to upload.
-        :param dbx_path: Path to save file on Dropbox.
+        :param remote_path: Path to save file on Dropbox.
         :param write_mode: Your intent when writing a file to some path. This is used to
             determine what constitutes a conflict and what the autorename strategy is.
             This is used to determine what constitutes a conflict and what the
@@ -856,7 +856,7 @@ class DropboxClient:
         else:
             raise RuntimeError("No write mode for uploading file.")
 
-        with convert_api_errors(dbx_path=dbx_path, local_path=local_path):
+        with convert_api_errors(remote_path=remote_path, local_path=local_path):
             with open(local_path, "rb", opener=opener_no_symlink) as f:
                 stat = os.stat(f.fileno())
 
@@ -865,7 +865,7 @@ class DropboxClient:
                         # Upload all at once.
                         res = self._upload_helper(
                             f,
-                            dbx_path,
+                            remote_path,
                             dbx_write_mode,
                             autorename,
                             sync_event,
@@ -877,19 +877,19 @@ class DropboxClient:
                         # Dropbox keeps upload sessions open for 48h so this could be done
                         # in the future.
                         session_id = self._upload_session_start_helper(
-                            f, dbx_path, sync_event, stat
+                            f, remote_path, sync_event, stat
                         )
 
                         while stat.st_size - f.tell() > self.UPLOAD_REQUEST_CHUNK_SIZE:
                             self._upload_session_append_helper(
-                                f, session_id, dbx_path, sync_event, stat
+                                f, session_id, remote_path, sync_event, stat
                             )
 
                         res = self._upload_session_finish_helper(
                             f,
                             session_id,
                             # Commit info.
-                            dbx_path,
+                            remote_path,
                             dbx_write_mode,
                             autorename,
                             # Commit info end.
@@ -903,7 +903,7 @@ class DropboxClient:
     def _upload_helper(
         self,
         f: BinaryIO,
-        dbx_path: str,
+        remote_path: str,
         mode: files.WriteMode,
         autorename: bool,
         sync_event: SyncEvent | None,
@@ -915,10 +915,10 @@ class DropboxClient:
             raise DataChangedError("File was modified during read")
 
         try:
-            with convert_api_errors(dbx_path=dbx_path):
+            with convert_api_errors(remote_path=remote_path):
                 md = self.dbx.files_upload(
                     self._throttled_upload_iter(data),
-                    dbx_path,
+                    remote_path,
                     client_modified=datetime.fromtimestamp(
                         stat.st_mtime, tz=timezone.utc
                     ),
@@ -940,7 +940,7 @@ class DropboxClient:
     def _upload_session_start_helper(
         self,
         f: BinaryIO,
-        dbx_path: str,
+        remote_path: str,
         sync_event: SyncEvent | None,
         old_stat: os.stat_result,
     ) -> str:
@@ -950,7 +950,7 @@ class DropboxClient:
             raise DataChangedError("File was modified during read")
 
         try:
-            with convert_api_errors(dbx_path=dbx_path):
+            with convert_api_errors(remote_path=remote_path):
                 session_start = self.dbx.files_upload_session_start(
                     self._throttled_upload_iter(data), content_hash=get_hash(data)
                 )
@@ -969,7 +969,7 @@ class DropboxClient:
         self,
         f: BinaryIO,
         session_id: str,
-        dbx_path: str,
+        remote_path: str,
         sync_event: SyncEvent | None,
         old_stat: os.stat_result,
     ) -> None:
@@ -983,11 +983,11 @@ class DropboxClient:
 
         if file_was_modified(os.stat(f.fileno()), old_stat):
             # Close upload session and throw error.
-            with convert_api_errors(dbx_path=dbx_path):
+            with convert_api_errors(remote_path=remote_path):
                 self.dbx.files_upload_session_append_v2(b"", cursor, close=True)
             raise DataChangedError("File was modified during read")
 
-        with convert_api_errors(dbx_path=dbx_path):
+        with convert_api_errors(remote_path=remote_path):
             try:
                 self.dbx.files_upload_session_append_v2(
                     self._throttled_upload_iter(data),
@@ -1013,7 +1013,7 @@ class DropboxClient:
         self,
         f: BinaryIO,
         session_id: str,
-        dbx_path: str,
+        remote_path: str,
         mode: files.WriteMode,
         autorename: bool,
         sync_event: SyncEvent | None,
@@ -1030,19 +1030,19 @@ class DropboxClient:
 
         if file_was_modified(os.stat(f.fileno()), old_stat):
             # Close upload session and throw error.
-            with convert_api_errors(dbx_path=dbx_path):
+            with convert_api_errors(remote_path=remote_path):
                 self.dbx.files_upload_session_append_v2(b"", cursor, close=True)
             raise DataChangedError("File was modified during read")
 
         # Finish upload session and return metadata.
         commit = files.CommitInfo(
-            path=dbx_path,
+            path=remote_path,
             client_modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
             autorename=autorename,
             mode=mode,
         )
 
-        with convert_api_errors(dbx_path=dbx_path):
+        with convert_api_errors(remote_path=remote_path):
             try:
                 md = self.dbx.files_upload_session_finish(
                     self._throttled_upload_iter(data),
@@ -1067,18 +1067,18 @@ class DropboxClient:
         return md
 
     def remove(
-        self, dbx_path: str, parent_rev: str | None = None
+        self, remote_path: str, parent_rev: str | None = None
     ) -> FileMetadata | FolderMetadata:
         """
         Removes a file / folder from Dropbox.
 
-        :param dbx_path: Path to file on Dropbox.
+        :param remote_path: Path to file on Dropbox.
         :param parent_rev: Perform delete if given "rev" matches the existing file's
             latest "rev". This field does not support deleting a folder.
         :returns: Metadata of deleted item.
         """
-        with convert_api_errors(dbx_path=dbx_path):
-            res = self.dbx.files_delete_v2(dbx_path, parent_rev=parent_rev)
+        with convert_api_errors(remote_path=remote_path):
+            res = self.dbx.files_delete_v2(remote_path, parent_rev=parent_rev)
         return convert_metadata(res.metadata)
 
     def remove_batch(
@@ -1151,26 +1151,26 @@ class DropboxClient:
                     user_message_locale="",
                     request_id="",
                 )
-                sync_err = dropbox_to_maestral_error(exc, dbx_path=entries[i][0])
+                sync_err = dropbox_to_maestral_error(exc, remote_path=entries[i][0])
                 result_list.append(sync_err)
 
         return result_list
 
     def move(
-        self, dbx_path: str, new_path: str, autorename: bool = False
+        self, remote_path: str, new_path: str, autorename: bool = False
     ) -> FileMetadata | FolderMetadata:
         """
         Moves / renames files or folders on Dropbox.
 
-        :param dbx_path: Path to file/folder on Dropbox.
+        :param remote_path: Path to file/folder on Dropbox.
         :param new_path: New path on Dropbox to move to.
         :param autorename: Have the Dropbox server try to rename the item in case of a
             conflict.
         :returns: Metadata of moved item.
         """
-        with convert_api_errors(dbx_path=new_path):
+        with convert_api_errors(remote_path=new_path):
             res = self.dbx.files_move_v2(
-                dbx_path,
+                remote_path,
                 new_path,
                 allow_shared_folder=True,
                 allow_ownership_transfer=True,
@@ -1178,24 +1178,24 @@ class DropboxClient:
             )
         return convert_metadata(res.metadata)
 
-    def make_dir(self, dbx_path: str, autorename: bool = False) -> FolderMetadata:
+    def make_dir(self, remote_path: str, autorename: bool = False) -> FolderMetadata:
         """
         Creates a folder on Dropbox.
 
-        :param dbx_path: Path of Dropbox folder.
+        :param remote_path: Path of Dropbox folder.
         :param autorename: Have the Dropbox server try to rename the item in case of a
             conflict.
         :returns: Metadata of created folder.
         """
-        with convert_api_errors(dbx_path=dbx_path):
-            res = self.dbx.files_create_folder_v2(dbx_path, autorename)
+        with convert_api_errors(remote_path=remote_path):
+            res = self.dbx.files_create_folder_v2(remote_path, autorename)
 
         md = cast(files.FolderMetadata, res.metadata)
         return convert_metadata(md)
 
     def make_dir_batch(
         self,
-        dbx_paths: list[str],
+        remote_paths: list[str],
         batch_size: int = 900,
         autorename: bool = False,
         force_async: bool = False,
@@ -1203,7 +1203,7 @@ class DropboxClient:
         """
         Creates multiple folders on Dropbox in a batch job.
 
-        :param dbx_paths: List of dropbox folder paths.
+        :param remote_paths: List of dropbox folder paths.
         :param batch_size: Number of folders to create in each batch. Dropbox allows
             batches of up to 1,000 folders. Larger values will be capped automatically.
         :param autorename: Have the Dropbox server try to rename the item in case of a
@@ -1220,7 +1220,7 @@ class DropboxClient:
         with convert_api_errors():
             # Up two ~ 1,000 entries allowed per batch:
             # https://www.dropbox.com/developers/reference/data-ingress-guide
-            for chunk in chunks(dbx_paths, n=batch_size):
+            for chunk in chunks(remote_paths, n=batch_size):
                 res = self.dbx.files_create_folder_batch(chunk, autorename, force_async)
                 if res.is_complete():
                     batch_res = res.get_complete()
@@ -1259,28 +1259,28 @@ class DropboxClient:
                     user_message_locale="",
                     request_id="",
                 )
-                sync_err = dropbox_to_maestral_error(exc, dbx_path=dbx_paths[i])
+                sync_err = dropbox_to_maestral_error(exc, remote_path=remote_paths[i])
                 result_list.append(sync_err)
 
         return result_list
 
     def share_dir(
-        self, dbx_path: str, force_async: bool = False
+        self, remote_path: str, force_async: bool = False
     ) -> FolderMetadata | None:
         """
         Converts a Dropbox folder to a shared folder. Creates the folder if it does not
         exist. May return None if the folder is immediately deleted after creation.
 
-        :param dbx_path: Path of Dropbox folder.
+        :param remote_path: Path of Dropbox folder.
         :param force_async: Whether to force async creation of the Dropbox directory.
             This only changes implementation details and is currently used to reliably
             test the async route.
         :returns: Metadata of shared folder.
         """
-        dbx_path = "" if dbx_path == "/" else dbx_path
+        remote_path = "" if remote_path == "/" else remote_path
 
-        with convert_api_errors(dbx_path=dbx_path):
-            res = self.dbx.sharing_share_folder(dbx_path, force_async=force_async)
+        with convert_api_errors(remote_path=remote_path):
+            res = self.dbx.sharing_share_folder(remote_path, force_async=force_async)
 
         if res.is_complete():
             shared_folder_md = res.get_complete()
@@ -1290,13 +1290,13 @@ class DropboxClient:
 
             time.sleep(0.2)
 
-            with convert_api_errors(dbx_path=dbx_path):
+            with convert_api_errors(remote_path=remote_path):
                 job_status = self.dbx.sharing_check_share_job_status(async_job_id)
 
             while job_status.is_in_progress():
                 time.sleep(0.2)
 
-                with convert_api_errors(dbx_path=dbx_path):
+                with convert_api_errors(remote_path=remote_path):
                     job_status = self.dbx.sharing_check_share_job_status(async_job_id)
 
             if job_status.is_complete():
@@ -1330,23 +1330,23 @@ class DropboxClient:
             return None
 
     def get_latest_cursor(
-        self, dbx_path: str, include_non_downloadable_files: bool = False
+        self, remote_path: str, include_non_downloadable_files: bool = False
     ) -> str:
         """
         Gets the latest cursor for the given folder and subfolders.
 
-        :param dbx_path: Path of folder on Dropbox.
+        :param remote_path: Path of folder on Dropbox.
         :param include_non_downloadable_files: If ``True``, files that cannot be
             downloaded (at the moment only G-suite files on Dropbox) will be included.
         :param kwargs: Additional keyword arguments for Dropbox API
             files/list_folder/get_latest_cursor endpoint.
         :returns: The latest cursor representing a state of a folder and its subfolders.
         """
-        dbx_path = "" if dbx_path == "/" else dbx_path
+        remote_path = "" if remote_path == "/" else remote_path
 
-        with convert_api_errors(dbx_path=dbx_path):
+        with convert_api_errors(remote_path=remote_path):
             res = self.dbx.files_list_folder_get_latest_cursor(
-                dbx_path,
+                remote_path,
                 include_non_downloadable_files=include_non_downloadable_files,
                 recursive=True,
             )
@@ -1355,7 +1355,7 @@ class DropboxClient:
 
     def list_folder(
         self,
-        dbx_path: str,
+        remote_path: str,
         recursive: bool = False,
         include_deleted: bool = False,
         include_mounted_folders: bool = True,
@@ -1366,8 +1366,8 @@ class DropboxClient:
         :meth:`list_folder_iterator` but returns all entries in a single
         :class:`core.ListFolderResult` instance.
 
-        :param dbx_path: Path of folder on Dropbox.
-        :param dbx_path: Path of folder on Dropbox.
+        :param remote_path: Path of folder on Dropbox.
+        :param remote_path: Path of folder on Dropbox.
         :param recursive: If true, the list folder operation will be applied recursively
             to all subfolders and the response will contain contents of all subfolders.
         :param include_deleted: If true, the results will include entries for files and
@@ -1380,7 +1380,7 @@ class DropboxClient:
         :returns: Content of given folder.
         """
         iterator = self.list_folder_iterator(
-            dbx_path,
+            remote_path,
             recursive=recursive,
             include_deleted=include_deleted,
             include_mounted_folders=include_mounted_folders,
@@ -1391,7 +1391,7 @@ class DropboxClient:
 
     def list_folder_iterator(
         self,
-        dbx_path: str,
+        remote_path: str,
         recursive: bool = False,
         include_deleted: bool = False,
         include_mounted_folders: bool = True,
@@ -1404,7 +1404,7 @@ class DropboxClient:
         returned in each iteration corresponds to the number of entries returned by a
         single Dropbox API call and will be typically around 500.
 
-        :param dbx_path: Path of folder on Dropbox.
+        :param remote_path: Path of folder on Dropbox.
         :param recursive: If true, the list folder operation will be applied recursively
             to all subfolders and the response will contain contents of all subfolders.
         :param include_deleted: If true, the results will include entries for files and
@@ -1419,11 +1419,11 @@ class DropboxClient:
             are not downloadable, i.e. Google Docs.
         :returns: Iterator over content of given folder.
         """
-        with convert_api_errors(dbx_path):
-            dbx_path = "" if dbx_path == "/" else dbx_path
+        with convert_api_errors(remote_path):
+            remote_path = "" if remote_path == "/" else remote_path
 
             res = self.dbx.files_list_folder(
-                dbx_path,
+                remote_path,
                 recursive=recursive,
                 include_deleted=include_deleted,
                 include_mounted_folders=include_mounted_folders,
@@ -1510,7 +1510,7 @@ class DropboxClient:
 
     def create_shared_link(
         self,
-        dbx_path: str,
+        remote_path: str,
         visibility: LinkAudience = LinkAudience.Public,
         access_level: LinkAccessLevel = LinkAccessLevel.Viewer,
         allow_download: bool | None = None,
@@ -1524,7 +1524,7 @@ class DropboxClient:
         team settings. Check the returned link metadata to verify the visibility and
         access level.
 
-        :param dbx_path: Dropbox path to file or folder to share.
+        :param remote_path: Dropbox path to file or folder to share.
         :param visibility: The visibility of the shared link. Can be public, team-only,
             or no-one. In case of the latter, the link merely points the user to the
             content and does not grant additional rights to the user. Users of this link
@@ -1552,8 +1552,8 @@ class DropboxClient:
             allow_download=allow_download,
         )
 
-        with convert_api_errors(dbx_path=dbx_path):
-            res = self.dbx.sharing_create_shared_link_with_settings(dbx_path, settings)
+        with convert_api_errors(remote_path=remote_path):
+            res = self.dbx.sharing_create_shared_link_with_settings(remote_path, settings)
 
         return convert_shared_link_metadata(res)
 
@@ -1567,24 +1567,24 @@ class DropboxClient:
             self.dbx.sharing_revoke_shared_link(url)
 
     def list_shared_links(
-        self, dbx_path: str | None = None
+        self, remote_path: str | None = None
     ) -> list[SharedLinkMetadata]:
         """
         Lists all shared links for a given Dropbox path (file or folder). If no path is
         given, list all shared links for the account, up to a maximum of 1,000 links.
 
-        :param dbx_path: Dropbox path to file or folder.
+        :param remote_path: Dropbox path to file or folder.
         :returns: Shared links for a path, including any shared links for parents
             through which this path is accessible.
         """
         results = []
 
-        with convert_api_errors(dbx_path=dbx_path):
-            res = self.dbx.sharing_list_shared_links(dbx_path)
+        with convert_api_errors(remote_path=remote_path):
+            res = self.dbx.sharing_list_shared_links(remote_path)
             results.append(convert_list_shared_link_result(res))
 
             while results[-1].has_more:
-                res = self.dbx.sharing_list_shared_links(dbx_path, results[-1].cursor)
+                res = self.dbx.sharing_list_shared_links(remote_path, results[-1].cursor)
                 results.append(convert_list_shared_link_result(res))
 
         return self.flatten_results(results).entries

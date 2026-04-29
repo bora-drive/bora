@@ -30,10 +30,10 @@ def sync():
 
     sync = SyncEngine(DropboxClient("test-config", CredentialStorage("test-config")))
     sync.fs_events.enable()
-    sync.dropbox_path = local_dir
+    sync.sync_path = local_dir
 
     observer = Observer()
-    observer.schedule(sync.fs_events, sync.dropbox_path, recursive=True)
+    observer.schedule(sync.fs_events, sync.sync_path, recursive=True)
     observer.start()
 
     yield sync
@@ -42,7 +42,7 @@ def sync():
     observer.join()
 
     remove_configuration("test-config")
-    delete(sync.dropbox_path)
+    delete(sync.sync_path)
 
 
 @pytest.fixture

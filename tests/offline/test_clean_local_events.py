@@ -18,7 +18,7 @@ from maestral.sync import SyncEngine
 @pytest.fixture
 def sync():
     sync = SyncEngine(DropboxClient("test-config", CredentialStorage("test-config")))
-    sync.dropbox_path = "/"
+    sync.sync_path = "/"
 
     yield sync
 

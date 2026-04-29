@@ -42,8 +42,8 @@ def convert_api_errors(func: Callable[P, T]) -> Callable[P, T]:
 
 def check_for_fatal_errors(m: MaestralProxy | Maestral) -> bool:
     """
-    Checks the given Maestral instance for fatal errors such as revoked Dropbox access,
-    deleted Dropbox folder etc. Prints a nice representation to the command line.
+    Checks the given Maestral instance for fatal errors such as revoked access,
+    deleted sync folder etc. Prints a nice representation to the command line.
 
     :param m: Proxy to Maestral daemon or Maestral instance.
     :returns: True in case of fatal errors, False otherwise.

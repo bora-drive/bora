@@ -103,9 +103,9 @@ class SyncEvent(Model):
     This class is used to represent both local and remote file system changes and track
     their sync progress. Some instance attributes will depend on the state of the sync
     session, e.g., :attr:`local_path` will depend on the current path of the local
-    Dropbox folder. They may therefore become invalid between sync sessions.
+    sync folder. They may therefore become invalid between sync sessions.
 
-    The class methods :meth:`from_dbx_metadata` and :meth:`from_file_system_event`
+    The class methods :meth:`from_metadata` and :meth:`from_file_system_event`
     should be used to properly construct a :class:`SyncEvent` from a
     :class:`dropbox.files.Metadata` instance or a
     :class:`watchdog.events.FileSystemEvent` instance, respectively.
@@ -127,23 +127,23 @@ class SyncEvent(Model):
     sync_time = NonNullColumn(SqlFloat())
     """Timestamp in Unix epoch seconds the SyncEvent was registered."""
 
-    dbx_id = Column(SqlString())
+    remote_id = Column(SqlString())
     """
-    A unique dropbox ID for the file or folder. Will only be set for download events
+    A unique remote ID for the file or folder. Will only be set for download events
     which are not deletions.
     """
 
-    dbx_path = NonNullColumn(SqlPath())
+    remote_path = NonNullColumn(SqlPath())
     """
-    Correctly cased Dropbox path of the item to sync. If the sync represents a move
+    Correctly cased Remote path of the item to sync. If the sync represents a move
     operation, this will be the destination path. Follows the casing from the
-    path_display attribute of Dropbox metadata.
+    path_display attribute of remote metadata.
     """
 
-    dbx_path_lower = NonNullColumn(SqlPath())
+    remote_path_lower = NonNullColumn(SqlPath())
     """
-    Dropbox path of the item to sync. If the sync represents a move operation, this will
-    be the destination path. This is normalised as the path_lower attribute of Dropbox
+    Remote path of the item to sync. If the sync represents a move operation, this will
+    be the destination path. This is normalised as the path_lower attribute of remote
     metadata.
     """
 
@@ -153,18 +153,18 @@ class SyncEvent(Model):
     be the destination path. This will be correctly cased.
     """
 
-    dbx_path_from = Column(SqlPath())
+    remote_path_from = Column(SqlPath())
     """
-    Dropbox path that this item was moved from. Will only be set if :attr:`change_type`
+    Remote path that this item was moved from. Will only be set if :attr:`change_type`
     is :attr:`ChangeType.Moved`. Follows the casing from the path_display attribute of
-    Dropbox metadata.
+    remote metadata.
     """
 
-    dbx_path_from_lower = Column(SqlPath())
+    remote_path_from_lower = Column(SqlPath())
     """
-    Dropbox path that this item was moved from. Will only be set if :attr:`change_type`
+    Remote path that this item was moved from. Will only be set if :attr:`change_type`
     is :attr:`ChangeType.Moved`. This is normalised as the path_lower attribute of
-    Dropbox metadata.
+    remote metadata.
     """
 
     local_path_from = Column(SqlPath())
@@ -205,15 +205,15 @@ class SyncEvent(Model):
     by other clients and not verified.
     """
 
-    change_dbid = Column(SqlString())
+    change_remote_id = Column(SqlString())
     """
-    The Dropbox ID of the account which performed the changes. This may not be set for
+    The Remote ID of the account which performed the changes. This may not be set for
     added folders or deletions on the server.
     """
 
     change_user_name = Column(SqlString())
     """
-    The user name corresponding to :attr:`change_dbid`, if the account still exists.
+    The user name corresponding to :attr:`change_remote_id`, if the account still exists.
     This field may not be set for performance reasons.
     """
 
@@ -278,9 +278,9 @@ class SyncEvent(Model):
         return self.direction == SyncDirection.Down
 
     def __repr__(self) -> str:
-        attrs = ["direction", "change_type", "item_type", "dbx_path"]
+        attrs = ["direction", "change_type", "item_type", "remote_path"]
         if self.change_type is ChangeType.Moved:
-            attrs.append("dbx_path_from")
+            attrs.append("remote_path_from")
         if self.symlink_target is not None:
             attrs.append("symlink_target")
 
@@ -290,12 +290,12 @@ class SyncEvent(Model):
     @classmethod
     def from_metadata(cls, md: Metadata, sync_engine: SyncEngine) -> SyncEvent:
         """
-        Initializes a SyncEvent from the given Dropbox metadata.
+        Initializes a SyncEvent from the given remote metadata.
 
-        :param md: Dropbox Metadata.
+        :param md: remote metadata.
         :param sync_engine: SyncEngine instance.
         :returns: An instance of this class with attributes populated from the given
-            Dropbox Metadata.
+            remote metadata.
         """
         if isinstance(md, DeletedMetadata):
             # there is currently no API call to determine who deleted a file or folder
@@ -305,8 +305,8 @@ class SyncEvent(Model):
             rev = None
             hash_str = None
             symlink_target = None
-            dbx_id = None
-            change_dbid = None
+            remote_id = None
+            change_remote_id = None
 
             entry = sync_engine.get_index_entry(md.path_lower)
             item_type = ItemType.Unknown if entry is None else entry.item_type
@@ -319,16 +319,16 @@ class SyncEvent(Model):
             rev = "folder"
             hash_str = "folder"
             symlink_target = None
-            dbx_id = md.id
+            remote_id = md.id
             change_time = None
-            change_dbid = None
+            change_remote_id = None
 
         elif isinstance(md, FileMetadata):
             item_type = ItemType.File
             rev = md.rev
             hash_str = md.content_hash
             symlink_target = md.symlink_target
-            dbx_id = md.id
+            remote_id = md.id
             size = md.size
             change_time = md.client_modified.timestamp()
             if sync_engine.get_local_rev(md.path_lower):
@@ -336,30 +336,30 @@ class SyncEvent(Model):
             else:
                 change_type = ChangeType.Added
             if md.shared:
-                change_dbid = md.modified_by
+                change_remote_id = md.modified_by
             else:
                 # File is not a shared folder, therefore
                 # the current user must have added or modified it.
-                change_dbid = sync_engine.client.account_info.account_id
+                change_remote_id = sync_engine.client.account_info.account_id
         else:
             raise RuntimeError(f"Cannot convert {md} to SyncEvent")
 
-        dbx_path_cased = sync_engine.correct_case(md.path_display)
+        remote_path_cased = sync_engine.correct_case(md.path_display)
 
         return cls(
             direction=SyncDirection.Down,
             item_type=item_type,
             sync_time=time.time(),
-            dbx_path=dbx_path_cased,
-            dbx_path_lower=md.path_lower,
-            dbx_id=dbx_id,
-            local_path=sync_engine.to_local_path_from_cased(dbx_path_cased),
+            remote_path=remote_path_cased,
+            remote_path_lower=md.path_lower,
+            remote_id=remote_id,
+            local_path=sync_engine.to_local_path_from_cased(remote_path_cased),
             rev=rev,
             content_hash=hash_str,
             symlink_target=symlink_target,
             change_type=change_type,
             change_time=change_time,
-            change_dbid=change_dbid,
+            change_remote_id=change_remote_id,
             status=SyncStatus.Queued,
             size=size,
             completed=0,
@@ -378,11 +378,11 @@ class SyncEvent(Model):
             SyncEvent.
         """
         try:
-            change_dbid = sync_engine.client.account_info.account_id
+            change_remote_id = sync_engine.client.account_info.account_id
         except NotLinkedError:
             # Allow converting events when we are not linked.
             # This is useful for testing.
-            change_dbid = ""
+            change_remote_id = ""
 
         to_path = get_dest_path(event)
         from_path = None
@@ -429,11 +429,11 @@ class SyncEvent(Model):
             except OSError:
                 symlink_target = None
 
-        dbx_path = sync_engine.to_dbx_path(to_path)
-        dbx_path_lower = normalize(dbx_path)
+        remote_path = sync_engine.to_remote_path(to_path)
+        remote_path_lower = normalize(remote_path)
 
-        dbx_path_from = sync_engine.to_dbx_path(from_path) if from_path else None
-        dbx_path_from_lower = normalize(dbx_path_from) if dbx_path_from else None
+        remote_path_from = sync_engine.to_remote_path(from_path) if from_path else None
+        remote_path_from_lower = normalize(remote_path_from) if remote_path_from else None
 
         # For file changes, update the change type based on our index. Local file system
         # events of created vs modified can be misleading for some safe save mechanisms.
@@ -442,7 +442,7 @@ class SyncEvent(Model):
             ChangeType.Added,
             ChangeType.Modified,
         }:
-            entry = sync_engine.get_index_entry(dbx_path_lower)
+            entry = sync_engine.get_index_entry(remote_path_lower)
             if entry is None:
                 # Item is new to us.
                 change_type = ChangeType.Added
@@ -454,17 +454,17 @@ class SyncEvent(Model):
             direction=SyncDirection.Up,
             item_type=item_type,
             sync_time=time.time(),
-            dbx_path=dbx_path,
-            dbx_path_lower=dbx_path_lower,
+            remote_path=remote_path,
+            remote_path_lower=remote_path_lower,
             local_path=to_path,
-            dbx_path_from=dbx_path_from,
-            dbx_path_from_lower=dbx_path_from_lower,
+            remote_path_from=remote_path_from,
+            remote_path_from_lower=remote_path_from_lower,
             local_path_from=from_path,
             content_hash=content_hash,
             symlink_target=symlink_target,
             change_type=change_type,
             change_time=change_time,
-            change_dbid=change_dbid,
+            change_remote_id=change_remote_id,
             status=SyncStatus.Queued,
             size=size,
             completed=0,
@@ -476,21 +476,21 @@ class IndexEntry(Model):
 
     __tablename__ = "'index'"
 
-    dbx_path_lower = NonNullColumn(SqlPath(), primary_key=True)
+    remote_path_lower = NonNullColumn(SqlPath(), primary_key=True)
     """
-    Dropbox path of the item in lower case. This acts as a primary key for the SQLites
-    database since there can only be one entry per case-insensitive Dropbox path.
-    Corresponds to the path_lower field of Dropbox metadata.
-    """
-
-    dbx_path_cased = NonNullColumn(SqlPath(), index=True)
-    """
-    Dropbox path of the item, correctly cased. Corresponds to the path_display field of
-    Dropbox metadata.
+    Remote path of the item in lower case. This acts as a primary key for the SQLites
+    database since there can only be one entry per case-insensitive Remote path.
+    Corresponds to the path_lower field of remote metadata.
     """
 
-    dbx_id = NonNullColumn(SqlString())
-    """The unique dropbox ID for the item."""
+    remote_path_cased = NonNullColumn(SqlPath(), index=True)
+    """
+    Remote path of the item, correctly cased. Corresponds to the path_display field of
+    remote metadata.
+    """
+
+    remote_id = NonNullColumn(SqlString())
+    """The unique remote ID for the item."""
 
     item_type = NonNullColumn(SqlEnum(ItemType))
     """The :class:`ItemType`."""
@@ -532,7 +532,7 @@ class IndexEntry(Model):
     def __repr__(self) -> str:
         return (
             f"<{self.__class__.__name__}(item_type={self.item_type.name}, "
-            f"dbx_path='{self.dbx_path_cased}')>"
+            f"remote_path='{self.remote_path_cased}')>"
         )
 
 
@@ -562,10 +562,10 @@ class SyncErrorEntry(Model):
 
     __tablename__ = "sync_errors"
 
-    dbx_path = NonNullColumn(SqlPath())
-    dbx_path_lower = NonNullColumn(SqlPath(), primary_key=True)
-    dbx_path_from = Column(SqlPath())
-    dbx_path_from_lower = Column(SqlPath())
+    remote_path = NonNullColumn(SqlPath())
+    remote_path_lower = NonNullColumn(SqlPath(), primary_key=True)
+    remote_path_from = Column(SqlPath())
+    remote_path_from_lower = Column(SqlPath())
     local_path = NonNullColumn(SqlPath())
     local_path_from = Column(SqlPath())
     direction = NonNullColumn(SqlEnum(SyncDirection))

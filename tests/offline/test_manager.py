@@ -66,7 +66,7 @@ def test_migrate_path_root_user_to_team(m: Maestral) -> None:
     os.makedirs(local_dropbox_dir)
 
     try:
-        m.sync.dropbox_path = local_dropbox_dir
+        m.sync.sync_path = local_dropbox_dir
 
         m.set_state("account", "path_root_type", "user")
         m.set_state("account", "path_root_nsid", "1")
@@ -129,7 +129,7 @@ def test_migrate_path_root_team_to_user(m: Maestral) -> None:
     os.makedirs(local_dropbox_dir)
 
     try:
-        m.sync.dropbox_path = local_dropbox_dir
+        m.sync.sync_path = local_dropbox_dir
 
         m.set_state("account", "path_root_type", "team")
         m.set_state("account", "path_root_nsid", "2")
@@ -197,7 +197,7 @@ def test_migrate_path_root_team_to_team(m: Maestral) -> None:
     os.makedirs(local_dropbox_dir)
 
     try:
-        m.sync.dropbox_path = local_dropbox_dir
+        m.sync.sync_path = local_dropbox_dir
 
         m.set_state("account", "path_root_type", "team")
         m.set_state("account", "path_root_nsid", "2")
@@ -266,7 +266,7 @@ def test_migrate_path_root_error(m: Maestral) -> None:
     home = get_home_dir()
     local_dropbox_dir = generate_cc_name(home + "/Dropbox", suffix="test runner")
 
-    m.sync.dropbox_path = local_dropbox_dir
+    m.sync.sync_path = local_dropbox_dir
 
     m.set_state("account", "path_root_type", "user")
     m.set_state("account", "path_root_nsid", "1")
