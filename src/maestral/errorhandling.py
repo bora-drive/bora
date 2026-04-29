@@ -1,5 +1,5 @@
 """
-This module contains methods and decorators to convert OSErrors and Dropbox SDK
+This module contains methods and decorators to convert OSErrors and remote SDK
 exceptions to instances of :exc:`maestral.exceptions.MaestralApiError`.
 """
 
@@ -76,20 +76,20 @@ FT = TypeVar("FT", bound=Callable[..., Any])
 
 @contextlib.contextmanager
 def convert_api_errors(
-    dbx_path: str | None = None, local_path: str | None = None
+    remote_path: str | None = None, local_path: str | None = None
 ) -> Iterator[None]:
     """
     A context manager that catches and re-raises instances of :exc:`OSError` and
     :exc:`dropbox.exceptions.DropboxException` as
     :exc:`maestral.exceptions.MaestralApiError` or :exc:`ConnectionError`.
 
-    :param dbx_path: Dropbox path associated with the error.
+    :param remote_path: remote path associated with the error.
     :param local_path: Local path associated with the error.
     """
     try:
         yield
     except (exceptions.DropboxException, ValidationError) as exc:
-        raise dropbox_to_maestral_error(exc, dbx_path, local_path)
+        raise dropbox_to_maestral_error(exc, remote_path, local_path)
     # Catch connection errors first, they may inherit from OSError.
     except CONNECTION_ERRORS:
         raise ConnectionError(
@@ -104,18 +104,18 @@ def convert_api_errors(
                 "Please check your internet connection and try again later.",
             )
         else:
-            raise os_to_maestral_error(exc, dbx_path, local_path)
+            raise os_to_maestral_error(exc, remote_path, local_path)
 
 
 def os_to_maestral_error(
-    exc: OSError, dbx_path: str | None = None, local_path: str | None = None
+    exc: OSError, remote_path: str | None = None, local_path: str | None = None
 ) -> LocalError:
     """
     Converts a :exc:`OSError` to a :exc:`maestral.exceptions.MaestralApiError` and
     tries to add a reasonably informative error title and message.
 
     :param exc: Original OSError.
-    :param dbx_path: Dropbox path associated with the error.
+    :param remote_path: remote path associated with the error.
     :param local_path: Local path associated with the error.
     :returns: Converted exception.
     """
@@ -168,7 +168,7 @@ def os_to_maestral_error(
     elif exc.errno == errno.ELOOP:
         err_cls = SymlinkError  # subclass of SyncError
         title = "Cannot upload symlink"
-        text = "Symlinks are not currently supported by the public Dropbox API."
+        text = "Symlinks are not currently supported by the public remote API."
     elif exc.errno == errno.ENOSPC:
         err_cls = InsufficientSpaceError  # subclass of SyncError
         title = "Could not download file"
@@ -185,7 +185,7 @@ def os_to_maestral_error(
 
     local_path = local_path or exc.filename
 
-    maestral_exc = err_cls(title, text, dbx_path=dbx_path, local_path=local_path)
+    maestral_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
     maestral_exc.__cause__ = exc
 
     return maestral_exc
@@ -193,15 +193,15 @@ def os_to_maestral_error(
 
 def dropbox_to_maestral_error(
     exc: exceptions.DropboxException | ValidationError | requests.HTTPError,
-    dbx_path: str | None = None,
+    remote_path: str | None = None,
     local_path: str | None = None,
 ) -> MaestralApiError:
     """
-    Converts a Dropbox SDK exception to a :exc:`maestral.exceptions.MaestralApiError`
+    Converts a remote SDK exception to a :exc:`maestral.exceptions.MaestralApiError`
     and tries to add a reasonably informative error title and message.
 
-    :param exc: Dropbox SDK exception..
-    :param dbx_path: Dropbox path associated with the error.
+    :param exc: remote SDK exception..
+    :param remote_path: remote path associated with the error.
     :param local_path: Local path associated with the error.
     :returns: Converted exception.
     """
@@ -209,7 +209,7 @@ def dropbox_to_maestral_error(
     text = "Please contact the developer with the traceback information from the logs."
     err_cls = MaestralApiError
 
-    # ---- Dropbox API Errors ----------------------------------------------------------
+    # ---- remote API Errors ----------------------------------------------------------
     if isinstance(exc, exceptions.ApiError):
         error = exc.error
 
@@ -613,7 +613,7 @@ def dropbox_to_maestral_error(
     elif isinstance(exc, exceptions.HttpError):
         text = exc.body
 
-    maestral_exc = err_cls(title, text, dbx_path=dbx_path, local_path=local_path)
+    maestral_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
     maestral_exc.__cause__ = exc
 
     return maestral_exc

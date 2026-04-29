@@ -95,7 +95,7 @@ def test_file_lifecycle(m: Maestral, name: str) -> None:
 
     # Test local file creation.
     tree: DirTreeType = {name: "content"}
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
 
     wait_for_idle(m)
 
@@ -104,7 +104,7 @@ def test_file_lifecycle(m: Maestral, name: str) -> None:
 
     # Test local file changes.
     tree = {name: "content changed"}
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
 
     wait_for_idle(m)
 
@@ -130,11 +130,11 @@ def test_file_lifecycle(m: Maestral, name: str) -> None:
 
 
 def test_remote_mtime_applied(m: Maestral) -> None:
-    dbx_path = "/test.txt"
-    local_path = m.to_local_path(dbx_path)
+    remote_path = "/test.txt"
+    local_path = m.to_local_path(remote_path)
     mtime = datetime.fromisoformat("2019-12-04")
     m.client.dbx.files_upload(
-        "content", dbx_path, mode=files.WriteMode.overwrite, client_modified=mtime
+        "content", remote_path, mode=files.WriteMode.overwrite, client_modified=mtime
     )
 
     wait_for_idle(m)
@@ -160,7 +160,7 @@ def test_folder_tree_local(m: Maestral) -> None:
         }
     }
 
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
     wait_for_idle(m, 10)
 
     assert_no_errors(m)
@@ -168,7 +168,7 @@ def test_folder_tree_local(m: Maestral) -> None:
 
     # Test local tree deletion.
 
-    delete(m.dropbox_path + "/test_folder")
+    delete(m.sync_path + "/test_folder")
 
     wait_for_idle(m)
 
@@ -226,7 +226,7 @@ def test_local_indexing(m: Maestral) -> None:
         }
     }
 
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
 
     # Start sync and check that all items are indexed and uploaded.
     m.start_sync()
@@ -248,8 +248,8 @@ def test_local_indexing(m: Maestral) -> None:
             "sub_folder_2": "content",  # Replace folder with file
         }
     }
-    delete(m.dropbox_path + "/test_folder")
-    create_local_tree(m.dropbox_path, new_tree)
+    delete(m.sync_path + "/test_folder")
+    create_local_tree(m.sync_path, new_tree)
 
     m.start_sync()
     wait_for_idle(m, 10)
@@ -274,11 +274,11 @@ def test_case_change_local(m: Maestral) -> None:
             },
         }
     }
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
     wait_for_idle(m)
 
     # Rename local parent folder to upper case.
-    shutil.move(m.dropbox_path + "/folder", m.dropbox_path + "/FOLDER")
+    shutil.move(m.sync_path + "/folder", m.sync_path + "/FOLDER")
     wait_for_idle(m)
 
     # Check that case change was propagated to the server.
@@ -301,18 +301,18 @@ def test_case_change_local_while_stopped(m: Maestral) -> None:
     tree: DirTreeType = {
         "folder": {},
     }
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
     wait_for_idle(m)
     m.stop_sync()
 
     # Rename local parent folder to upper case.
-    shutil.move(m.dropbox_path + "/folder", m.dropbox_path + "/FOLDER")
+    shutil.move(m.sync_path + "/folder", m.sync_path + "/FOLDER")
 
     changes, _ = m.sync._get_local_changes_while_inactive()
 
     assert len(changes) == 2
-    assert DirCreatedEvent(src_path=m.dropbox_path + "/FOLDER") in changes
-    assert DirDeletedEvent(src_path=m.dropbox_path + "/folder") in changes
+    assert DirCreatedEvent(src_path=m.sync_path + "/FOLDER") in changes
+    assert DirDeletedEvent(src_path=m.sync_path + "/folder") in changes
 
     m.start_sync()
     wait_for_idle(m)
@@ -334,8 +334,8 @@ def test_case_change_remote(m: Maestral) -> None:
     """
 
     # Start with nested folders.
-    os.mkdir(m.dropbox_path + "/folder")
-    os.mkdir(m.dropbox_path + "/folder/Subfolder")
+    os.mkdir(m.sync_path + "/folder")
+    os.mkdir(m.sync_path + "/folder/Subfolder")
     wait_for_idle(m)
 
     assert_synced(m)
@@ -349,8 +349,8 @@ def test_case_change_remote(m: Maestral) -> None:
 
     md = m.client.get_metadata("/folder")
 
-    assert osp.isdir(m.dropbox_path + "/FOLDER")
-    assert osp.isdir(m.dropbox_path + "/FOLDER/Subfolder")
+    assert osp.isdir(m.sync_path + "/FOLDER")
+    assert osp.isdir(m.sync_path + "/FOLDER/Subfolder")
     assert isinstance(md, FolderMetadata)
     assert md.name == "FOLDER", "casing was not propagated to local folder"
 
@@ -363,7 +363,7 @@ def test_mignore(m: Maestral) -> None:
 
     # 1) Test that changes have no effect when the sync is running.
 
-    create_local_tree(m.dropbox_path, {"folder": {}, "bar": {}})
+    create_local_tree(m.sync_path, {"folder": {}, "bar": {}})
 
     wait_for_idle(m)
 
@@ -385,7 +385,7 @@ def test_mignore(m: Maestral) -> None:
     wait_for_idle(m)
     m.start_sync()
 
-    os.mkdir(m.dropbox_path + "/foo")
+    os.mkdir(m.sync_path + "/foo")
     wait_for_idle(m)
 
     assert not m.client.get_metadata("/foo")
@@ -393,14 +393,14 @@ def test_mignore(m: Maestral) -> None:
 
     # 3) Test that renaming an item excludes it.
 
-    move(m.dropbox_path + "/folder", m.dropbox_path + "/build")
+    move(m.sync_path + "/folder", m.sync_path + "/build")
     wait_for_idle(m)
 
     assert not m.client.get_metadata("/build")
 
     # 4) Test that renaming an item includes it.
 
-    move(m.dropbox_path + "/build", m.dropbox_path + "/folder")
+    move(m.sync_path + "/build", m.sync_path + "/folder")
     wait_for_idle(m)
 
     assert_no_errors(m)
@@ -413,13 +413,13 @@ def test_move_to_existing_file(m: Maestral) -> None:
     # Create two local files.
 
     tree: DirTreeType = {"file0.txt": "c0", "file1.txt": "c1"}
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
 
     wait_for_idle(m)
 
     # Move file0 to file1.
 
-    shutil.move(m.dropbox_path + "/file0.txt", m.dropbox_path + "/file1.txt")
+    shutil.move(m.sync_path + "/file0.txt", m.sync_path + "/file1.txt")
 
     wait_for_idle(m)
 
@@ -437,7 +437,7 @@ def test_excluded_folder_cleared_on_deletion(m: Maestral) -> None:
     corresponding item is deleted.
     """
 
-    dbx_path = "/selective_sync_test_folder"
+    remote_path = "/selective_sync_test_folder"
     local_path = m.to_local_path("/selective_sync_test_folder")
 
     # Create local folder.
@@ -445,19 +445,19 @@ def test_excluded_folder_cleared_on_deletion(m: Maestral) -> None:
     wait_for_idle(m)
 
     # Exclude the folder from sync.
-    m.exclude_items(dbx_path)
+    m.exclude_items(remote_path)
     wait_for_idle(m)
 
-    assert normalize(dbx_path) in m.excluded_items
-    assert m.excluded_status(dbx_path) == "excluded"
+    assert normalize(remote_path) in m.excluded_items
+    assert m.excluded_status(remote_path) == "excluded"
     assert not osp.exists(local_path)
 
     # Check that an excluded folder is removed from excluded_list on deletion.
-    m.client.remove(dbx_path)
+    m.client.remove(remote_path)
     wait_for_idle(m)
 
     assert (
-        normalize(dbx_path) not in m.excluded_items
+        normalize(remote_path) not in m.excluded_items
     ), 'deleted item is still in "excluded_items" list'
 
     assert_synced(m)
@@ -511,14 +511,14 @@ def test_file_conflict_modified(m: Maestral) -> None:
     """Tests conflicting local vs remote file changes."""
 
     # Create a test file and stop syncing.
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     wait_for_idle(m)
 
     m.stop_sync()
     wait_for_idle(m)
 
     # Modify file.txt locally
-    create_local_tree(m.dropbox_path, {"file.txt": "content modified conflict"})
+    create_local_tree(m.sync_path, {"file.txt": "content modified conflict"})
 
     # Modify file.txt on remote.
     create_remote_tree(m, {"file.txt": "content 2"})
@@ -545,7 +545,7 @@ def test_file_conflict_created(m: Maestral) -> None:
     m.stop_sync()
 
     # Create local and remote files at the same location with different contents.
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     create_remote_tree(m, {"file.txt": "content 2"})
 
     # Resume syncing and check for conflicting copy
@@ -568,7 +568,7 @@ def test_remote_file_replaced_by_folder(m: Maestral) -> None:
 
     # Create a test file.
 
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     wait_for_idle(m)
 
     with m.sync.sync_lock:
@@ -588,7 +588,7 @@ def test_remote_file_replaced_by_folder_and_unsynced_local_changes(m: Maestral) 
     unsynced changes.
     """
 
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     wait_for_idle(m)
 
     with m.sync.sync_lock:
@@ -597,7 +597,7 @@ def test_remote_file_replaced_by_folder_and_unsynced_local_changes(m: Maestral) 
         m.client.make_dir("/file.txt")
 
         # create local changes
-        create_local_tree(m.dropbox_path, {"file.txt": "content modified"})
+        create_local_tree(m.sync_path, {"file.txt": "content modified"})
 
     wait_for_idle(m)
 
@@ -628,7 +628,7 @@ def test_remote_folder_replaced_by_file(m: Maestral) -> None:
         }
     }
 
-    create_local_tree(m.dropbox_path, tree)
+    create_local_tree(m.sync_path, tree)
     wait_for_idle(m)
 
     with m.sync.sync_lock:
@@ -664,7 +664,7 @@ def test_remote_folder_replaced_by_file_and_unsynced_local_changes(m: Maestral) 
         # Local state:
         # - '/Sync Tests/folder/'
         # - '/Sync Tests/folder/subfolder'
-        create_local_tree(m.dropbox_path, {"folder": {"subfolder": {}}})
+        create_local_tree(m.sync_path, {"folder": {"subfolder": {}}})
 
     wait_for_idle(m)
 
@@ -686,13 +686,13 @@ def test_remote_folder_replaced_by_file_and_unsynced_local_changes(m: Maestral) 
 def test_local_folder_replaced_by_file(m: Maestral) -> None:
     """Tests the upload sync when a local folder is replaced by a file."""
 
-    os.mkdir(m.dropbox_path + "/folder")
+    os.mkdir(m.sync_path + "/folder")
     wait_for_idle(m)
 
     with m.sync.sync_lock:
         # replace local folder with file
-        delete(m.dropbox_path + "/folder")
-        create_local_tree(m.dropbox_path, {"folder": "content"})
+        delete(m.sync_path + "/folder")
+        create_local_tree(m.sync_path, {"folder": "content"})
 
     wait_for_idle(m)
 
@@ -704,15 +704,15 @@ def test_local_folder_file_deleted_event(m: Maestral) -> None:
     """Tests the upload sync when a local folder is deleted but a FileDeletedEvent
     is emitted instead. The deletion should fail."""
 
-    os.mkdir(m.dropbox_path + "/folder")
+    os.mkdir(m.sync_path + "/folder")
     wait_for_idle(m)
 
     with m.sync.sync_lock:
         # Remove the folder.
-        with m.sync.fs_events.ignore(DirDeletedEvent(m.dropbox_path + "/folder")):
-            delete(m.dropbox_path + "/folder")
+        with m.sync.fs_events.ignore(DirDeletedEvent(m.sync_path + "/folder")):
+            delete(m.sync_path + "/folder")
         # Queue an artificial file deleted event.
-        m.sync.fs_events.queue_event(FileDeletedEvent(m.dropbox_path + "/folder"))
+        m.sync.fs_events.queue_event(FileDeletedEvent(m.sync_path + "/folder"))
 
     wait_for_idle(m)
 
@@ -728,13 +728,13 @@ def test_local_folder_replaced_by_file_and_unsynced_remote_changes(m: Maestral) 
 
     # remote folder is currently not checked for unsynced changes but replaced
 
-    create_local_tree(m.dropbox_path, {"folder": {}})
+    create_local_tree(m.sync_path, {"folder": {}})
     wait_for_idle(m)
 
     with m.sync.sync_lock:
         # replace local folder with file
-        delete(m.dropbox_path + "/folder")
-        create_local_tree(m.dropbox_path, {"folder": "content"})
+        delete(m.sync_path + "/folder")
+        create_local_tree(m.sync_path, {"folder": "content"})
 
         # create remote changes
         create_remote_tree(m, {"folder": {"file.txt": "content"}})
@@ -748,13 +748,13 @@ def test_local_folder_replaced_by_file_and_unsynced_remote_changes(m: Maestral) 
 def test_local_file_replaced_by_folder(m: Maestral) -> None:
     """Tests the upload sync when a local file is replaced by a folder."""
 
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     wait_for_idle(m)
 
     with m.sync.sync_lock:
         # replace local file with folder
-        os.unlink(m.dropbox_path + "/file.txt")
-        os.mkdir(m.dropbox_path + "/file.txt")
+        os.unlink(m.sync_path + "/file.txt")
+        os.mkdir(m.sync_path + "/file.txt")
 
     wait_for_idle(m)
 
@@ -770,11 +770,11 @@ def test_local_file_folder_deleted_event(m: Maestral) -> None:
     wait_for_idle(m)
 
     # Delete local file, suppress FS event.
-    with m.sync.fs_events.ignore(FileDeletedEvent(m.dropbox_path + "/file.txt")):
-        delete(m.dropbox_path + "/file.txt")
+    with m.sync.fs_events.ignore(FileDeletedEvent(m.sync_path + "/file.txt")):
+        delete(m.sync_path + "/file.txt")
 
     # Queue fake DirDeletedEvent.
-    m.sync.fs_events.queue_event(DirDeletedEvent(m.dropbox_path + "/file.txt"))
+    m.sync.fs_events.queue_event(DirDeletedEvent(m.sync_path + "/file.txt"))
 
     wait_for_idle(m)
 
@@ -791,13 +791,13 @@ def test_local_file_replaced_by_folder_and_unsynced_remote_changes(m: Maestral) 
     # Check if server-modified time > last_sync of file and only delete file if
     # older. Otherwise, let Dropbox handle creating a conflicting copy.
 
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     wait_for_idle(m)
 
     with m.sync.sync_lock:
         # replace local file with folder
-        delete(m.dropbox_path + "/file.txt")
-        create_local_tree(m.dropbox_path, {"file.txt": {}})
+        delete(m.sync_path + "/file.txt")
+        create_local_tree(m.sync_path, {"file.txt": {}})
 
         # create remote changes
         create_remote_tree(m, {"file.txt": "content 2"})
@@ -819,7 +819,7 @@ def test_selective_sync_conflict(m: Maestral) -> None:
     path that is excluded by selective sync.
     """
 
-    create_local_tree(m.dropbox_path, {"folder": {}})
+    create_local_tree(m.sync_path, {"folder": {}})
     wait_for_idle(m)
 
     # exclude 'folder' from sync
@@ -829,10 +829,10 @@ def test_selective_sync_conflict(m: Maestral) -> None:
     assert_synced(m, {})
 
     # recreate 'folder' locally
-    os.mkdir(m.dropbox_path + "/folder")
+    os.mkdir(m.sync_path + "/folder")
     wait_for_idle(m)
 
-    os.mkdir(m.dropbox_path + "/folder")
+    os.mkdir(m.sync_path + "/folder")
     wait_for_idle(m)
 
     new_tree: DirTreeType = {
@@ -852,10 +852,10 @@ def test_case_conflict(m: Maestral) -> None:
     only differs in casing from an existing path.
     """
 
-    os.mkdir(m.dropbox_path + "/folder")
+    os.mkdir(m.sync_path + "/folder")
     wait_for_idle(m)
 
-    os.mkdir(m.dropbox_path + "/Folder")
+    os.mkdir(m.sync_path + "/Folder")
     wait_for_idle(m)
 
     new_tree: DirTreeType = {
@@ -872,7 +872,7 @@ def test_unicode_decomposed(m: Maestral) -> None:
     Tests the lifecycle of a file with decomposed unicode characters.
     """
     file_name = b"fo\xcc\x81lder".decode()  # decomposed ó (NFD)
-    local_path = f"{m.dropbox_path}/{file_name}"
+    local_path = f"{m.sync_path}/{file_name}"
     local_path_normalized = normalize_unicode(local_path)
 
     with open(local_path, "a") as f:
@@ -919,11 +919,11 @@ def test_unicode_conflict(m: Maestral) -> None:
     name_decomposed = b"fo\xcc\x81lder"  # decomposed "ó"
     name_composed = b"f\xc3\xb3lder"  # composed "ó"
 
-    os.mkdir(m.dropbox_path.encode() + b"/" + name_decomposed)
+    os.mkdir(m.sync_path.encode() + b"/" + name_decomposed)
     wait_for_idle(m)
 
     try:
-        os.mkdir(m.dropbox_path.encode() + b"/" + name_composed)
+        os.mkdir(m.sync_path.encode() + b"/" + name_composed)
     except FileExistsError:
         # File system / OS does not allow for unicode conflicts, e.g., on macOS.
         return
@@ -946,7 +946,7 @@ def test_parallel_deletion_when_paused(m: Maestral) -> None:
     """Tests parallel remote and local deletions of an item."""
 
     # create a local file
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
 
     wait_for_idle(m)
     assert_synced(m)
@@ -955,7 +955,7 @@ def test_parallel_deletion_when_paused(m: Maestral) -> None:
     wait_for_idle(m)
 
     # delete local file
-    delete(m.dropbox_path + "/file.txt")
+    delete(m.sync_path + "/file.txt")
 
     # delete remote file
     m.client.remove("/file.txt")
@@ -974,7 +974,7 @@ def test_local_and_remote_creation_with_equal_content(m: Maestral) -> None:
     wait_for_idle(m)
 
     # create local file
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     # create remote file with equal content
     create_remote_tree(m, {"file.txt": "content"})
 
@@ -992,7 +992,7 @@ def test_local_and_remote_creation_with_different_content(m: Maestral) -> None:
     wait_for_idle(m)
 
     # create local file
-    create_local_tree(m.dropbox_path, {"file.txt": "content"})
+    create_local_tree(m.sync_path, {"file.txt": "content"})
     # create remote file with different content
     create_remote_tree(m, {"file.txt": "content 2"})
 
@@ -1014,7 +1014,7 @@ def test_local_deletion_during_upload(m: Maestral) -> None:
     """Tests the case where a local item is deleted during the upload."""
 
     # We mimic a deletion during upload by queueing a fake FileCreatedEvent.
-    fake_created_event = FileCreatedEvent(m.dropbox_path + "/file.txt")
+    fake_created_event = FileCreatedEvent(m.sync_path + "/file.txt")
     m.manager.sync.fs_events.queue_event(fake_created_event)
 
     wait_for_idle(m)
@@ -1028,7 +1028,7 @@ def test_rapid_local_changes(m: Maestral) -> None:
 
     for t in (0.1, 0.1, 0.5, 0.5, 1.0, 1.0, 2.0, 2.0):
         time.sleep(t)
-        with open(m.dropbox_path + "/file.txt", "a") as f:
+        with open(m.sync_path + "/file.txt", "a") as f:
             f.write(f"{t} ")
 
     wait_for_idle(m)
@@ -1091,8 +1091,8 @@ def test_local_path_error(m: Maestral) -> None:
 def test_local_indexing_error(m: Maestral) -> None:
     """Tests handling of PermissionError during local indexing."""
 
-    dbx_path = "/folder/file.txt"
-    local_path = m.to_local_path(dbx_path)
+    remote_path = "/folder/file.txt"
+    local_path = m.to_local_path(remote_path)
 
     os.makedirs(local_path)
     wait_for_idle(m)
@@ -1116,11 +1116,11 @@ def test_local_permission_error(m: Maestral) -> None:
 
     m.stop_sync()
 
-    dbx_path = "/file"
-    local_path = m.to_local_path(dbx_path)
+    remote_path = "/file"
+    local_path = m.to_local_path(remote_path)
 
-    create_local_tree(m.dropbox_path, {"file": "content"})
-    os.chmod(m.dropbox_path + "/file", 0o000)
+    create_local_tree(m.sync_path, {"file": "content"})
+    os.chmod(m.sync_path + "/file", 0o000)
 
     m.start_sync()
     wait_for_idle(m)
@@ -1129,7 +1129,7 @@ def test_local_permission_error(m: Maestral) -> None:
         m,
         InsufficientPermissionsError,
         local_path,
-        dbx_path,
+        remote_path,
         SyncDirection.Up,
     )
 
@@ -1161,7 +1161,7 @@ def test_long_path_error(m: Maestral) -> None:
     sync_errors = m.sync_errors
 
     assert len(sync_errors) > 0
-    assert sync_errors[-1].dbx_path == test_path
+    assert sync_errors[-1].remote_path == test_path
     assert sync_errors[-1].type == "PathError"
     assert sync_errors[-1].direction == SyncDirection.Down
 
@@ -1218,7 +1218,7 @@ def test_unknown_path_encoding(m: Maestral, capsys) -> None:
 
 
 def test_symlink_error(m: Maestral) -> None:
-    local_path = m.dropbox_path + "/link"
+    local_path = m.sync_path + "/link"
 
     os.symlink("to_nowhere", local_path)
     wait_for_idle(m)
@@ -1229,7 +1229,7 @@ def test_symlink_error(m: Maestral) -> None:
 def test_symlink_indexing_error(m: Maestral) -> None:
     m.stop_sync()
 
-    local_path = m.dropbox_path + "/link"
+    local_path = m.sync_path + "/link"
 
     os.symlink("to_nowhere", local_path)
 
@@ -1240,7 +1240,7 @@ def test_symlink_indexing_error(m: Maestral) -> None:
 
 
 def test_dropbox_dir_delete_during_sync(m: Maestral) -> None:
-    delete(m.dropbox_path)
+    delete(m.sync_path)
 
     wait_for_idle(m)
 
@@ -1250,10 +1250,10 @@ def test_dropbox_dir_delete_during_sync(m: Maestral) -> None:
 
 @pytest.mark.skipif(is_fs_case_sensitive(HOME), reason="file system is case sensitive")
 def test_dropbox_dir_rename_during_sync(m: Maestral) -> None:
-    dirname, basename = osp.split(m.dropbox_path)
+    dirname, basename = osp.split(m.sync_path)
 
     # Move the directory to a new location with a different casing.
-    shutil.move(m.dropbox_path, osp.join(dirname, basename.upper()))
+    shutil.move(m.sync_path, osp.join(dirname, basename.upper()))
 
     wait_for_idle(m)
 
@@ -1264,7 +1264,7 @@ def test_dropbox_dir_rename_during_sync(m: Maestral) -> None:
 def test_dropbox_dir_delete_during_pause(m: Maestral) -> None:
     m.stop_sync()
 
-    delete(m.dropbox_path)
+    delete(m.sync_path)
 
     m.start_sync()
 
@@ -1383,7 +1383,7 @@ def assert_sync_error(
     m: Maestral,
     err_class: type[SyncError],
     local_path: str | None = None,
-    dbx_path: str | None = None,
+    remote_path: str | None = None,
     direction: SyncDirection | None = None,
 ) -> None:
     assert len(m.sync_errors) == 1
@@ -1395,8 +1395,8 @@ def assert_sync_error(
     if local_path is not None:
         assert error.local_path == local_path
 
-    if dbx_path is not None:
-        assert error.dbx_path == dbx_path
+    if remote_path is not None:
+        assert error.remote_path == remote_path
 
     if direction is not None:
         assert error.direction is direction
@@ -1432,25 +1432,25 @@ def assert_synced(m: Maestral, tree: DirTreeType | None = None) -> None:
             ), f'different symlink targets for "{md0.path_display}"'
 
     # Assert that all local items are present on server.
-    for path, _ in walk(m.dropbox_path, m.sync._scandir_with_ignore):
-        dbx_path_lower = m.sync.to_dbx_path_lower(path)
+    for path, _ in walk(m.sync_path, m.sync._scandir_with_ignore):
+        remote_path_lower = m.sync.to_remote_path_lower(path)
         assert (
-            dbx_path_lower in remote_items_map
+            remote_path_lower in remote_items_map
         ), f'local item "{path}" does not exist on dbx'
 
     # Check each item in our index is on the server.
     for entry in m.sync.get_index():
         # Check that there is a match on the server.
-        md1 = remote_items_map.get(entry.dbx_path_lower)
-        assert md1, f'indexed item "{entry.dbx_path_lower}" does not exist on dbx'
+        md1 = remote_items_map.get(entry.remote_path_lower)
+        assert md1, f'indexed item "{entry.remote_path_lower}" does not exist on dbx'
 
         remote_rev = md1.rev if isinstance(md1, FileMetadata) else "folder"
 
         # Check if revs are equal on server and locally.
-        assert entry.rev == remote_rev, f'different revs for "{entry.dbx_path_lower}"'
+        assert entry.rev == remote_rev, f'different revs for "{entry.remote_path_lower}"'
 
         # Check if casing on drive is the same as in index.
-        local_path_expected_casing = m.dropbox_path + entry.dbx_path_cased
+        local_path_expected_casing = m.sync_path + entry.remote_path_cased
         local_path_actual_casing = to_existing_unnormalized_path(
             local_path_expected_casing
         )
@@ -1482,12 +1482,12 @@ def assert_local_tree(m: Maestral, tree: DirTreeType) -> None:
 
     local_lockpath = m.to_local_path(LOCK_PATH)
 
-    for dirpath, dirnames, filenames in os.walk(m.dropbox_path):
-        relative_path = dirpath.replace(m.dropbox_path + "/", "")
+    for dirpath, dirnames, filenames in os.walk(m.sync_path):
+        relative_path = dirpath.replace(m.sync_path + "/", "")
 
         # Find node in tree.
         node = actual_tree
-        if dirpath != m.dropbox_path:
+        if dirpath != m.sync_path:
             for component in relative_path.split("/"):
                 node = node[component]
 
@@ -1534,20 +1534,20 @@ def create_local_tree(prefix: str, tree: DirTreeType) -> None:
 
 def create_remote_tree(m: Maestral, tree: DirTreeType, prefix: str = "/") -> None:
     for name, content in tree.items():
-        dbx_path = osp.join(prefix, name)
+        remote_path = osp.join(prefix, name)
 
         if isinstance(content, str):
-            with convert_api_errors(dbx_path=dbx_path):
+            with convert_api_errors(remote_path=remote_path):
                 m.client.dbx.files_upload(
-                    content.encode(), dbx_path, mode=files.WriteMode.overwrite
+                    content.encode(), remote_path, mode=files.WriteMode.overwrite
                 )
 
         elif isinstance(content, dict):
             try:
-                m.client.make_dir(dbx_path)
+                m.client.make_dir(remote_path)
             except FolderConflictError:
                 pass
-            create_remote_tree(m, content, dbx_path)
+            create_remote_tree(m, content, remote_path)
 
 
 def tree_normalize_unicode(tree: T) -> T:

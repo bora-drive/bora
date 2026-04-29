@@ -20,7 +20,7 @@ from .cli_settings import autostart, bandwidth_limit, excluded, notify
 from .core import OrderedGroup
 
 
-@click.group(cls=OrderedGroup, help="Dropbox client for Linux and macOS.")
+@click.group(cls=OrderedGroup, help="File sync client for Linux and macOS.")
 @click.version_option(version=__version__, message="%(version)s")
 def main() -> None:
     pass

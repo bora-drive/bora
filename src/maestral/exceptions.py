@@ -16,15 +16,15 @@ class MaestralApiError(Exception):
     MaestralApiError provides attributes that can be used to generate human-readable
     error messages and metadata regarding affected file paths (if any).
 
-    Errors originating from the Dropbox API or the 'local API' both inherit from
+    Errors originating from the remote API or the 'local API' both inherit from
     MaestralApiError.
 
     :param title: A short description of the error type. This can be used in a CLI or
         GUI to give a short error summary.
     :param message: A more verbose description which can include instructions on how to
         proceed to fix the error.
-    :param dbx_path: Dropbox path of the item that caused the error.
-    :param dbx_path_from: Dropbox origin path of the item that caused the error.
+    :param remote_path: Remote path of the item that caused the error.
+    :param remote_path_from: Remote origin path of the item that caused the error.
         This should be set for instance when error occurs when moving an item.
     :param local_path: Local path of the item that caused the error.
     :param local_path_from: Local origin path of the item that caused the error.
@@ -35,18 +35,39 @@ class MaestralApiError(Exception):
         self,
         title: str,
         message: str = "",
-        dbx_path: str | None = None,
-        dbx_path_from: str | None = None,
+        remote_path: str | None = None,
+        remote_path_from: str | None = None,
         local_path: str | None = None,
         local_path_from: str | None = None,
+        # Backward compat aliases:
+        dbx_path: str | None = None,
+        dbx_path_from: str | None = None,
     ) -> None:
         super().__init__(f"{title}. {message}")
         self.title = title
         self.message = message
-        self.dbx_path = dbx_path
-        self.dbx_path_from = dbx_path_from
+        self.remote_path = remote_path or dbx_path
+        self.remote_path_from = remote_path_from or dbx_path_from
         self.local_path = local_path
         self.local_path_from = local_path_from
+
+    @property
+    def dbx_path(self) -> str | None:
+        """Backward compat alias for remote_path."""
+        return self.remote_path
+
+    @dbx_path.setter
+    def dbx_path(self, value: str | None) -> None:
+        self.remote_path = value
+
+    @property
+    def dbx_path_from(self) -> str | None:
+        """Backward compat alias for remote_path_from."""
+        return self.remote_path_from
+
+    @dbx_path_from.setter
+    def dbx_path_from(self, value: str | None) -> None:
+        self.remote_path_from = value
 
     def __str__(self) -> str:
         return f"{self.title}. {self.message}"
@@ -69,11 +90,11 @@ class DataChangedError(SyncError):
 
 class InsufficientPermissionsError(SyncError):
     """Raised when accessing a file or folder fails due to insufficient permissions,
-    both locally and on Dropbox servers."""
+    both locally and on the remote."""
 
 
 class InsufficientSpaceError(SyncError):
-    """Raised when the Dropbox account or local drive has insufficient storage space."""
+    """Raised when the remote account or local drive has insufficient storage space."""
 
 
 class PathError(SyncError):
@@ -151,11 +172,11 @@ class CancelledError(MaestralApiError):
 
 
 class NotLinkedError(MaestralApiError):
-    """Raised when no Dropbox account is linked."""
+    """Raised when no remote account is linked."""
 
 
 class InvalidDbidError(MaestralApiError):
-    """Raised when the given Dropbox ID does not correspond to an existing account."""
+    """Raised when the given ID does not correspond to an existing account."""
 
 
 class KeyringAccessError(MaestralApiError):
@@ -174,7 +195,7 @@ class CacheDirError(MaestralApiError):
 
 
 class InotifyError(MaestralApiError):
-    """Raised when the local Dropbox folder is too large to monitor with inotify."""
+    """Raised when the local sync folder is too large to monitor with inotify."""
 
 
 class OutOfMemoryError(MaestralApiError):
@@ -202,9 +223,9 @@ class TokenRevokedError(AuthError):
 
 class CursorResetError(MaestralApiError):
     """Raised when the cursor used for a longpoll or list-folder request has been
-    invalidated. Dropbox will very rarely invalidate a cursor. If this happens, a new
+    invalidated. The server will very rarely invalidate a cursor. If this happens, a new
     cursor for the respective folder has to be obtained through files_list_folder. This
-    may require re-syncing the entire Dropbox."""
+    may require re-syncing the entire sync folder."""
 
 
 class BadInputError(MaestralApiError):

@@ -84,7 +84,7 @@ def is_equal_or_child(
 
 def normalize_case(string: str) -> str:
     """
-    Converts a string to lower case. Todo: Follow Python 2.5 / Dropbox conventions.
+    Converts a string to lower case. Todo: Follow Python 2.5 conventions.
 
     :param string: Original string.
     :returns: Lowercase string.
@@ -105,23 +105,23 @@ def normalize_unicode(string: str) -> str:
 
 def normalize(path: str | bytes) -> str:
     """
-    Replicates the path normalization performed by Dropbox servers. This typically only
+    Replicates the path normalization performed by the remote server. This typically only
     involves converting the path to lower case, with a few (undocumented) exceptions:
 
     * Unicode normalization: decomposed characters are converted to composed characters.
-    * Lower casing of non-ascii characters: Dropbox uses the Python 2.5 behavior for
+    * Lower casing of non-ascii characters: The remote uses the Python 2.5 behavior for
       conversion to lower case. This means that some cyrillic characters are incorrectly
       lower-cased. For example:
       "Ꙋ".lower() -> "Ꙋ" instead of "ꙋ"
       "ΣΣΣ".lower() -> "σσσ" instead of "σσς"
     * Trailing spaces are stripped from folder names. We do not perform this
-      normalization here because the Dropbox API will raise sync errors for such names
+      normalization here because the remote API will raise sync errors for such names
       anyways.
 
     Note that calling :func:`normalize` on an already normalized path will return the
     unmodified input.
 
-    Todo: Follow Python 2.5 / Dropbox conventions instead of Python 3 conventions.
+    Todo: Follow Python 2.5 conventions instead of Python 3 conventions.
 
     :param path: Original path.
     :returns: Normalized path.
@@ -273,7 +273,7 @@ def to_existing_unnormalized_path(
 def normalized_path_exists(path: str, root: str = osp.sep) -> bool:
     """
     Checks if a ``path`` exists in given ``root`` directory, similar to
-    ``os.path.exists`` but case-insensitive. Normalisation is performed as by Dropbox
+    ``os.path.exists`` but case-insensitive. Normalisation is performed as by the remote server
     servers (lower case and unicode normalisation).
 
     :param path: Path relative to ``root``.
@@ -465,7 +465,7 @@ def content_hash(
 
     :param local_path: Absolute path on local drive.
     :param chunk_size: Size of chunks to hash in bytes.
-    :returns: Content hash to compare with Dropbox's content hash and mtime just before
+    :returns: Content hash to compare with the remote content hash and mtime just before
         the hash was computed.
     """
     hasher = DropboxContentHasher()

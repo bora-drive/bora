@@ -22,7 +22,7 @@ CONFIG_DIR_NAME = "maestral"
 
 DEFAULTS_CONFIG: _DefaultsType = {
     "auth": {
-        "account_id": "",  # dropbox account id
+        "account_id": "",  # remote account id
         "keyring": "automatic",  # keychain backend to use for credential storage
         "token_access_type": "offline",
     },
@@ -36,7 +36,7 @@ DEFAULTS_CONFIG: _DefaultsType = {
         "max_parallel_downloads": 6,  # max number of parallel downloads
     },
     "sync": {
-        "path": "",  # dropbox folder location
+        "path": "",  # sync folder location
         "excluded_items": [],  # files and folders excluded from sync
         "max_cpu_percent": 20.0,  # max CPU usage target (100% = all cores busy)
         "keep_history": 60 * 60 * 24 * 7,  # default: one week
@@ -46,7 +46,7 @@ DEFAULTS_CONFIG: _DefaultsType = {
 }
 
 DEFAULTS_STATE: _DefaultsType = {
-    "account": {  # account state, periodically updated from dropbox servers
+    "account": {  # account state, periodically updated from remote servers
         "email": "",
         "display_name": "",
         "abbreviated_name": "",
@@ -62,7 +62,7 @@ DEFAULTS_STATE: _DefaultsType = {
         "update_notification_last": 0.0,
     },
     "sync": {  # sync state, updated by monitor
-        "cursor": "",  # remote cursor: represents last state synced from dropbox
+        "cursor": "",  # remote cursor: represents last state synced from remote
         "lastsync": 0.0,  # local cursor: time-stamp of last upload
         "last_reindex": 0.0,  # time-stamp of full last reindexing
         "indexing_counter": 0,  # counter for indexing progress between restarts

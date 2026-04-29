@@ -96,7 +96,7 @@ def m(pytestconfig, test_lock):
 
     home = get_home_dir()
     local_dropbox_dir = generate_cc_name(home + "/Dropbox", suffix="test runner")
-    m.create_dropbox_directory(local_dropbox_dir)
+    m.create_sync_directory(local_dropbox_dir)
 
     clean_dropbox_dir(m.client, test_lock.lock_path)
     m.start_sync()

@@ -5,11 +5,11 @@ from maestral.models import ChangeType, ItemType, SyncDirection, SyncEvent, Sync
 from maestral.sync import ActivityNode, ActivityTree
 
 EVENT1 = SyncEvent(
-    dbx_path="/d0/file1.txt",
+    remote_path="/d0/file1.txt",
     direction=SyncDirection.Up,
     status=SyncStatus.Syncing,
     local_path="/d0/file1.txt",
-    dbx_path_lower="/d0/file1.txt",
+    remote_path_lower="/d0/file1.txt",
     change_type=ChangeType.Added,
     completed=0,
     size=10,
@@ -17,11 +17,11 @@ EVENT1 = SyncEvent(
     sync_time=datetime.today(),
 )
 EVENT2 = SyncEvent(
-    dbx_path="/d0/file2.txt",
+    remote_path="/d0/file2.txt",
     direction=SyncDirection.Up,
     status=SyncStatus.Syncing,
     local_path="/d0/file2.txt",
-    dbx_path_lower="/d0/file2.txt",
+    remote_path_lower="/d0/file2.txt",
     change_type=ChangeType.Added,
     completed=0,
     size=10,
@@ -29,11 +29,11 @@ EVENT2 = SyncEvent(
     sync_time=datetime.today(),
 )
 EVENT2_FAILED = SyncEvent(
-    dbx_path="/d0/file2.txt",
+    remote_path="/d0/file2.txt",
     direction=SyncDirection.Up,
     status=SyncStatus.Failed,
     local_path="/d0/file2.txt",
-    dbx_path_lower="/d0/file2.txt",
+    remote_path_lower="/d0/file2.txt",
     change_type=ChangeType.Added,
     completed=0,
     size=10,
@@ -68,7 +68,7 @@ def test_activity_tree_remove_single() -> None:
 
     assert EVENT1 not in tree.sync_events
     assert len(tree.children) == 0
-    assert not tree.has_path(EVENT1.dbx_path)
+    assert not tree.has_path(EVENT1.remote_path)
 
     assert_tree_integrity(tree)
 
@@ -109,9 +109,9 @@ def test_activity_tree_failed_replaced() -> None:
 
 def assert_in_tree(tree: ActivityTree, event: SyncEvent) -> None:
     assert event in tree.sync_events
-    assert tree.has_path(event.dbx_path)
+    assert tree.has_path(event.remote_path)
 
-    parts = event.dbx_path.lstrip("/").split("/")
+    parts = event.remote_path.lstrip("/").split("/")
 
     node = tree
 
@@ -119,7 +119,7 @@ def assert_in_tree(tree: ActivityTree, event: SyncEvent) -> None:
         assert event in node.children[part].sync_events
         node = node.children[part]
 
-    assert tree.get_node(event.dbx_path) is node
+    assert tree.get_node(event.remote_path) is node
 
 
 def assert_not_in_tree(tree: ActivityTree, event: SyncEvent) -> None:

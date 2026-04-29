@@ -18,7 +18,7 @@ from .common import (
     existing_config_option,
     inject_proxy,
 )
-from .core import CliException, DropboxPath
+from .core import CliException, RemotePath
 from .dialogs import confirm, prompt, select, select_multiple, select_path
 from .output import RichDateField, echo, info, ok, rich_table, warn
 
@@ -50,36 +50,36 @@ def stop_daemon_with_cli_feedback(config_name: str) -> None:
         echo("\rStopping Maestral...        " + FAILED)
 
 
-def select_dbx_path_dialog(
+def select_remote_path_dialog(
     config_name: str, default_dir_name: str | None = None, allow_merge: bool = False
 ) -> str:
     """
-    A CLI dialog to ask for a local Dropbox folder location.
+    A CLI dialog to ask for a local sync folder location.
 
     :param config_name: The configuration to use for the default folder name.
     :param default_dir_name: The default directory name. Defaults to
-        "Dropbox ({config_name})" if not given.
+        "Sync ({config_name})" if not given.
     :param allow_merge: If ``True``, allows the selection of an existing folder without
         deleting it. Defaults to ``False``.
     :returns: Path given by user.
     """
-    default_dir_name = default_dir_name or f"Dropbox ({config_name.capitalize()})"
+    default_dir_name = default_dir_name or f"Sync ({config_name.capitalize()})"
 
     while True:
         res = select_path(
-            "Please choose a local Dropbox folder:",
+            "Please choose a local sync folder:",
             default=f"~/{default_dir_name}",
             files_allowed=False,
         )
         res = res.rstrip(osp.sep)
 
-        dropbox_path = osp.expanduser(res)
+        sync_path = osp.expanduser(res)
 
-        if osp.exists(dropbox_path):
+        if osp.exists(sync_path):
             if allow_merge:
                 text = (
                     "Directory already exists. Do you want to replace it "
-                    "or merge its content with your Dropbox?"
+                    "or merge its content with your sync folder?"
                 )
                 choice = select(text, options=["replace", "merge", "cancel"])
             else:
@@ -91,7 +91,7 @@ def select_dbx_path_dialog(
                 choice = 0 if replace else 2
 
             if choice == 0:
-                err = delete(dropbox_path)
+                err = delete(sync_path)
                 if err:
                     warn(
                         "Could not write to selected location. "
@@ -99,28 +99,28 @@ def select_dbx_path_dialog(
                     )
                 else:
                     ok("Replaced existing folder")
-                    return dropbox_path
+                    return sync_path
             elif choice == 1:
                 ok("Merging with existing folder")
-                return dropbox_path
+                return sync_path
 
         else:
-            return dropbox_path
+            return sync_path
 
 
 def link_dialog(m: MaestralProxy | Maestral) -> None:
     """
-    A CLI dialog for linking a Dropbox account.
+    A CLI dialog for linking a remote account.
 
     :param m: Proxy to Maestral daemon.
     """
     authorize_url = m.get_auth_url()
 
     info(f"Linking new account for '{m.config_name}' config")
-    info("Retrieving auth code from Dropbox")
+    info("Retrieving auth code from the remote")
     choice = select(
         "How would you like to you link your account?",
-        options=["Open Dropbox website", "Print auth URL to console"],
+        options=["Open authorization website", "Print auth URL to console"],
     )
 
     if choice == 0:
@@ -142,7 +142,7 @@ def link_dialog(m: MaestralProxy | Maestral) -> None:
         elif res == 1:
             warn("Invalid token, please try again")
         elif res == 2:
-            warn("Could not connect to Dropbox, please try again")
+            warn("Could not connect to the remote, please try again")
 
 
 @click.command(help="Start the sync daemon.")
@@ -189,12 +189,12 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         if m.pending_link:
             link_dialog(m)
 
-        if m.pending_dropbox_folder:
-            path = select_dbx_path_dialog(config_name, allow_merge=True)
+        if m.pending_sync_folder:
+            path = select_remote_path_dialog(config_name, allow_merge=True)
 
             while True:
                 try:
-                    m.create_dropbox_directory(path)
+                    m.create_sync_directory(path)
                     break
                 except OSError:
                     warn(
@@ -206,7 +206,7 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
             include_all = confirm("Would you like sync all folders?")
 
             if not include_all:
-                # get all top-level Dropbox folders
+                # get all top-level sync folders
                 info("Loading...")
                 entries = m.list_folder("/", recursive=False)
 
@@ -325,12 +325,12 @@ def resume(m: Maestral) -> None:
         ok("Syncing resumed.")
 
 
-@click.group(help="Link, unlink and view the Dropbox account.")
+@click.group(help="Link, unlink and view the remote account.")
 def auth() -> None:
     pass
 
 
-@auth.command(name="link", help="Link a new Dropbox account.")
+@auth.command(name="link", help="Link a new remote account.")
 @click.option(
     "--relink",
     "-r",
@@ -368,7 +368,7 @@ def auth_link(
 @auth.command(
     name="unlink",
     help="""
-Unlink your Dropbox account.
+Unlink your remote account.
 
 If Maestral is running, it will be stopped before unlinking.
 """,
@@ -407,7 +407,7 @@ def auth_status(config_name: str) -> None:
     echo("")
     echo(f"Email:         {email}")
     echo(f"Account type:  {account_type}")
-    echo(f"Dropbox ID:    {dbid}")
+    echo(f"Remote ID:    {dbid}")
     echo("")
 
 
@@ -419,7 +419,7 @@ def sharelink() -> None:
 @sharelink.command(
     name="create", help="Create a shared link for a file or folder. Return the URL."
 )
-@click.argument("dropbox_path", type=DropboxPath())
+@click.argument("sync_path", type=RemotePath())
 @click.option(
     "-p",
     "--password",
@@ -436,11 +436,11 @@ def sharelink() -> None:
 @convert_api_errors
 def sharelink_create(
     m: Maestral,
-    dropbox_path: str,
+    sync_path: str,
     password: str,
     expiry: datetime | None,
 ) -> None:
-    link_info = m.create_shared_link(dropbox_path, password=password, expires=expiry)
+    link_info = m.create_shared_link(sync_path, password=password, expires=expiry)
     echo(link_info.url)
 
 
@@ -457,7 +457,7 @@ def sharelink_revoke(m: Maestral, url: list[str]) -> None:
 @sharelink.command(
     name="list", help="List shared links for given paths or all shared links."
 )
-@click.argument("dropbox_path", nargs=-1, type=DropboxPath())
+@click.argument("sync_path", nargs=-1, type=RemotePath())
 @click.option(
     "-l",
     "--long",
@@ -467,13 +467,13 @@ def sharelink_revoke(m: Maestral, url: list[str]) -> None:
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def sharelink_list(m: Maestral, dropbox_path: list[str], long: bool) -> None:
+def sharelink_list(m: Maestral, sync_path: list[str], long: bool) -> None:
     links: list[SharedLinkMetadata]
 
-    if len(dropbox_path) > 0:
+    if len(sync_path) > 0:
         links = []
-        for dbx_path in dropbox_path:
-            links.extend(m.list_shared_links(dbx_path))
+        for remote_path in sync_path:
+            links.extend(m.list_shared_links(remote_path))
     else:
         links = m.list_shared_links()
 

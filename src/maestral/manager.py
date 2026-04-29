@@ -265,7 +265,7 @@ class SyncManager:
         local_observer_thread = Observer(timeout=40)
         local_observer_thread.name = "maestral-fsobserver"
         local_observer_thread.schedule(
-            self.sync.fs_events, self.sync.dropbox_path, recursive=True
+            self.sync.fs_events, self.sync.sync_path, recursive=True
         )
 
         for emitter in local_observer_thread.emitters:
@@ -288,7 +288,7 @@ class SyncManager:
 
                     raise InotifyError(
                         "Inotify limit reached",
-                        "Changes to your Dropbox folder cannot be monitored because it "
+                        "Changes to your sync folder cannot be monitored because it "
                         "contains too many items. Please increase "
                         f"fs.inotify.max_user_watches to {n_new}. See {url} for more "
                         "information.",
@@ -299,7 +299,7 @@ class SyncManager:
 
                     raise InotifyError(
                         "Inotify limit reached",
-                        "Changes to your Dropbox folder cannot be monitored because "
+                        "Changes to your sync folder cannot be monitored because "
                         "there are too many activity inotify instances. Please "
                         f"increase fs.inotify.max_user_instances to {n_new}. See "
                         f"{url} for more information.",
@@ -308,13 +308,13 @@ class SyncManager:
             elif exc.errno in (errno.EPERM, errno.EACCES):
                 raise InotifyError(
                     "Insufficient permissions to monitor local changes",
-                    "Please check the permissions for your local Dropbox folder",
+                    "Please check the permissions for your local sync folder",
                 )
 
             elif exc.errno in (errno.ENOENT, errno.ENOTDIR):
                 raise NoSyncDirError(
-                    "Dropbox folder missing",
-                    "Please move the Dropbox folder back to its original location "
+                    "sync folder missing",
+                    "Please move the sync folder back to its original location "
                     "or restart Maestral to set up a new folder.",
                 )
             else:
@@ -355,7 +355,7 @@ class SyncManager:
     def rebuild_index(self) -> None:
         """
         Rebuilds the rev file by comparing remote with local files and updating rev
-        numbers from the Dropbox server. Files are compared by their content hashes and
+        numbers from the remote server. Files are compared by their content hashes and
         conflicting copies are created if the contents differ. File changes during the
         rebuild process will be queued and uploaded once rebuilding has completed.
 
@@ -409,7 +409,7 @@ class SyncManager:
 
     def _update_path_root(self) -> None:
         """
-        Changes the layout of the local Dropbox folder if the user joins or leaves a
+        Changes the layout of the local sync folder if the user joins or leaves a
         team. New team folders will be downloaded, old team folders will be removed.
         """
         current_root_type = self._state.get("account", "path_root_type")
@@ -442,11 +442,11 @@ class SyncManager:
         local_user_home_path = self.sync.to_local_path_from_cased(new_user_home_path)
 
         try:
-            local_dropbox_dirlist = list(os.scandir(self.sync.dropbox_path))
+            local_sync_dirlist = list(os.scandir(self.sync.sync_path))
         except (FileNotFoundError, NotADirectoryError):
-            title = "Dropbox folder missing"
+            title = "sync folder missing"
             msg = (
-                "Please move the Dropbox folder back to its original location or "
+                "Please move the sync folder back to its original location or "
                 "restart Maestral to set up a new folder."
             )
             raise NoSyncDirError(title, msg)
@@ -461,13 +461,13 @@ class SyncManager:
                         "Migrating user files and downloading team folders",
                     )
 
-                # Migrate user folder to "self.sync.dropbox_path/home_path". We do this
+                # Migrate user folder to "self.sync.sync_path/home_path". We do this
                 # by creating a temporary folder and renaming it after moving all
                 # personal items to prevent name conflicts where a folder has the same
                 # name as `root_info.home_path`.
-                tmpdir = TemporaryDirectory(dir=self.sync.dropbox_path)
+                tmpdir = TemporaryDirectory(dir=self.sync.sync_path)
 
-                for entry in local_dropbox_dirlist:
+                for entry in local_sync_dirlist:
                     if entry.path != tmpdir.name:
                         new_path = f"{tmpdir.name}/{entry.name}"
                         self._logger.debug(
@@ -489,21 +489,21 @@ class SyncManager:
                 self._logger.info("User left team. Updating folder layout.")
                 if self.desktop_notifier:
                     self.desktop_notifier.notify(
-                        "Left Dropbox Team",
+                        "Left team",
                         "Migrating user files and removing team folders",
                     )
 
                 # Remove all team folders.
-                for entry in local_dropbox_dirlist:
+                for entry in local_sync_dirlist:
                     if entry.name != current_user_home_path.lstrip("/"):
                         delete(entry.path, raise_error=True)
 
-                # Migrate user folders to local Dropbox root. We do this by renaming the
+                # Migrate user folders to local sync root. We do this by renaming the
                 # user home to a temporary name and then moving its contents to the
                 # parent folder.
-                old_home_root = self.sync.dropbox_path + current_user_home_path
+                old_home_root = self.sync.sync_path + current_user_home_path
 
-                tmpdir = TemporaryDirectory(dir=self.sync.dropbox_path)
+                tmpdir = TemporaryDirectory(dir=self.sync.sync_path)
 
                 try:
                     os.rename(old_home_root, tmpdir.name)
@@ -512,7 +512,7 @@ class SyncManager:
                     pass
                 else:
                     for entry in list(os.scandir(tmpdir.name)):
-                        new_path = f"{self.sync.dropbox_path}/{entry.name}"
+                        new_path = f"{self.sync.sync_path}/{entry.name}"
                         move(entry.path, new_path, raise_error=True)
                         self._logger.debug(
                             "Moved to root folder: %r → %r", entry.path, new_path
@@ -540,7 +540,7 @@ class SyncManager:
                     )
 
                 # Remove all team folders, leave user folder alone.
-                for entry in local_dropbox_dirlist:
+                for entry in local_sync_dirlist:
                     if entry.name != current_user_home_path.lstrip("/"):
                         delete(entry.path, raise_error=True)
                         self._logger.debug("Deleted team folder: %r", entry.path)
@@ -565,7 +565,7 @@ class SyncManager:
 
     def connection_monitor(self) -> None:
         """
-        Monitors the connection to Dropbox servers. Pauses syncing when the connection
+        Monitors the connection to remote servers. Pauses syncing when the connection
         is lost and resumes syncing when reconnected and syncing has not been paused by
         the user.
         """
@@ -591,7 +591,7 @@ class SyncManager:
         autostart: Event,
     ) -> None:
         """
-        Worker to sync changes of remote Dropbox with local folder.
+        Worker to sync changes of the remote with local folder.
 
         :param running: Event to shut down local file event handler and worker threads.
         :param startup_completed: Set when startup sync is completed.
@@ -611,7 +611,7 @@ class SyncManager:
                 if not running.is_set():
                     return
 
-                self.sync.ensure_dropbox_folder_present()
+                self.sync.ensure_sync_folder_present()
 
                 if has_changes:
                     self._logger.info(SYNCING)
@@ -640,17 +640,17 @@ class SyncManager:
         while running.is_set():
             with self._handle_sync_thread_errors(running, autostart):
                 try:
-                    dbx_path_lower = self.download_queue.get(timeout=40)
+                    remote_path_lower = self.download_queue.get(timeout=40)
                 except Empty:
                     continue
 
                 if not running.is_set():
-                    self.download_queue.put(dbx_path_lower)
+                    self.download_queue.put(remote_path_lower)
                     return
 
                 with self.sync.sync_lock:
-                    self.sync.get_remote_item(dbx_path_lower)
-                    self.download_queue.task_done(dbx_path_lower)
+                    self.sync.get_remote_item(remote_path_lower)
+                    self.download_queue.task_done(remote_path_lower)
                     self._logger.info(IDLE)
 
         _free_memory()
@@ -662,7 +662,7 @@ class SyncManager:
         autostart: Event,
     ) -> None:
         """
-        Worker to sync local changes to remote Dropbox.
+        Worker to sync local changes to the remote.
 
         :param running: Event to shut down local file event handler and worker threads.
         :param startup_completed: Set when startup sync is completed.
@@ -677,7 +677,7 @@ class SyncManager:
                 if not running.is_set():
                     return
 
-                self.sync.ensure_dropbox_folder_present()
+                self.sync.ensure_sync_folder_present()
 
                 if has_changes:
                     self._logger.info(SYNCING)
@@ -693,15 +693,15 @@ class SyncManager:
         autostart: Event,
     ) -> None:
         """
-        Worker to sync local changes to remote Dropbox.
+        Worker to sync local changes to the remote.
 
         :param running: Event to shut down local file event handler and worker threads.
         :param startup_completed: Set when startup sync is completed.
         :param autostart: Set when syncing should automatically resume on connection.
         """
         with self._handle_sync_thread_errors(running, autostart):
-            # Fail early if Dropbox folder disappeared.
-            self.sync.ensure_dropbox_folder_present()
+            # Fail early if sync folder disappeared.
+            self.sync.ensure_sync_folder_present()
 
             # Reload mignore rules.
             self.sync.load_mignore_file()
@@ -721,16 +721,16 @@ class SyncManager:
                 self._logger.info("Retrying failed syncs...")
 
             for error in list(self.sync.download_errors):
-                self.sync.get_remote_item(error.dbx_path_lower)
+                self.sync.get_remote_item(error.remote_path_lower)
 
             # Resume interrupted downloads.
             if self.download_queue.qsize() > 0:
                 self._logger.info("Resuming interrupted syncs...")
 
             while self.download_queue.has_pending():
-                dbx_path = self.download_queue.get()
-                self.sync.get_remote_item(dbx_path)
-                self.download_queue.task_done(dbx_path)
+                remote_path = self.download_queue.get()
+                self.sync.get_remote_item(remote_path)
+                self.download_queue.task_done(remote_path)
 
             if not running.is_set():
                 startup_completed.set()

@@ -17,7 +17,7 @@ from rich.text import Text
 from ..core import DeletedMetadata, FileMetadata, FolderMetadata
 from ..models import SyncDirection, SyncEvent, SyncStatus
 from .common import check_for_fatal_errors, convert_api_errors, inject_proxy
-from .core import DropboxPath
+from .core import RemotePath
 from .output import RichDateField, echo, rich_table
 
 if TYPE_CHECKING:
@@ -60,7 +60,7 @@ def status(m: Maestral) -> None:
         sync_errors_table = rich_table("Path", "Error")
 
         for error in sync_errors:
-            sync_errors_table.add_row(error.dbx_path, f"{error.title}. {error.message}")
+            sync_errors_table.add_row(error.remote_path, f"{error.title}. {error.message}")
 
         console.print(sync_errors_table)
         console.print("")
@@ -71,7 +71,7 @@ def status(m: Maestral) -> None:
 Show the sync status of a local file or folder.
 
 Returned value will be 'uploading', 'downloading', 'up to date', 'error', or 'unwatched'
-(for files outside of the Dropbox directory). This will always be 'unwatched' if syncing
+(for files outside of the sync directory). This will always be 'unwatched' if syncing
 is paused. This command can be used to for instance to query information for a plugin to
 a file-manager.
 """,
@@ -97,7 +97,7 @@ def activity(m: Maestral) -> None:
     progressbar_for_path: dict[EventKey, TaskID] = {}
 
     def _event_key(e: SyncEvent) -> EventKey:
-        return e.dbx_path, e.direction
+        return e.remote_path, e.direction
 
     console = Console()
 
@@ -141,7 +141,7 @@ def activity(m: Maestral) -> None:
                                 info,
                                 total=event.size,
                                 completed=event.completed,
-                                filename=os.path.basename(event.dbx_path),
+                                filename=os.path.basename(event.remote_path),
                             )
                             progressbar_for_path[_event_key(event)] = task_id
                         else:
@@ -156,19 +156,19 @@ def activity(m: Maestral) -> None:
 
 
 @click.command(help="Show sync history.")
-@click.argument("dropbox_path", type=DropboxPath(), default="/")
+@click.argument("sync_path", type=RemotePath(), default="/")
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def history(m: Maestral, dropbox_path: str) -> None:
-    dbx_path = None if dropbox_path == "/" else dropbox_path
-    events = m.get_history(dbx_path)
+def history(m: Maestral, sync_path: str) -> None:
+    remote_path = None if sync_path == "/" else sync_path
+    events = m.get_history(remote_path)
     table = rich_table("Path", "Change", "Location", "Time")
 
     for event in events:
         dt_local_naive = datetime.fromtimestamp(event.change_time_or_sync_time)
         location = "local" if event.direction is SyncDirection.Up else "remote"
         table.add_row(
-            Text(event.dbx_path, overflow="ellipsis", no_wrap=True),
+            Text(event.remote_path, overflow="ellipsis", no_wrap=True),
             Text(event.change_type.value),
             Text(location),
             RichDateField(dt_local_naive),
@@ -178,8 +178,8 @@ def history(m: Maestral, dropbox_path: str) -> None:
     console.print(table)
 
 
-@click.command(help="List contents of a Dropbox directory.")
-@click.argument("dropbox_path", type=DropboxPath(), default="/")
+@click.command(help="List contents of a sync directory.")
+@click.argument("sync_path", type=RemotePath(), default="/")
 @click.option(
     "-l",
     "--long",
@@ -196,11 +196,11 @@ def history(m: Maestral, dropbox_path: str) -> None:
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def ls(m: Maestral, long: bool, dropbox_path: str, include_deleted: bool) -> None:
+def ls(m: Maestral, long: bool, sync_path: str, include_deleted: bool) -> None:
     echo("Loading...\r", nl=False)
 
     entries_iter = m.list_folder_iterator(
-        dropbox_path,
+        sync_path,
         recursive=False,
         include_deleted=include_deleted,
     )
@@ -275,7 +275,7 @@ def ls(m: Maestral, long: bool, dropbox_path: str, include_deleted: bool) -> Non
         console.print(Columns(fields, width=max_len, column_first=True))
 
 
-@click.command(help="List all configured Dropbox accounts.")
+@click.command(help="List all configured remote accounts.")
 @click.option(
     "--clean",
     is_flag=True,

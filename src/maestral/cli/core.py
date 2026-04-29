@@ -1,6 +1,6 @@
 """
 This module provides custom click command line parameters for Maestral such
-:class:`DropboxPath`, :class:`ConfigKey` and :class:`ConfigName`, as well as an ordered
+:class:`RemotePath`, :class:`ConfigKey` and :class:`ConfigName`, as well as an ordered
 command group class which prints its help output in sections.
 """
 
@@ -26,17 +26,17 @@ from .output import warn
 #   when the object is used with prompt inputs.
 
 
-class DropboxPath(click.ParamType):
-    """A command line parameter representing a Dropbox path
+class RemotePath(click.ParamType):
+    """A command line parameter representing a remote path
 
     This parameter type provides custom shell completion for items inside the local
-    Dropbox folder.
+    sync folder.
 
     :param file_okay: Controls if a file is a possible value.
     :param dir_okay: Controls if a directory is a possible value.
     """
 
-    name = "Dropbox path"
+    name = "remote path"
     envvar_list_splitter = osp.pathsep
 
     def __init__(self, file_okay: bool = True, dir_okay: bool = True) -> None:
@@ -76,12 +76,12 @@ class DropboxPath(click.ParamType):
         # get the Maestral config for which to complete paths
         config_name = ctx.params.get("config_name", "maestral") if ctx else "maestral"
 
-        # get all matching paths in our local Dropbox folder
+        # get all matching paths in our local sync folder
         # TODO: query from server if not too slow
 
         config = MaestralConfig(config_name)
-        dropbox_dir = config.get("sync", "path")
-        local_incomplete = osp.join(dropbox_dir, incomplete)
+        sync_dir = config.get("sync", "path")
+        local_incomplete = osp.join(sync_dir, incomplete)
         local_dirname = osp.dirname(local_incomplete)
 
         try:
@@ -89,19 +89,19 @@ class DropboxPath(click.ParamType):
                 for entry in it:
                     if entry.path.startswith(local_incomplete):
                         if self.file_okay and entry.is_file():
-                            dbx_path = removeprefix(entry.path, dropbox_dir)
-                            matches.append(dbx_path)
+                            remote_path = removeprefix(entry.path, sync_dir)
+                            matches.append(remote_path)
                         if self.dir_okay and entry.is_dir():
-                            dbx_path = removeprefix(entry.path, dropbox_dir)
-                            matches.append(dbx_path)
+                            remote_path = removeprefix(entry.path, sync_dir)
+                            matches.append(remote_path)
         except OSError:
             pass
 
         # get all matching excluded items
 
-        for dbx_path in config.get("sync", "excluded_items"):
-            if dbx_path.startswith("/" + incomplete):
-                matches.append(dbx_path)
+        for remote_path in config.get("sync", "excluded_items"):
+            if remote_path.startswith("/" + incomplete):
+                matches.append(remote_path)
 
         for match in matches:
             if not absolute:
@@ -133,7 +133,7 @@ class ConfigKey(click.ParamType):
 
 
 class ConfigName(click.ParamType):
-    """A command line parameter representing a Dropbox path
+    """A command line parameter representing a remote path
 
     This parameter type provides custom shell completion for existing config names.
 

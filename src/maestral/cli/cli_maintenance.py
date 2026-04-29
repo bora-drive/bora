@@ -13,9 +13,9 @@ from click.shell_completion import get_completion_class
 from rich.console import Console
 from rich.text import Text
 
-from .cli_core import select_dbx_path_dialog
+from .cli_core import select_remote_path_dialog
 from .common import convert_api_errors, existing_config_option, inject_proxy
-from .core import CliException, ConfigKey, DropboxPath
+from .core import CliException, ConfigKey, RemotePath
 from .dialogs import confirm, select
 from .output import RichDateField, echo, echo_via_pager, ok, rich_table, warn
 from .utils import get_term_size
@@ -24,23 +24,23 @@ if TYPE_CHECKING:
     from ..main import Maestral
 
 
-@click.command(help="Move the local Dropbox folder.")
+@click.command(help="Move the local sync folder.")
 @click.argument("new_path", required=False, type=click.Path(writable=True))
 @inject_proxy(fallback=True, existing_config=True)
 def move_dir(m: Maestral, new_path: str) -> None:
-    new_path = new_path or select_dbx_path_dialog(m.config_name)
+    new_path = new_path or select_remote_path_dialog(m.config_name)
     new_path = osp.realpath(osp.expanduser(new_path))
 
-    m.move_dropbox_directory(new_path)
+    m.move_sync_directory(new_path)
 
-    ok(f"Dropbox folder moved to {new_path}.")
+    ok(f"sync folder moved to {new_path}.")
 
 
 @click.command(
     help="""
 Rebuild the sync index.
 
-Rebuilding may take several minutes, depending on the size of your Dropbox.
+Rebuilding may take several minutes, depending on the size of your sync folder.
 """,
 )
 @click.option(
@@ -53,7 +53,7 @@ def rebuild_index(m: Maestral, yes: bool) -> None:
 
     msg = textwrap.fill(
         "Rebuilding the index may take several minutes, depending on the size of "
-        "your Dropbox. Any changes to local files will be synced once rebuilding "
+        "your sync folder. Any changes to local files will be synced once rebuilding "
         "has completed. If you stop the daemon during the process, rebuilding will "
         "start again on the next launch.\nIf the daemon is not currently running, "
         "a rebuild will be scheduled for the next startup.",
@@ -72,7 +72,7 @@ def rebuild_index(m: Maestral, yes: bool) -> None:
 
 
 @click.command(help="List old file revisions.")
-@click.argument("dropbox_path", type=DropboxPath())
+@click.argument("sync_path", type=RemotePath())
 @click.option(
     "-l",
     "--limit",
@@ -83,10 +83,10 @@ def rebuild_index(m: Maestral, yes: bool) -> None:
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def revs(m: Maestral, dropbox_path: str, limit: int) -> None:
+def revs(m: Maestral, sync_path: str, limit: int) -> None:
     table = rich_table("Revision", "Modified Time")
 
-    for entry in m.list_revisions(dropbox_path, limit=limit):
+    for entry in m.list_revisions(sync_path, limit=limit):
         table.add_row(Text(entry.rev), RichDateField(entry.client_modified))
 
     console = Console()
@@ -106,7 +106,7 @@ to generate the diff. Depending on the file size, this may use significant disk 
 and memory.
 """,
 )
-@click.argument("dropbox_path", type=DropboxPath())
+@click.argument("sync_path", type=RemotePath())
 @click.option(
     "-v",
     "--rev",
@@ -128,7 +128,7 @@ and memory.
 @convert_api_errors
 def diff(
     m: Maestral,
-    dropbox_path: str,
+    sync_path: str,
     rev: list[str],
     no_color: bool,
     no_pager: bool,
@@ -139,15 +139,15 @@ def diff(
 
     # Ask for user input if revs are not provided as CLI arguments.
     if len(rev) == 0:
-        entries = m.list_revisions(dropbox_path, limit=limit)
+        entries = m.list_revisions(sync_path, limit=limit)
         modified_dates: list[str] = []
 
         for entry in entries:
             field = RichDateField(entry.client_modified)
             modified_dates.append(field.format(40))
 
-        dbx_path = entries[0].path_display
-        local_path = m.to_local_path(dbx_path)
+        remote_path = entries[0].path_display
+        local_path = m.to_local_path(remote_path)
 
         if osp.isfile(local_path):
             # prepend local version as an option
@@ -232,7 +232,7 @@ Restore a previous version of a file.
 If no revision number is given, old revisions will be listed.
 """,
 )
-@click.argument("dropbox_path", type=DropboxPath())
+@click.argument("sync_path", type=RemotePath())
 @click.option("-v", "--rev", help="Revision to restore.", default="")
 @click.option(
     "-l",
@@ -244,10 +244,10 @@ If no revision number is given, old revisions will be listed.
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def restore(m: Maestral, dropbox_path: str, rev: str, limit: int) -> None:
+def restore(m: Maestral, sync_path: str, rev: str, limit: int) -> None:
     if not rev:
         echo("Loading...\r", nl=False)
-        entries = m.list_revisions(dropbox_path, limit=limit)
+        entries = m.list_revisions(sync_path, limit=limit)
         dates = []
         for entry in entries:
             field = RichDateField(entry.client_modified)
@@ -261,9 +261,9 @@ def restore(m: Maestral, dropbox_path: str, rev: str, limit: int) -> None:
 
         rev = entries[index].rev
 
-    m.restore(dropbox_path, rev)
+    m.restore(sync_path, rev)
 
-    ok(f'Restored {rev} to "{dropbox_path}"')
+    ok(f'Restored {rev} to "{sync_path}"')
 
 
 @click.group(help="View and manage the log.")
@@ -344,7 +344,7 @@ def log_level(m: Maestral, level_name: str) -> None:
 Direct access to config values.
 
 Warning: Changing some config values must be accompanied by maintenance tasks. For
-example, changing the config value for the Dropbox location needs to be accompanied by
+example, changing the config value for the sync folder location needs to be accompanied by
 actually moving the folder. This command only gets / sets the value in the config file.
 Most changes will also require a restart of the daemon to become effective.
 
@@ -355,9 +355,9 @@ inconsistent state.
 Currently available config keys are:
 
 \b
-- path: the location of the local Dropbox folder
+- path: the location of the local sync folder
 - excluded_items: list of files or folders excluded by selective sync
-- account_id: the ID of the linked Dropbox account
+- account_id: the ID of the linked remote account
 - notification_level: the level for desktop notifications
 - log_level: the log level.
 - update_notification_interval: interval in secs to check for updates

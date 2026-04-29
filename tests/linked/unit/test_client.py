@@ -276,40 +276,40 @@ def test_share_dir_existing(client: DropboxClient) -> None:
 
 def test_sharedlink_lifecycle(client: DropboxClient) -> None:
     # create a folder to share
-    dbx_path = "/shared_folder"
-    client.make_dir(dbx_path)
+    remote_path = "/shared_folder"
+    client.make_dir(remote_path)
 
     # test creating a shared link
-    link_data = client.create_shared_link(dbx_path)
+    link_data = client.create_shared_link(remote_path)
 
     resp = requests.get(link_data.url)
     assert resp.status_code == 200
 
-    links = client.list_shared_links(dbx_path)
+    links = client.list_shared_links(remote_path)
     assert link_data.url in [link.url for link in links]
 
     # test revoking a shared link
     client.revoke_shared_link(link_data.url)
-    links = client.list_shared_links(dbx_path)
+    links = client.list_shared_links(remote_path)
     assert link_data.url not in [link.url for link in links]
 
 
 def test_sharedlink_errors(client: DropboxClient) -> None:
-    dbx_path = "/shared_folder"
-    client.make_dir(dbx_path)
+    remote_path = "/shared_folder"
+    client.make_dir(remote_path)
 
     # test creating a shared link with password fails on basic account
     account_info = client.get_account_info()
 
     if account_info.account_type is AccountType.Basic:
         with pytest.raises(SharedLinkError):
-            client.create_shared_link(dbx_path, password="secret")
+            client.create_shared_link(remote_path, password="secret")
 
     # test creating a shared link with the same settings as an existing link
-    client.create_shared_link(dbx_path)
+    client.create_shared_link(remote_path)
 
     with pytest.raises(SharedLinkError):
-        client.create_shared_link(dbx_path)
+        client.create_shared_link(remote_path)
 
     # test creating a shared link with an invalid path
     with pytest.raises(NotFoundError):
