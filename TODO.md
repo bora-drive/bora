@@ -80,7 +80,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Implement `populate_from_listing(items)` for initial full sync
 - [ ] Handle duplicate name detection and resolution
 - [ ] Handle files with multiple parents (pick canonical)
-- [ ] Write unit tests for path cache
+- [ ] Write unit tests for path cache (red/green TDD — tests written before or alongside implementation)
 
 ## Phase 5: Google Drive Client (CORE REWRITE)
 
@@ -244,6 +244,10 @@ All known tasks, roughly in dependency order. Check off as completed.
 
 ## Phase 12: Testing
 
+> **Approach:** Red/green TDD for all new code. Use `google-api-python-client`'s
+> built-in `HttpMock` for mocking Google API responses (canned HTTP replay).
+> A dedicated test Google account will be set up for integration tests.
+
 ### Unit tests (offline)
 
 - [ ] Port `tests/offline/test_client.py` for `GoogleDriveClient` (mock Google API)
@@ -263,7 +267,8 @@ All known tasks, roughly in dependency order. Check off as completed.
 
 ### Integration tests (linked)
 
-- [ ] Set up test Google account with Drive API access
+- [ ] Set up dedicated test Google account with Drive API access
+- [ ] Document test account setup in `tests/README.md` (credentials, project config)
 - [ ] Port `tests/linked/unit/test_client.py`
 - [ ] Port `tests/linked/integration/test_sync.py`
 - [ ] Port `tests/linked/integration/test_main.py`
