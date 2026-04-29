@@ -105,8 +105,11 @@ class NotAFolderError(SyncError):
     """Raised when a folder is required but a file is provided."""
 
 
-class DropboxServerError(SyncError):
-    """Raised in case of internal Dropbox errors."""
+class ServerError(SyncError):
+    """Raised in case of internal server errors."""
+
+
+DropboxServerError = ServerError  # backward compat
 
 
 class RestrictedContentError(SyncError):
@@ -136,8 +139,11 @@ class SymlinkError(SyncError):
 # ==== errors which are not related to a specific sync event ===========================
 
 
-class DropboxConnectionError(MaestralApiError):
-    """Raised when the connection to Dropbox fails"""
+class ConnectionError(MaestralApiError):
+    """Raised when the connection to the remote server fails."""
+
+
+DropboxConnectionError = ConnectionError  # backward compat
 
 
 class CancelledError(MaestralApiError):
@@ -156,8 +162,11 @@ class KeyringAccessError(MaestralApiError):
     """Raised when retrieving a saved auth token from the user keyring fails."""
 
 
-class NoDropboxDirError(MaestralApiError):
-    """Raised when the local Dropbox folder cannot be found."""
+class NoSyncDirError(MaestralApiError):
+    """Raised when the local sync folder cannot be found."""
+
+
+NoDropboxDirError = NoSyncDirError  # backward compat
 
 
 class CacheDirError(MaestralApiError):
@@ -176,15 +185,18 @@ class DatabaseError(MaestralApiError):
     """Raised when reading or writing to the database fails."""
 
 
-class DropboxAuthError(MaestralApiError):
+class AuthError(MaestralApiError):
     """Raised when authentication fails."""
 
 
-class TokenExpiredError(DropboxAuthError):
+DropboxAuthError = AuthError  # backward compat
+
+
+class TokenExpiredError(AuthError):
     """Raised when authentication fails because the user's token has expired."""
 
 
-class TokenRevokedError(DropboxAuthError):
+class TokenRevokedError(AuthError):
     """Raised when authentication fails because the user's token has been revoked."""
 
 
