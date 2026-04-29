@@ -32,7 +32,7 @@ except ImportError:
 
 # local imports
 from . import __version__
-from .client import DropboxClient
+from .client import GoogleDriveClient as DropboxClient  # TODO: rename all usages
 from .config import CumulusConfig, CumulusState, validate_config_name
 from .constants import (
     CONNECTING,
