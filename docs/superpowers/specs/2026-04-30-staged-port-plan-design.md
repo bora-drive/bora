@@ -66,12 +66,12 @@ path cache, no sync engine, no error-handling hierarchy, no tests.
 
 | # | Question (REVIEW2 ref) | Procedure | What it informs |
 |---|---|---|---|
-| 1 | Does OAuth `run_local_server` work in your dev environments? (B1) | Run locally and via SSH; if either fails, prototype out-of-band PKCE flow | Stage 2: paste-the-code UX vs. local-server reliance |
-| 2 | Does `md5Checksum` match locally-computed `hashlib.md5`? | Upload 5 files (small, large, binary, text, non-ASCII bytes); compare | Stage 5: hashing plan stands or needs special-casing |
-| 3 | What does `changes.list` return for trash / hard-delete / unshare / move-out-of-scope? (A3, A4) | Set up a folder, get `startPageToken`, perform each mutation, capture payloads | Stage 3: concrete rules for `_clean_remote_changes` and `removed` disambiguation |
-| 4 | Can you create a Drive file whose `name` contains `/`? (C1) | `files.create(name='2024/05 report.pdf')`; if it succeeds, see how `files.list` returns it | Stage 1: escape policy vs. reject policy |
-| 5 | What does a combined move + rename look like in one change entry? (A5) | Single `files.update` with new name and `addParents`/`removeParents`; observe change | Stage 4: whether path cache `move()` must be atomic over both operations |
-| 6 | What `removed` reasons can a change entry actually carry? (A4) | Trigger trash, hard-delete (`files.delete`), permission revoke, move-out-of-scope; record each payload | Stage 3: whether `removed=True` alone is sufficient or `file.trashed` / parent visibility must also be inspected |
+| 1 | Does OAuth `run_local_server` work in your dev environments? (B1) | Run locally and via SSH; if either fails, prototype out-of-band PKCE flow | **Spike answer:** Mode A succeeds in headless VM via SSH port-forward; paste-redirect fails with `InsecureTransportError` (HTTP redirect_uri rejected by oauthlib). Stage 2 default = `run_local_server` + documented SSH port-forward; paste-redirect fallback requires `OAUTHLIB_INSECURE_TRANSPORT=1` or an embedded-loopback rewrite. |
+| 2 | Does `md5Checksum` match locally-computed `hashlib.md5`? | Upload 5 files (small, large, binary, text, non-ASCII bytes); compare | **Spike answer:** all 5 match exactly, including 6 MB resumable case. Stage 5 hashing plan stands as-is — `ContentHasher` (MD5) maps directly to Drive's `md5Checksum`. |
+| 3 | What does `changes.list` return for trash / hard-delete / unshare / move-out-of-scope? (A3, A4) | Set up a folder, get `startPageToken`, perform each mutation, capture payloads | **Spike answer (unshare deferred — single account):** trash → `removed=false` + `file.trashed=true` + full file body; hard-delete → `removed=true` + no file body, only `fileId`; move-out → `removed=false` + full file body with updated `parents`. `_clean_remote_changes` rules embedded in §5.3. |
+| 4 | Can you create a Drive file whose `name` contains `/`? (C1) | `files.create(name='2024/05 report.pdf')`; if it succeeds, see how `files.list` returns it | **Spike answer:** Drive accepts `/` literally — `name`, `list`, `get` all roundtrip the slash unchanged. Stage 1 must **escape** (not reject); Stage 4 mirror-escapes on upload. |
+| 5 | What does a combined move + rename look like in one change entry? (A5) | Single `files.update` with new name and `addParents`/`removeParents`; observe change | **Spike answer:** exactly one change entry covers both — `path_cache.move()` reads name+parents atomically from the single entry. No split-entry coordination required. |
+| 6 | What `removed` reasons can a change entry actually carry? (A4) | Trigger trash, hard-delete (`files.delete`), permission revoke, move-out-of-scope; record each payload | **Spike answer:** `removed=true` alone is **not** sufficient — only set for hard-delete. Trash → `removed=false` + `file.trashed=true`. Move-out → `removed=false` + parents updated. Disambiguation table embedded in §5.3. |
 
 ### 4.2 Deliverable
 
@@ -112,8 +112,10 @@ sized to ~3–10 days of focused work.
 
 **In scope:**
 
-- C1 — decide and implement `/`-in-name policy (informed by spike Q4):
-  reject vs. escape. The cache must enforce the choice.
+- C1 — `/`-in-name policy: **escape** `/` (and the escape character itself)
+  when serializing a Drive `name` into the virtual path; symmetric un-escape
+  on hydration. Decided by spike Q4 (Drive accepts `/` literally as a name
+  character).
 - C2 — replace `name.lower()` with `casefold() + NFC` for case-conflict keys.
 - C3 (cache side) — reject names containing filesystem-reserved characters
   (`*?"<>|` plus embedded NUL) before admission to the cache.
@@ -138,7 +140,12 @@ of Stage 1.
   `src/cumulus/resources/`; document for contributors.
 - Phase 3 — `get_auth_url`, `link(code)`, `unlink()`, refresh-on-401, `linked`
   property.
-- B1 — headless-friendly OAuth UX. Specific approach informed by spike Q1.
+- B1 — headless-friendly OAuth UX. Default: `run_local_server` (works
+  locally and over SSH port-forward — confirmed by spike Q1). Document the
+  port-forward pattern for headless users. Paste-redirect fallback requires
+  `OAUTHLIB_INSECURE_TRANSPORT=1` env var (or an embedded-loopback rewrite);
+  the spike's `run_flow_console` is a reference for the failure mode without
+  it (`InsecureTransportError`).
 - B3 — token-revocation propagation: when a background-thread API call returns
   401 / `RefreshError`, surface as `AuthError` and re-link prompt; verify the
   existing Dropbox-flow re-link path still functions.
@@ -162,8 +169,18 @@ also populate the path cache, which the write client then reads from.
 - A3 — change-feed filtering by sync-root: change entries don't include paths,
   so resolving each `fileId` to a path goes through the cache; misses trigger
   a `files.get` to learn parents.
-- A4 — `removed` disambiguation rules (informed by spike Q3, Q6): distinguish
-  "file is gone, propagate delete" from "we lost visibility, do nothing".
+- A4 — `removed` disambiguation rules (decided by spike Q3, Q6):
+
+  | Observation | Interpretation | Action |
+  |---|---|---|
+  | `removed=true` (no `file`) | hard-deleted, unshared, or lost visibility | propagate delete; cache resolves fileId → cached path |
+  | `removed=false` + `file.trashed=true` | user trashed | propagate delete |
+  | `removed=false` + `file.trashed=false` + no parent in sync scope | moved out of sync scope | propagate delete of local mirror |
+  | `removed=false` + `file.trashed=false` + parent in sync scope | normal create / update / move within mirror | apply via path_cache |
+
+  Rule 3 (move-out detection) requires computing `file.parents ⊆ sync_root`
+  per change; the cache resolution covers this provided the cache is
+  populated.
 - C6 — Computers / Backup folders: skip with log warning (single bullet, not
   a section).
 - Read-side error mapping (subset of Phase 6): 401, 403, 404, 429, 500/503 for
@@ -182,8 +199,10 @@ populates from initial listing.
   Overwrite}`; MD5 verify after upload; cache update on success.
 - Phase 5f (file/folder ops): `remove`, `move`, `make_dir`, `make_dir_batch`,
   `remove_batch`, `autorename`.
-- A5 — combined move+rename in a single `files.update`; path cache `move()`
-  must update name and parent atomically.
+- A5 — combined move+rename in a single `files.update`; spike Q5 confirmed
+  the change feed emits **one** entry covering both new name and new parent,
+  so `path_cache.move()` reads name+parents atomically from the single entry
+  (no split-entry coordination needed).
 - C3 (upload sanitization) — reject or normalize names containing
   filesystem-reserved characters before they reach Drive. Cross-check with
   Stage 1's cache-side rule.
@@ -346,12 +365,22 @@ stage-bound risks:
 
 ## 9. Open questions / things to revisit after the spike
 
-- C1 `/`-in-name: reject or escape? Decision deferred to Stage 1 spec
-  pending spike Q4 result.
+- ~~C1 `/`-in-name: reject or escape?~~ **Resolved by spike Q4 → escape.**
+  Embedded in §5.1.
+- ~~A5 combined move+rename atomicity in change feed.~~ **Resolved by spike
+  Q5 → single entry, atomic.** Embedded in §5.4.
+- ~~A4 `removed` disambiguation rules.~~ **Resolved by spike Q3+Q6** via the
+  rule table embedded in §5.3.
+- B1 OAuth UX: spike Q1 confirmed `run_local_server` works headless via
+  port-forward; paste-redirect needs `OAUTHLIB_INSECURE_TRANSPORT=1`.
+  Embedded in §5.2.
 - C4 trash vs delete default: `trashed=True` proposed, but final policy
   pending Stage 4 spec and possibly user input.
 - A6 `appProperties`: defer unless Stage 3 / 4 surface a concrete need.
 - D4 GUI compat: shim or break? Decision deferred to Stage 5 spec.
+- Q3 unshare scenario: not run in spike (single-account); revisit only if
+  Stage 3 surfaces a concrete failure mode that the working assumption
+  (treat unshare like hard-delete) doesn't cover.
 
 ## 10. Next step after this design is approved
 
