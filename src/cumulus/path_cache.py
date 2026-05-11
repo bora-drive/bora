@@ -3,20 +3,27 @@
 Google Drive's API is ID-based: every file/folder has an opaque ``file_id``.
 The sync engine (and the user) think in paths. This module bridges the gap.
 
-Design decisions (see REVIEW.md Issue #2):
+Key responsibilities:
 
-* **Concurrency** — the path cache shares ``SyncEngine.sync_lock``. It is only
-  accessed during sync operations that already hold the lock, so no additional
-  lock is needed.
-* **Initial population** — a single filtered ``files.list`` call (``trashed=false``)
-  retrieves all items, then the tree is reconstructed in-memory from parent
-  references before bulk-inserting into SQLite.
-* **Case-insensitive uniqueness** — Cumulus enforces Dropbox-like
-  case-insensitivity: two items whose names differ only by case are treated as
-  duplicates.  During bulk population the first item (by file-ID lexicographic
-  order) wins; during incremental updates (``set`` / ``move``) the existing
-  entry wins.  Conflicts are logged as warnings; users should fix them in the
-  Google Drive web UI.
+* **Path encoding** — Drive accepts characters in ``name`` (slash, control
+  chars, Windows-reserved punctuation) that don't survive a filesystem
+  path round-trip. The cache stores ``remote_path`` in URL-encoded form
+  (via ``cumulus.path_codec``); the ``name`` column stores the raw Drive
+  name as-is for upload purposes.
+* **Case-fold lookup key** — ``remote_path_fold`` holds
+  ``fold_path(remote_path)`` (NFC + casefold per name component). This
+  replaces the simple ``.lower()`` key used in earlier prototypes; Drive
+  doesn't return a server-computed fold form (Dropbox did), so we
+  compute it client-side.
+* **Concurrency** — the path cache shares ``SyncEngine.sync_lock``. It is
+  only accessed during sync operations that already hold the lock, so no
+  additional lock is needed.
+* **Atomic populate** — ``populate_from_listing`` runs inside a single
+  ``Database.transaction()``; on failure the cache is restored to its
+  prior state.
+
+See ``docs/superpowers/specs/2026-05-02-stage-1-path-cache-design.md`` for
+the full design.
 """
 
 from __future__ import annotations
@@ -28,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from .database.orm import Column, Manager, Model, NonNullColumn
 from .database.types import SqlInt, SqlPath, SqlString
 from .native_docs import GOOGLE_FOLDER_MIME_TYPE
+from .path_codec import compose_path, encode_name, fold_path
 
 if TYPE_CHECKING:
     from .database.core import Database
@@ -51,17 +59,27 @@ class PathCacheEntry(Model):
     """Google Drive file ID (unique, opaque string)."""
 
     remote_path = NonNullColumn(SqlPath(), index=True)
-    """Canonical remote path, e.g. ``/Documents/report.pdf``.
-    Cased as it appears on Drive."""
+    """URL-encoded virtual path, e.g. ``/Documents/2024%2F05 report.pdf``.
 
-    remote_path_lower = NonNullColumn(SqlPath(), index=True)
-    """Lower-cased remote path, used for case-insensitive lookups."""
+    Encoded via :func:`cumulus.path_codec.encode_name` per name component.
+    The encoding makes the path safe to use as a filesystem path segment
+    even when Drive ``name`` fields contain ``/``, control chars, or
+    Windows-reserved punctuation."""
+
+    remote_path_fold = NonNullColumn(SqlPath(), index=True)
+    """Case-fold lookup key, computed as
+    :func:`cumulus.path_codec.fold_path` (NFC + casefold per component).
+
+    This is *not* a simple lowercase form — Drive's case-insensitive
+    semantics use Unicode collation (closer to Python's ``str.casefold``
+    plus NFC) than ASCII lowercase."""
 
     parent_id = Column(SqlString())
     """File ID of the parent folder.  ``None`` for the root."""
 
     name = NonNullColumn(SqlString())
-    """File/folder name as it appears on Drive."""
+    """Raw Drive name (e.g. ``2024/05 report.pdf`` literally, with the
+    slash). Used by Stage 4 upload when re-naming on Drive."""
 
     is_folder = NonNullColumn(SqlInt())
     """1 for folders, 0 for files."""
@@ -103,14 +121,15 @@ class PathIDCache:
     def path_to_id(self, remote_path: str) -> str | None:
         """Return the file ID for *remote_path*, or ``None`` if not cached.
 
-        The lookup is **case-insensitive**.
+        ``remote_path`` is the encoded path. The lookup is
+        case-insensitive (uses ``remote_path_fold``).
         """
         if remote_path == self.ROOT_PATH:
             return self._root_id
 
-        lower = remote_path.lower()
+        fold = fold_path(remote_path)
         rows = self._table.select_sql(
-            "WHERE remote_path_lower = ?", os.fsencode(lower)
+            "WHERE remote_path_fold = ?", os.fsencode(fold)
         )
         if rows:
             return rows[0].file_id
@@ -136,13 +155,13 @@ class PathIDCache:
     ) -> str | None:
         """Check whether *remote_path* case-conflicts with an existing entry.
 
-        Returns the ``file_id`` of the conflicting entry, or ``None`` if there
-        is no conflict.  An entry with the same *file_id* is **not** considered
-        a conflict (that's just an update of the same file).
+        Returns the ``file_id`` of the conflicting entry, or ``None`` if
+        there is no conflict. An entry with the same *file_id* is **not**
+        considered a conflict (that's just an update of the same file).
         """
-        lower = remote_path.lower()
+        fold = fold_path(remote_path)
         rows = self._table.select_sql(
-            "WHERE remote_path_lower = ?", os.fsencode(lower)
+            "WHERE remote_path_fold = ?", os.fsencode(fold)
         )
         for row in rows:
             if row.file_id != file_id:
@@ -159,9 +178,14 @@ class PathIDCache:
     ) -> bool:
         """Insert or update a cache entry.
 
-        Returns ``True`` if the entry was stored, ``False`` if it was rejected
-        due to a case-insensitive name conflict with a *different* file.
-        Updating an existing entry (same *file_id*) always succeeds.
+        :param remote_path: encoded path (use
+            :func:`cumulus.path_codec.compose_path` to derive from a Drive
+            change event's parent + name).
+        :param name: raw Drive ``name`` (un-encoded).
+
+        Returns ``True`` if the entry was stored, ``False`` if it was
+        rejected due to a case-insensitive name conflict with a different
+        file. Updating an existing entry (same *file_id*) always succeeds.
         """
         conflict_id = self.has_case_conflict(remote_path, file_id)
         if conflict_id is not None:
@@ -178,7 +202,7 @@ class PathIDCache:
         entry = PathCacheEntry(
             file_id=file_id,
             remote_path=remote_path,
-            remote_path_lower=remote_path.lower(),
+            remote_path_fold=fold_path(remote_path),
             parent_id=parent_id,
             name=name,
             is_folder=int(is_folder),
@@ -187,18 +211,21 @@ class PathIDCache:
         return True
 
     def remove(self, remote_path: str) -> None:
-        """Remove *remote_path* and all its children from the cache."""
-        lower = remote_path.lower()
+        """Remove *remote_path* and all its children from the cache.
+
+        ``remote_path`` is the encoded path.
+        """
+        fold = fold_path(remote_path)
 
         # Delete exact match.
         rows = self._table.select_sql(
-            "WHERE remote_path_lower = ?", os.fsencode(lower)
+            "WHERE remote_path_fold = ?", os.fsencode(fold)
         )
         for row in rows:
             self._table.delete_primary_key(row.file_id)
 
         # Delete children using a range query on the BLOB column.
-        children = self._select_children(lower)
+        children = self._select_children(fold)
         for child in children:
             self._table.delete_primary_key(child.file_id)
 
@@ -374,25 +401,18 @@ class PathIDCache:
 
     # -- Internal helpers --------------------------------------------------
 
-    def _select_children(self, parent_lower: str) -> list[PathCacheEntry]:
-        """Select all entries whose ``remote_path_lower`` starts with
-        ``parent_lower + "/"``.
+    def _select_children(self, parent_fold: str) -> list[PathCacheEntry]:
+        """Select all entries whose ``remote_path_fold`` starts with
+        ``parent_fold + "/"``.
 
         Uses a range query (``>=`` / ``<``) which works correctly on BLOB
         columns, unlike ``LIKE``.
         """
-        prefix = parent_lower + "/"
+        prefix = parent_fold + "/"
         # Upper bound: increment the last character of the parent path.
-        upper = parent_lower + "0"  # '0' == chr(ord('/') + 1)
+        upper = parent_fold + "0"  # '0' == chr(ord('/') + 1)
         return self._table.select_sql(
-            "WHERE remote_path_lower >= ? AND remote_path_lower < ?",
+            "WHERE remote_path_fold >= ? AND remote_path_fold < ?",
             os.fsencode(prefix),
             os.fsencode(upper),
         )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
