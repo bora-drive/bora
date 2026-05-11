@@ -424,3 +424,158 @@ class TestResolvePath:
         )
         # MISSING_PARENT isn't in the table and isn't root_id.
         assert cache.resolve_path("F1") is None
+
+
+from unittest.mock import patch  # noqa: E402
+
+from cumulus.database.orm import Manager  # noqa: E402
+
+
+def make_drive_item(
+    file_id: str,
+    name: str,
+    parents: list[str] | None,
+    is_folder: bool = False,
+) -> dict:
+    """Helper to build a fake `files.list` item."""
+    item: dict = {
+        "id": file_id,
+        "name": name,
+        "mimeType": (
+            "application/vnd.google-apps.folder" if is_folder else "text/plain"
+        ),
+    }
+    if parents is not None:
+        item["parents"] = parents
+    return item
+
+
+class TestPopulateFromListing:
+    def test_simple_tree(self) -> None:
+        cache = make_cache()
+        items = [
+            make_drive_item("DIR", "Documents", parents=["ROOT"], is_folder=True),
+            make_drive_item("F1", "report.pdf", parents=["DIR"]),
+            make_drive_item("F2", "notes.txt", parents=["ROOT"]),
+        ]
+        cache.populate_from_listing(items)
+        assert cache.path_to_id("/Documents") == "DIR"
+        assert cache.path_to_id("/Documents/report.pdf") == "F1"
+        assert cache.path_to_id("/notes.txt") == "F2"
+
+    def test_encodes_unsafe_names(self) -> None:
+        cache = make_cache()
+        items = [
+            make_drive_item("F1", "2024/05 report.pdf", parents=["ROOT"]),
+            make_drive_item("F2", "weird?.txt", parents=["ROOT"]),
+        ]
+        cache.populate_from_listing(items)
+        # Lookup uses encoded path.
+        assert cache.path_to_id("/2024%2F05 report.pdf") == "F1"
+        assert cache.path_to_id("/weird%3F.txt") == "F2"
+        # Raw names preserved in `name` column.
+        entry_f1 = cache.get_entry("F1")
+        entry_f2 = cache.get_entry("F2")
+        assert entry_f1 is not None and entry_f1.name == "2024/05 report.pdf"
+        assert entry_f2 is not None and entry_f2.name == "weird?.txt"
+
+    def test_dedup_by_fold_key_within_parent(self) -> None:
+        cache = make_cache()
+        items = [
+            make_drive_item("F1", "Documents", parents=["ROOT"], is_folder=True),
+            make_drive_item("F2", "documents", parents=["ROOT"], is_folder=True),
+        ]
+        cache.populate_from_listing(items)
+        # Lexicographic-first id wins (F1 < F2).
+        assert cache.path_to_id("/Documents") == "F1"
+        # The loser is not in the cache at all.
+        assert cache.get_entry("F2") is None
+
+    def test_orphan_skipped(self) -> None:
+        cache = make_cache()
+        items = [
+            make_drive_item("F1", "ok.txt", parents=["ROOT"]),
+            make_drive_item("F2", "orphan.txt", parents=["NOT_IN_TREE"]),
+        ]
+        cache.populate_from_listing(items)
+        assert cache.path_to_id("/ok.txt") == "F1"
+        assert cache.get_entry("F2") is None
+
+    def test_clear_then_populate(self) -> None:
+        cache = make_cache()
+        cache.set(
+            remote_path="/old.pdf",
+            file_id="STALE",
+            parent_id="ROOT",
+            name="old.pdf",
+            is_folder=False,
+        )
+        items = [make_drive_item("F1", "new.pdf", parents=["ROOT"])]
+        cache.populate_from_listing(items)
+        # Stale row gone, new row present.
+        assert cache.get_entry("STALE") is None
+        assert cache.path_to_id("/new.pdf") == "F1"
+
+
+class TestPopulateAtomicity:
+    def test_rollback_on_mid_commit_failure(self) -> None:
+        cache = make_cache()
+        # Pre-populate with one row.
+        cache.set(
+            remote_path="/before.pdf",
+            file_id="BEFORE",
+            parent_id="ROOT",
+            name="before.pdf",
+            is_folder=False,
+        )
+
+        items = [
+            make_drive_item("DIR", "Documents", parents=["ROOT"], is_folder=True),
+            make_drive_item("F1", "report.pdf", parents=["DIR"]),
+            make_drive_item("F2", "notes.txt", parents=["ROOT"]),
+        ]
+
+        # Patch Manager.update to raise on the 2nd call.
+        original_update = Manager.update
+        call_count = {"n": 0}
+
+        def flaky_update(self, obj):  # type: ignore[no-untyped-def]
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("simulated mid-commit failure")
+            return original_update(self, obj)
+
+        with patch.object(Manager, "update", flaky_update):
+            with pytest.raises(RuntimeError, match="simulated"):
+                cache.populate_from_listing(items)
+
+        # The pre-existing row must still be queryable: rollback worked.
+        assert cache.get_entry("BEFORE") is not None
+        assert cache.path_to_id("/before.pdf") == "BEFORE"
+        # None of the new items took effect.
+        assert cache.get_entry("DIR") is None
+        assert cache.get_entry("F1") is None
+        assert cache.get_entry("F2") is None
+
+    def test_planning_exception_does_not_touch_db(self) -> None:
+        cache = make_cache()
+        cache.set(
+            remote_path="/before.pdf",
+            file_id="BEFORE",
+            parent_id="ROOT",
+            name="before.pdf",
+            is_folder=False,
+        )
+        # An item with no `id` triggers a KeyError during planning.
+        items = [{"name": "broken", "parents": ["ROOT"], "mimeType": "text/plain"}]
+        with pytest.raises(KeyError):
+            cache.populate_from_listing(items)
+        # Pre-existing row still there.
+        assert cache.get_entry("BEFORE") is not None
+
+    def test_populate_requires_root_id(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        db = Database(conn)
+        cache = PathIDCache(db)  # root_id NOT set
+        with pytest.raises(RuntimeError, match="root_id must be set"):
+            cache.populate_from_listing([])
