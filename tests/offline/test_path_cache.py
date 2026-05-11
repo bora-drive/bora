@@ -253,3 +253,122 @@ class TestRemove:
         cache.remove("/foo")
         assert cache.path_to_id("/foo") is None
         assert cache.path_to_id("/foobar") == "B"
+
+
+class TestMove:
+    def test_simple_rename(self) -> None:
+        cache = make_cache()
+        cache.set(
+            remote_path="/old.pdf",
+            file_id="F1",
+            parent_id="ROOT",
+            name="old.pdf",
+            is_folder=False,
+        )
+        ok = cache.move("/old.pdf", "/new.pdf")
+        assert ok is True
+        assert cache.path_to_id("/old.pdf") is None
+        assert cache.path_to_id("/new.pdf") == "F1"
+        # name column updated to the raw new name.
+        entry = cache.get_entry("F1")
+        assert entry is not None
+        assert entry.name == "new.pdf"
+
+    def test_rename_with_slash_in_new_name(self) -> None:
+        # Combined move/rename where new raw name contains '/'.
+        cache = make_cache()
+        cache.set(
+            remote_path="/old.pdf",
+            file_id="F1",
+            parent_id="ROOT",
+            name="old.pdf",
+            is_folder=False,
+        )
+        # New encoded path for raw name "2024/05.pdf"
+        ok = cache.move("/old.pdf", "/2024%2F05.pdf")
+        assert ok is True
+        entry = cache.get_entry("F1")
+        assert entry is not None
+        # name column is the raw form, not the encoded form.
+        assert entry.name == "2024/05.pdf"
+        assert entry.remote_path == "/2024%2F05.pdf"
+
+    def test_folder_rename_cascades_to_descendants(self) -> None:
+        cache = make_cache()
+        cache.set(
+            remote_path="/old",
+            file_id="DIR",
+            parent_id="ROOT",
+            name="old",
+            is_folder=True,
+        )
+        cache.set(
+            remote_path="/old/a.pdf",
+            file_id="A",
+            parent_id="DIR",
+            name="a.pdf",
+            is_folder=False,
+        )
+        cache.set(
+            remote_path="/old/sub/b.pdf",
+            file_id="B",
+            parent_id="SUB",
+            name="b.pdf",
+            is_folder=False,
+        )
+        ok = cache.move("/old", "/new")
+        assert ok is True
+        assert cache.path_to_id("/new") == "DIR"
+        assert cache.path_to_id("/new/a.pdf") == "A"
+        assert cache.path_to_id("/new/sub/b.pdf") == "B"
+        # Descendant `name` columns must NOT change — only their paths.
+        entry_a = cache.get_entry("A")
+        assert entry_a is not None
+        assert entry_a.name == "a.pdf"
+        entry_b = cache.get_entry("B")
+        assert entry_b is not None
+        assert entry_b.name == "b.pdf"
+
+    def test_move_does_not_touch_sibling_with_shared_prefix(self) -> None:
+        # /foo → /bar must not affect /foobar.
+        cache = make_cache()
+        cache.set(
+            remote_path="/foo",
+            file_id="A",
+            parent_id="ROOT",
+            name="foo",
+            is_folder=True,
+        )
+        cache.set(
+            remote_path="/foobar",
+            file_id="B",
+            parent_id="ROOT",
+            name="foobar",
+            is_folder=True,
+        )
+        cache.move("/foo", "/bar")
+        assert cache.path_to_id("/bar") == "A"
+        assert cache.path_to_id("/foobar") == "B"
+
+    def test_move_to_case_conflicting_target_skipped(self) -> None:
+        cache = make_cache()
+        cache.set(
+            remote_path="/A.pdf",
+            file_id="F1",
+            parent_id="ROOT",
+            name="A.pdf",
+            is_folder=False,
+        )
+        cache.set(
+            remote_path="/B.pdf",
+            file_id="F2",
+            parent_id="ROOT",
+            name="B.pdf",
+            is_folder=False,
+        )
+        # Try to rename F2 → "a.pdf" (fold-collides with F1).
+        ok = cache.move("/B.pdf", "/a.pdf")
+        assert ok is False
+        # Both rows untouched.
+        assert cache.path_to_id("/A.pdf") == "F1"
+        assert cache.path_to_id("/B.pdf") == "F2"

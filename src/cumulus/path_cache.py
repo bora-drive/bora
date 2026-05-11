@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 from .database.orm import Column, Manager, Model, NonNullColumn
 from .database.types import SqlInt, SqlPath, SqlString
 from .native_docs import GOOGLE_FOLDER_MIME_TYPE
-from .path_codec import compose_path, encode_name, fold_path
+from .path_codec import compose_path, decode_name, encode_name, fold_path
 
 if TYPE_CHECKING:
     from .database.core import Database
@@ -232,15 +232,17 @@ class PathIDCache:
     def move(self, old_path: str, new_path: str) -> bool:
         """Rename *old_path* → *new_path*, updating all children atomically.
 
-        Returns ``False`` (and does nothing) if *new_path* case-conflicts with
-        an existing entry that isn't the item being moved.
+        Both paths are encoded. Returns ``False`` (and does nothing) if
+        *new_path* case-conflicts with an existing entry that isn't the
+        item being moved.
         """
-        # Check for a case conflict at the destination.
-        old_lower = old_path.lower()
+        old_fold = fold_path(old_path)
         rows = self._table.select_sql(
-            "WHERE remote_path_lower = ?", os.fsencode(old_lower)
+            "WHERE remote_path_fold = ?", os.fsencode(old_fold)
         )
         moving_id = rows[0].file_id if rows else None
+
+        # Check for a case conflict at the destination.
         conflict_id = self.has_case_conflict(new_path, moving_id)
         if conflict_id is not None:
             logger.warning(
@@ -252,23 +254,27 @@ class PathIDCache:
             )
             return False
 
-        new_lower = new_path.lower()
+        new_fold = fold_path(new_path)
 
-        # Update the entry itself.
+        # Update the entry itself: new path, new fold, new raw name. The
+        # leaf of new_path is encoded; decode it to recover the raw Drive
+        # name (the column stores raw form for upload).
+        new_leaf_encoded = new_path.rsplit("/", 1)[-1]
+        new_leaf_raw = decode_name(new_leaf_encoded)
+
         for row in rows:
             row.remote_path = new_path
-            row.remote_path_lower = new_lower
-            row.name = new_path.rsplit("/", 1)[-1]
+            row.remote_path_fold = new_fold
+            row.name = new_leaf_raw
             self._table.update(row)
 
-        # Update children.
-        old_prefix = old_lower + "/"
-        children = self._select_children(old_lower)
+        # Update children's paths via prefix substitution. Children's
+        # `name` columns don't change — only their stored paths.
+        old_prefix = old_fold + "/"
+        children = self._select_children(old_fold)
         for child in children:
-            # Replace only the leading prefix.
-            suffix = child.remote_path_lower[len(old_prefix):]
-            child.remote_path_lower = new_lower + "/" + suffix
-            # Preserve casing of the suffix from the cased path.
+            fold_suffix = child.remote_path_fold[len(old_prefix):]
+            child.remote_path_fold = new_fold + "/" + fold_suffix
             cased_suffix = child.remote_path[len(old_path) + 1:]
             child.remote_path = new_path + "/" + cased_suffix
             self._table.update(child)
