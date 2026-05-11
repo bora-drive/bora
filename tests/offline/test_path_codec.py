@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cumulus.path_codec import decode_name, encode_name
+from cumulus.path_codec import decode_name, encode_name, fold_key
 
 
 class TestEncodeName:
@@ -90,3 +90,46 @@ class TestEncodeIdempotency:
         assert encode_name("%2F") == "%252F"
         # The single decode of the double-encoded form gets back the original.
         assert decode_name("%252F") == "%2F"
+
+
+class TestFoldKey:
+    """Unicode case-fold + NFC normalization."""
+
+    def test_ascii_case_folds(self) -> None:
+        assert fold_key("Documents") == fold_key("documents") == "documents"
+
+    def test_german_sharp_s_folds_to_ss(self) -> None:
+        # casefold('ß') == 'ss'; both inputs collapse.
+        assert fold_key("Straße") == fold_key("STRASSE") == "strasse"
+
+    def test_greek_final_sigma_collapses(self) -> None:
+        # 'ς' (final sigma) and 'σ' (medial sigma) both casefold to 'σ'.
+        assert fold_key("Σοφος") == fold_key("σοφος") == fold_key("σοφος")
+
+    def test_turkish_dotted_i_folds_consistently(self) -> None:
+        # 'İ' (U+0130) casefolds to 'i' + COMBINING DOT ABOVE (U+0307).
+        # The combining dot is UTF-8 0xCC 0x87 → encodes to %CC%87.
+        assert fold_key("İstanbul") == "i%CC%87stanbul"
+        # Equivalent input (already-decomposed form) maps to the same key.
+        assert fold_key("i̇stanbul") == "i%CC%87stanbul"
+
+    def test_double_nfc_observable(self) -> None:
+        # Decomposed input: 'é' as 'e' + combining acute (U+0301).
+        decomposed = "café"
+        composed = "café"
+        # casefold(x) without leading NFC differs by composition order;
+        # fold_key normalizes both to the same canonical form.
+        assert fold_key(decomposed) == fold_key(composed)
+
+    def test_url_encoded_output(self) -> None:
+        # Output is URL-encoded so it's a stable byte string for indexing.
+        assert fold_key("Café") == "caf%C3%A9"
+
+    def test_empty_string(self) -> None:
+        assert fold_key("") == ""
+
+    def test_encode_set_chars_in_input(self) -> None:
+        # fold_key encodes the encode-set the same way encode_name does.
+        # ASCII letters and the encoded form are case-stable.
+        assert fold_key("a/b") == "a%2Fb"
+        assert fold_key("A/B") == "a%2Fb"
