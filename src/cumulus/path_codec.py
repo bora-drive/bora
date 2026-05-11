@@ -46,3 +46,17 @@ def encode_name(name: str) -> str:
 def decode_name(encoded: str) -> str:
     """Inverse of :func:`encode_name`."""
     return urllib.parse.unquote(encoded)
+
+
+def fold_key(name: str) -> str:
+    """Case-fold key for one name component.
+
+    Computes ``quote(NFC(casefold(NFC(name))), safe='')``. The double NFC
+    handles cases where casefold introduces decomposition (e.g. Turkish
+    'İ' casefolds to 'i' + combining dot above, which the trailing NFC
+    keeps in canonical form).
+    """
+    normalized = unicodedata.normalize("NFC", name)
+    folded = normalized.casefold()
+    folded = unicodedata.normalize("NFC", folded)
+    return urllib.parse.quote(folded, safe="")
