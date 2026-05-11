@@ -372,3 +372,55 @@ class TestMove:
         # Both rows untouched.
         assert cache.path_to_id("/A.pdf") == "F1"
         assert cache.path_to_id("/B.pdf") == "F2"
+
+
+class TestResolvePath:
+    def test_resolve_simple_path(self) -> None:
+        cache = make_cache()
+        cache.set(
+            remote_path="/Documents",
+            file_id="DIR",
+            parent_id="ROOT",
+            name="Documents",
+            is_folder=True,
+        )
+        cache.set(
+            remote_path="/Documents/report.pdf",
+            file_id="F1",
+            parent_id="DIR",
+            name="report.pdf",
+            is_folder=False,
+        )
+        assert cache.resolve_path("F1") == "/Documents/report.pdf"
+
+    def test_resolve_path_with_slash_in_raw_name(self) -> None:
+        # Walk reconstructs the encoded path even when raw names contain '/'.
+        cache = make_cache()
+        cache.set(
+            remote_path="/2024%2F05",
+            file_id="DIR",
+            parent_id="ROOT",
+            name="2024/05",
+            is_folder=True,
+        )
+        cache.set(
+            remote_path="/2024%2F05/report.pdf",
+            file_id="F1",
+            parent_id="DIR",
+            name="report.pdf",
+            is_folder=False,
+        )
+        assert cache.resolve_path("F1") == "/2024%2F05/report.pdf"
+
+    def test_resolve_orphan_returns_none(self) -> None:
+        # Entry whose parent isn't in the cache.
+        cache = make_cache()
+        cache.set(
+            remote_path="/orphan.pdf",
+            file_id="F1",
+            parent_id="MISSING_PARENT",
+            name="orphan.pdf",
+            is_folder=False,
+        )
+        # MISSING_PARENT isn't in the table and isn't root_id.
+        assert cache.resolve_path("F1") is None

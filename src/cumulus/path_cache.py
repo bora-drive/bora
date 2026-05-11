@@ -282,9 +282,11 @@ class PathIDCache:
         return True
 
     def resolve_path(self, file_id: str) -> str | None:
-        """Walk the parent chain to reconstruct the full path for *file_id*.
+        """Walk the parent chain to reconstruct the full encoded path
+        for *file_id*.
 
-        Returns ``None`` if any ancestor is missing from the cache (orphan).
+        Returns ``None`` if any ancestor is missing from the cache
+        (orphan).
         """
         parts: list[str] = []
         current_id: str | None = file_id
@@ -297,7 +299,9 @@ class PathIDCache:
                     file_id,
                 )
                 return None
-            parts.append(entry.name)
+            # Encode each segment as we walk so the result is the encoded
+            # form even when raw `name` contains an unsafe char.
+            parts.append(encode_name(entry.name))
             current_id = entry.parent_id
 
         if current_id is None:
