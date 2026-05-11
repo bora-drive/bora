@@ -579,3 +579,75 @@ class TestPopulateAtomicity:
         cache = PathIDCache(db)  # root_id NOT set
         with pytest.raises(RuntimeError, match="root_id must be set"):
             cache.populate_from_listing([])
+
+
+from cumulus.path_codec import compose_path as _compose_path  # noqa: E402
+from cumulus.path_codec import fold_path as _fold_path  # noqa: E402
+
+
+def _assert_invariants(cache: PathIDCache) -> None:
+    """Walk every row and assert per-row invariants from spec §5.2.
+
+    1. remote_path == compose_path(parent.remote_path, self.name)
+       (with parent's remote_path == "/" when parent_id == root_id)
+    2. remote_path_fold == fold_path(remote_path)
+    """
+    rows = cache._table.select_sql("")  # all rows
+    by_id = {r.file_id: r for r in rows}
+    for row in rows:
+        # Invariant 2.
+        assert row.remote_path_fold == _fold_path(row.remote_path), (
+            f"row {row.file_id!r}: remote_path_fold {row.remote_path_fold!r} "
+            f"!= fold_path({row.remote_path!r})"
+        )
+        # Invariant 1.
+        if row.parent_id == cache.root_id:
+            parent_path = "/"
+        elif row.parent_id in by_id:
+            parent_path = by_id[row.parent_id].remote_path
+        else:
+            # Orphan — invariant 1 doesn't apply (parent missing).
+            continue
+        expected = _compose_path(parent_path, row.name)
+        assert row.remote_path == expected, (
+            f"row {row.file_id!r}: remote_path {row.remote_path!r} != "
+            f"compose_path({parent_path!r}, {row.name!r}) == {expected!r}"
+        )
+
+
+class TestInvariantsAfterMutations:
+    def test_invariants_after_set_move_remove_populate(self) -> None:
+        cache = make_cache()
+        # Populate.
+        items = [
+            make_drive_item("DIR", "Documents", parents=["ROOT"], is_folder=True),
+            make_drive_item("F1", "report.pdf", parents=["DIR"]),
+            make_drive_item("F2", "weird/name.txt", parents=["ROOT"]),
+        ]
+        cache.populate_from_listing(items)
+        _assert_invariants(cache)
+
+        # Set a new row.
+        cache.set(
+            remote_path="/Documents/added.txt",
+            file_id="F3",
+            parent_id="DIR",
+            name="added.txt",
+            is_folder=False,
+        )
+        _assert_invariants(cache)
+
+        # Move the folder.
+        cache.move("/Documents", "/Archive")
+        _assert_invariants(cache)
+
+        # Remove a leaf.
+        cache.remove("/Archive/added.txt")
+        _assert_invariants(cache)
+
+        # Re-populate (clears prior state).
+        items2 = [
+            make_drive_item("X1", "fresh.pdf", parents=["ROOT"]),
+        ]
+        cache.populate_from_listing(items2)
+        _assert_invariants(cache)
