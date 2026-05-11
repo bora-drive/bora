@@ -24,15 +24,61 @@ These are inherited from the design spec. Do not relitigate during execution:
 - **Bulk insert helper:** *not* added in Stage 1 unless the existing per-row insert is measurably too slow on a 10k-file test (it isn't, this stage). Stage 7's E3 test surfaces the perf need if any. (spec §6.5)
 - **Out-of-scope tests:** concurrent mutation under real `sync_lock`, cache-vs-Drive divergence, 10k-file load test. (spec §7.3)
 
+## Deviations from this plan, caught during TDD execution
+
+The plan was executed end-to-end on 2026-05-11. The following points
+diverged from the literal plan text and are recorded here so future
+readers don't misread the design intent.
+
+1. **`encode_name` uses `safe=" "`, not `safe=""`** (`src/cumulus/path_codec.py`).
+   The plan and spec said `safe=""`, but its accompanying tests assume
+   internal spaces pass through unchanged (the trailing-space rule
+   replaces a literal trailing `' '` with `%20`, which only makes sense
+   if quote() didn't already encode it). `safe=" "` is the form that
+   makes the trailing-char rule and the round-trip tests consistent.
+   `fold_key` was given the same `safe=" "` for the same reason — so
+   `fold_path` round-trips paths with internal spaces correctly.
+
+2. **`fold_key` Turkish-i test asserts the actual fold output**, not
+   idempotency on already-folded form. The plan's test was
+   `fold_key(folded) == folded`, which fails because applying the codec
+   twice double-encodes `%`. The replaced assertion checks that
+   `fold_key("İstanbul") == "i%CC%87stanbul"` and that the equivalent
+   decomposed input maps to the same key — which is what the spec §3.2
+   "double NFC handles cases where casefold introduces decomposition"
+   actually means.
+
+3. **`TestEncodeIdempotency.test_already_encoded_double_encodes` second
+   assertion fixed**. The plan had `decode(decode("%252F")) == "%2F"`,
+   which evaluates to `"/"` (decode goes too far). The correct
+   assertion is the single-decode form: `decode("%252F") == "%2F"`.
+
+4. **`Manager.clear()` switched from `DROP TABLE`+recreate to
+   `DELETE FROM`** (`src/cumulus/database/orm.py`). The plan called for
+   wrapping `populate_from_listing`'s clear+insert in a single
+   `Database.transaction()`. With the old `clear()`, the recreate path
+   called `Cursor.executescript()`, which — per Python's `sqlite3`
+   module — force-commits any pending transaction before running. That
+   silently broke atomicity (a later rollback wouldn't restore the
+   pre-`clear()` rows). `DELETE FROM` preserves the schema and
+   participates correctly in the surrounding transaction. A regression
+   test (`test_clear_inside_transaction_rolls_back` in
+   `tests/offline/test_database.py`) pins this behavior.
+
+These four fixes are all in service of preserving the spec's
+load-bearing properties (codec round-trip, fold-equivalence, atomic
+populate). None alter what spec §2 says is in or out of scope.
+
 ## File Structure
 
 | Path | Action | Purpose |
 |---|---|---|
 | `src/cumulus/path_codec.py` | **Create** | Pure-function codec module: `encode_name`, `decode_name`, `fold_key`, `compose_path`, `fold_path` |
 | `src/cumulus/database/core.py` | **Modify** | Add `Database.transaction()` context manager; gate `Database.execute()` auto-commit so it skips the implicit `with self.connection:` while a transaction is open |
+| `src/cumulus/database/orm.py` | **Modify** | `Manager.clear()` → `DELETE FROM` (was `DROP TABLE`+recreate) so it is transaction-safe |
 | `src/cumulus/path_cache.py` | **Modify** | Schema column rename, swap `.lower()` for `fold_path()`, fix `move()` name-derivation bug, atomic `populate_from_listing` |
 | `tests/offline/test_path_codec.py` | **Create** | Unit tests for the codec (round-trips, fold-key edge cases, compose/fold paths) |
-| `tests/offline/test_database.py` | **Create** | Unit tests for the new `Database.transaction()` semantics |
+| `tests/offline/test_database.py` | **Create** | Unit tests for the new `Database.transaction()` semantics and `Manager.clear()` transactional behavior |
 | `tests/offline/test_path_cache.py` | **Create** | Unit tests for the cache (encoding round-trip end-to-end, case conflicts, move cascade, subtree range, atomicity, invariants) |
 
 ## Test Strategy
