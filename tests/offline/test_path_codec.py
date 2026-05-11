@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from cumulus.path_codec import decode_name, encode_name, fold_key
+from cumulus.path_codec import (
+    compose_path,
+    decode_name,
+    encode_name,
+    fold_key,
+    fold_path,
+)
 
 
 class TestEncodeName:
@@ -133,3 +139,62 @@ class TestFoldKey:
         # ASCII letters and the encoded form are case-stable.
         assert fold_key("a/b") == "a%2Fb"
         assert fold_key("A/B") == "a%2Fb"
+
+
+class TestComposePath:
+    def test_root_parent(self) -> None:
+        assert compose_path("/", "report.pdf") == "/report.pdf"
+
+    def test_nested_parent(self) -> None:
+        assert (
+            compose_path("/Documents", "report.pdf") == "/Documents/report.pdf"
+        )
+
+    def test_parent_ending_in_slash_normalized(self) -> None:
+        # Caller may pass "/" or "/Documents"; both yield correct output.
+        assert (
+            compose_path("/Documents/", "report.pdf") == "/Documents/report.pdf"
+        )
+
+    def test_raw_name_with_slash_encoded(self) -> None:
+        # The Q4 spike case.
+        assert (
+            compose_path("/Documents", "2024/05 report.pdf")
+            == "/Documents/2024%2F05 report.pdf"
+        )
+
+    def test_raw_name_with_non_ascii(self) -> None:
+        assert compose_path("/", "café.txt") == "/caf%C3%A9.txt"
+
+    def test_raw_name_empty_string(self) -> None:
+        # Defensive: empty leaf returns parent + "/" + "".
+        assert compose_path("/Documents", "") == "/Documents/"
+
+    def test_parent_already_encoded_passes_through(self) -> None:
+        # Parent path is already encoded; compose_path doesn't re-encode it.
+        assert (
+            compose_path("/2024%2F05 reports", "Q1.pdf")
+            == "/2024%2F05 reports/Q1.pdf"
+        )
+
+
+class TestFoldPath:
+    def test_root_only(self) -> None:
+        assert fold_path("/") == "/"
+
+    def test_simple_path(self) -> None:
+        assert fold_path("/Documents/Report.pdf") == "/documents/report.pdf"
+
+    def test_path_with_encoded_segment(self) -> None:
+        # The encoded segment %2F is decoded, folded, re-encoded.
+        # "2024%2F05" → raw "2024/05" → fold → "2024%2F05" (digits unchanged).
+        assert (
+            fold_path("/Documents/2024%2F05 report.pdf")
+            == "/documents/2024%2F05 report.pdf"
+        )
+
+    def test_path_with_non_ascii(self) -> None:
+        assert fold_path("/Caf%C3%A9/index.txt") == "/caf%C3%A9/index.txt"
+
+    def test_mixed_case_segments(self) -> None:
+        assert fold_path("/FOO/Bar/BAZ") == "/foo/bar/baz"

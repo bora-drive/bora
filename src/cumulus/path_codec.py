@@ -59,4 +59,41 @@ def fold_key(name: str) -> str:
     normalized = unicodedata.normalize("NFC", name)
     folded = normalized.casefold()
     folded = unicodedata.normalize("NFC", folded)
-    return urllib.parse.quote(folded, safe="")
+    # safe=" " mirrors encode_name; both paths and fold-keys preserve
+    # internal spaces so that fold_path round-trips consistently.
+    return urllib.parse.quote(folded, safe=" ")
+
+
+def compose_path(parent_path: str, raw_name: str) -> str:
+    """Build an encoded child path from an encoded parent path and a raw
+    Drive name.
+
+    Example::
+
+        compose_path('/Documents', '2024/05 report.pdf')
+        -> '/Documents/2024%2F05 report.pdf'
+
+    ``parent_path == '/'`` is the root; result is ``'/' + encode_name(raw_name)``.
+    A trailing slash on ``parent_path`` is ignored.
+    """
+    if parent_path.endswith("/") and parent_path != "/":
+        parent_path = parent_path[:-1]
+    encoded_leaf = encode_name(raw_name)
+    if parent_path == "/":
+        return "/" + encoded_leaf
+    return parent_path + "/" + encoded_leaf
+
+
+def fold_path(encoded_path: str) -> str:
+    """Fold key for a full encoded path.
+
+    Splits on ``/``, decodes each segment, applies :func:`fold_key`,
+    rejoins with ``/``. Used by the cache to derive ``remote_path_fold``
+    from ``remote_path``.
+    """
+    if encoded_path == "/":
+        return "/"
+    # Leading "/" produces an empty first segment; preserve it.
+    parts = encoded_path.split("/")
+    folded_parts = [fold_key(decode_name(p)) if p else p for p in parts]
+    return "/".join(folded_parts)
