@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 from .database.orm import Column, Manager, Model, NonNullColumn
 from .database.types import SqlInt, SqlPath, SqlString
 from .native_docs import GOOGLE_FOLDER_MIME_TYPE
-from .path_codec import compose_path, decode_name, encode_name, fold_path
+from .path_codec import compose_path, decode_name, encode_name, fold_key, fold_path
 
 if TYPE_CHECKING:
     from .database.core import Database
@@ -323,42 +323,41 @@ class PathIDCache:
 
             {"id": str, "name": str, "parents": [str, ...], "mimeType": str}
 
-        Duplicate names within the same parent are detected: the first item
-        (by file-ID lexicographic order) wins; later duplicates are skipped
-        with a warning.
-        """
-        self.clear()
+        Duplicate names within the same parent (by fold key) are detected:
+        the first item by file-ID lexicographic order wins; later
+        duplicates are skipped with a warning.
 
+        Atomic: either all non-skipped items are present after this
+        returns, or the cache is restored to its prior state.
+        """
         if self._root_id is None:
             raise RuntimeError(
                 "root_id must be set before calling populate_from_listing"
             )
 
-        # Index items by ID for parent-chain resolution.
+        # Phase 1: index by id and by parent.
         by_id: dict[str, dict[str, Any]] = {}
-        children_of: dict[str, list[dict[str, Any]]] = {}  # parent_id -> [items]
+        children_of: dict[str, list[dict[str, Any]]] = {}
 
         for item in items:
             fid = item["id"]
             by_id[fid] = item
 
             parents = item.get("parents", [])
-            # Pick the first parent as canonical (see PLAN.md §3.1).
             parent_id = parents[0] if parents else None
-            item["_parent_id"] = parent_id
 
             if parent_id is not None:
                 children_of.setdefault(parent_id, []).append(item)
 
-        # Detect duplicates: (parent_id, lower_name) -> winning file_id.
-        seen: dict[tuple[str | None, str], str] = {}
+        # Phase 2: plan. Detect duplicates by fold key (NFC + casefold);
+        # then BFS from root building encoded paths.
         skip_ids: set[str] = set()
+        seen: dict[tuple[str | None, str], str] = {}
 
         for parent_id, kids in children_of.items():
-            # Sort by file_id for deterministic winner selection.
             kids.sort(key=lambda x: x["id"])
             for kid in kids:
-                key = (parent_id, kid["name"].lower())
+                key = (parent_id, fold_key(kid["name"]))
                 if key in seen:
                     skip_ids.add(kid["id"])
                     logger.warning(
@@ -372,34 +371,64 @@ class PathIDCache:
                 else:
                     seen[key] = kid["id"]
 
-        # BFS from root to build paths.
-        queue: list[tuple[str, str]] = [(self._root_id, "")]  # (folder_id, path_prefix)
+        # BFS plan; build PathCacheEntry instances without writing yet.
+        plan: list[PathCacheEntry] = []
+        queue: list[tuple[str, str]] = [(self._root_id, "/")]
         visited: set[str] = {self._root_id}
 
         while queue:
-            folder_id, prefix = queue.pop(0)
+            folder_id, parent_path = queue.pop(0)
             for child in children_of.get(folder_id, []):
                 cid = child["id"]
                 if cid in skip_ids or cid in visited:
                     continue
                 visited.add(cid)
 
-                name = child["name"]
-                path = f"{prefix}/{name}"
+                raw_name = child["name"]
+                encoded_path = compose_path(parent_path, raw_name)
                 is_folder = (
                     child.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE
                 )
 
-                self.set(
-                    remote_path=path,
-                    file_id=cid,
-                    parent_id=folder_id,
-                    name=name,
-                    is_folder=is_folder,
+                plan.append(
+                    PathCacheEntry(
+                        file_id=cid,
+                        remote_path=encoded_path,
+                        remote_path_fold=fold_path(encoded_path),
+                        parent_id=folder_id,
+                        name=raw_name,
+                        is_folder=int(is_folder),
+                    )
                 )
 
                 if is_folder:
-                    queue.append((cid, path))
+                    queue.append((cid, encoded_path))
+
+        # Log orphans (items in the listing whose parent isn't reachable
+        # from root). Behavior: silently dropped from the plan,
+        # observability via warning log.
+        for item_id, item in by_id.items():
+            if (
+                item_id in visited
+                or item_id in skip_ids
+                or item_id == self._root_id
+            ):
+                continue
+            parents = item.get("parents", [])
+            parent_repr = parents[0] if parents else None
+            logger.warning(
+                "Orphaned file: %s (id=%s) has parent %s which is not "
+                "reachable from sync root; skipping",
+                item.get("name"),
+                item_id,
+                parent_repr,
+            )
+
+        # Phase 3: atomic swap. clear() + bulk insert under one transaction.
+        with self._db.transaction():
+            self._table.clear()
+            for entry in plan:
+                self._table.update(entry)
 
     def clear(self) -> None:
         """Remove all entries from the cache."""
