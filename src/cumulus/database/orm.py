@@ -405,10 +405,16 @@ class Manager(Generic[M]):
         return cast(int, counts[0])
 
     def clear(self) -> None:
-        """Delete all rows from table."""
-        self.db.execute(f"DROP TABLE {self.table_name}")
+        """Delete all rows from table.
+
+        Uses ``DELETE FROM`` rather than ``DROP TABLE`` + recreate so the
+        call is safe to use inside a :meth:`Database.transaction`. Python's
+        ``sqlite3.Cursor.executescript`` (used by ``CREATE TABLE``) force-
+        commits any pending transaction before running the script, which
+        would silently break the surrounding transaction's atomicity.
+        """
+        self.db.execute(f"DELETE FROM {self.table_name}")
         self.clear_cache()
-        self.create_table_if_not_exists()
 
     def _get_primary_key(self, obj: M) -> SQLSafeType:
         """
