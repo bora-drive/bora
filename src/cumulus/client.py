@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 import os
 import time
+
+import requests
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -273,8 +275,25 @@ class GoogleDriveClient:
             return 2
 
     def unlink(self) -> None:
-        """Unlinks the Google account and deletes stored credentials."""
-        _not_implemented()
+        """Unlinks the configured Google account.
+
+        Best-effort revokes the refresh token with Google so a leaked token
+        can't be reused; failures to revoke do not block local-state cleanup.
+        """
+        creds = self._credentials
+        if creds is not None and creds.refresh_token:
+            try:
+                requests.post(
+                    "https://oauth2.googleapis.com/revoke",
+                    params={"token": creds.refresh_token},
+                    timeout=self._timeout,
+                )
+            except CONNECTION_ERRORS:
+                logger.debug("Could not revoke token with Google", exc_info=True)
+        self._credentials = None
+        self._pending_paste_flow = None
+        self._cached_account_info = None
+        self._cached_space_usage = None
 
     # ---- Service builder -------------------------------------------------------------
 

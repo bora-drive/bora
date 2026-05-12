@@ -275,3 +275,45 @@ def test_get_auth_url_replaces_prior_pending_flow(client, monkeypatch):
     first = client._pending_paste_flow
     client.get_auth_url()
     assert client._pending_paste_flow is not first
+
+
+def test_unlink_clears_credentials_and_revokes(client, cred_storage, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    base = _oauth.credentials_from_refresh_token("rt-to-revoke")
+    _oauth.save_credentials(cred_storage, base, account_id="perm-1")
+    # Force the client to populate _credentials.
+    assert client.linked is True
+
+    with mock.patch("cumulus.client.requests.post") as m_post:
+        client.unlink()
+
+    assert client._credentials is None
+    assert client._cached_account_info is None
+    m_post.assert_called_once()
+    args, kwargs = m_post.call_args
+    assert args[0] == "https://oauth2.googleapis.com/revoke"
+    assert kwargs["params"] == {"token": "rt-to-revoke"}
+
+
+def test_unlink_tolerates_revoke_failure(client, cred_storage, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    base = _oauth.credentials_from_refresh_token("rt-to-revoke")
+    _oauth.save_credentials(cred_storage, base, account_id="perm-1")
+    assert client.linked is True
+
+    import requests as _req
+    with mock.patch(
+        "cumulus.client.requests.post",
+        side_effect=_req.exceptions.ConnectionError("offline"),
+    ):
+        # Must not raise.
+        client.unlink()
+
+    assert client._credentials is None
+
+
+def test_unlink_when_not_linked_is_a_noop(client):
+    assert client.linked is False
+    with mock.patch("cumulus.client.requests.post") as m_post:
+        client.unlink()
+    m_post.assert_not_called()
