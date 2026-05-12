@@ -24,6 +24,13 @@ from shlex import quote
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, ContextManager, Iterable
 
+# Allow OAuth callbacks over plain HTTP for localhost (used by the Shape C
+# paste-the-redirect-URL fallback only). This relaxes oauthlib's
+# localhost-over-HTTP rule for redirect_uri matching at token-exchange
+# time; live Drive API calls remain HTTPS-only. Set unconditionally so the
+# env var is in place before any oauthlib-using module imports.
+os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+
 # external imports
 import Pyro5
 from fasteners import InterProcessLock
