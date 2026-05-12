@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest import mock
 
 import pytest
+from google.auth.exceptions import RefreshError
+from google.oauth2.credentials import Credentials
 
 from cumulus import oauth
 from cumulus.exceptions import AuthError
@@ -115,3 +118,57 @@ def test_load_credentials_returns_none_on_malformed_blob(cred_storage):
 def test_load_credentials_returns_none_on_wrong_shape(cred_storage):
     cred_storage.save_creds("perm-x", json.dumps({"something_else": 1}))
     assert oauth.load_credentials(cred_storage) is None
+
+
+def _mark_refreshed(self, request):
+    # Simulate google-auth's parent refresh() success path:
+    # mutate self.token and self.expiry as a real refresh would.
+    from datetime import datetime, timedelta
+    self.token = "refreshed-access-token"
+    self.expiry = datetime.utcnow() + timedelta(hours=1)
+
+
+def test_persisting_credentials_refresh_persists(monkeypatch, cred_storage):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    base = oauth.credentials_from_refresh_token("rt-abc")
+    wrapped = oauth.wrap_persisting(base, cred_storage, account_id="perm-456")
+
+    monkeypatch.setattr(Credentials, "refresh", _mark_refreshed)
+    wrapped.refresh(request=mock.Mock())
+
+    # Persisted blob carries the refreshed access token.
+    assert cred_storage.account_id == "perm-456"
+    reloaded = oauth.load_credentials(cred_storage)
+    assert reloaded is not None
+    assert reloaded.token == "refreshed-access-token"
+
+
+def test_persisting_credentials_refresh_does_not_persist_on_error(
+    monkeypatch, cred_storage
+):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    base = oauth.credentials_from_refresh_token("rt-abc")
+    wrapped = oauth.wrap_persisting(base, cred_storage, account_id="perm-456")
+
+    def _raise(self, request):
+        raise RefreshError("invalid_grant")
+
+    monkeypatch.setattr(Credentials, "refresh", _raise)
+
+    with pytest.raises(RefreshError):
+        wrapped.refresh(request=mock.Mock())
+
+    # Keyring untouched.
+    assert cred_storage.account_id is None
+    assert cred_storage.token is None
+
+
+def test_load_credentials_returned_blob_can_be_wrapped(monkeypatch, cred_storage):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    base = oauth.credentials_from_refresh_token("rt-abc")
+    oauth.save_credentials(cred_storage, base, account_id="perm-789")
+    loaded = oauth.load_credentials(cred_storage)
+    assert loaded is not None
+    wrapped = oauth.wrap_persisting(loaded, cred_storage, account_id="perm-789")
+    assert isinstance(wrapped, oauth.PersistingCredentials)
+    assert wrapped.refresh_token == "rt-abc"

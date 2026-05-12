@@ -25,6 +25,8 @@ __all__ = [
     "credentials_from_refresh_token",
     "save_credentials",
     "load_credentials",
+    "PersistingCredentials",
+    "wrap_persisting",
 ]
 
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -99,3 +101,50 @@ def load_credentials(cred_storage: CredentialStorage) -> Credentials | None:
         return Credentials.from_authorized_user_info(info, scopes=info.get("scopes"))
     except (ValueError, json.JSONDecodeError):
         return None
+
+
+class PersistingCredentials(Credentials):
+    """Credentials subclass whose refresh() also persists to the keyring.
+
+    googleapiclient calls .refresh() automatically on 401; subclassing it
+    gives us a single hook to write the refreshed token back without
+    every API call site needing a wrapper.
+    """
+
+    def __init__(
+        self,
+        *args,
+        cred_storage: CredentialStorage | None = None,
+        account_id: str | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._cred_storage = cred_storage
+        self._account_id = account_id
+
+    def refresh(self, request) -> None:  # type: ignore[no-untyped-def]
+        super().refresh(request)
+        # Parent either mutated self.token/self.expiry or raised RefreshError
+        # (which we let propagate). On success, persist.
+        if self._cred_storage is not None and self._account_id is not None:
+            save_credentials(self._cred_storage, self, self._account_id)
+
+
+def wrap_persisting(
+    creds: Credentials,
+    cred_storage: CredentialStorage,
+    account_id: str,
+) -> PersistingCredentials:
+    """Upgrade a plain Credentials into a PersistingCredentials bound to a
+    specific cred_storage and account_id. Field-for-field copy."""
+    return PersistingCredentials(
+        token=creds.token,
+        refresh_token=creds.refresh_token,
+        token_uri=creds.token_uri,
+        client_id=creds.client_id,
+        client_secret=creds.client_secret,
+        scopes=creds.scopes,
+        expiry=creds.expiry,
+        cred_storage=cred_storage,
+        account_id=account_id,
+    )
