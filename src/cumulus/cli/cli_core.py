@@ -116,13 +116,14 @@ def _local_server_dialog(m: "MaestralProxy | Maestral") -> int:
 
     Returns the same 0/1/2 contract as Maestral.link.
     """
-    info("A browser will open to authorize Cumulus to access your Google Drive.")
-    info("If you're on a headless server, run on your laptop first:")
+    info("Cumulus will print an authorization URL below.")
+    info("Open it in your local browser to authorize access to your Google Drive.")
+    info("If you're on a headless server, first run on your laptop:")
     info("    ssh -L 8080:localhost:8080 <your-host>")
-    info("Then re-run 'cumulus auth link' here.")
+    info("Then come back here and open the URL on your laptop.")
 
     try:
-        creds = oauth.run_local_flow(port=8080)
+        creds = oauth.run_local_flow(port=8080, open_browser=False)
     except Exception as exc:  # AuthError already; surface message and bail.
         warn(str(exc))
         return 1
