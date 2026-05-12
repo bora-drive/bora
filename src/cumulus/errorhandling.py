@@ -12,6 +12,7 @@ import errno
 import os
 from typing import Any, Callable, Iterator, TypeVar, Union
 
+import google.auth.exceptions
 import requests
 
 from .exceptions import (
@@ -82,8 +83,15 @@ def convert_api_errors(
     """
     try:
         yield
-    # TODO: Phase 6 — catch googleapiclient.errors.HttpError and
-    # google.auth.exceptions here and convert via google_api_to_cumulus_error.
+    except google.auth.exceptions.RefreshError as exc:
+        raise TokenRevokedError(
+            "Authentication revoked",
+            "Your Google account has been disconnected. "
+            "Run 'cumulus auth link -r' to re-link.",
+        ) from exc
+    except google.auth.exceptions.GoogleAuthError as exc:
+        raise AuthError("Authentication error", str(exc)) from exc
+    # TODO: Stage 3 — catch googleapiclient.errors.HttpError and convert via google_api_to_cumulus_error.
     except CONNECTION_ERRORS:
         raise ConnectionError(
             "Cannot connect to Google Drive",
