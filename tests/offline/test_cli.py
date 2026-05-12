@@ -297,3 +297,55 @@ def test_local_server_dialog_returns_1_when_creds_lack_refresh_token():
 
     assert res == 1
     m.link.assert_not_called()
+
+
+from cumulus.cli.cli_core import (
+    _paste_redirect_dialog,
+    _parse_redirect_url_or_code,
+)
+
+
+def test_parse_redirect_url_extracts_code_from_full_redirect():
+    url = "http://localhost:8080/?code=4%2F0AY0e-g7XYZ&state=abc&scope=drive"
+    assert _parse_redirect_url_or_code(url) == "4/0AY0e-g7XYZ"
+
+
+def test_parse_redirect_url_extracts_code_from_bare_code():
+    assert _parse_redirect_url_or_code("4/0AY0e-g7XYZ") == "4/0AY0e-g7XYZ"
+
+
+def test_parse_redirect_url_strips_whitespace():
+    assert _parse_redirect_url_or_code("  4/0AY0e-g7XYZ  ") == "4/0AY0e-g7XYZ"
+
+
+def test_parse_redirect_url_returns_empty_on_no_code():
+    assert _parse_redirect_url_or_code("http://localhost:8080/?error=denied") == ""
+    assert _parse_redirect_url_or_code("") == ""
+
+
+def test_paste_redirect_dialog_calls_link_with_parsed_code(monkeypatch):
+    m = mock.Mock()
+    m.get_auth_url = mock.Mock(return_value="https://accounts.google.com/auth")
+    m.link = mock.Mock(return_value=0)
+
+    # Simulate user pasting the full redirect URL.
+    monkeypatch.setattr(
+        "cumulus.cli.cli_core.prompt",
+        lambda _: "http://localhost:8080/?code=4/abc&state=x",
+    )
+
+    res = _paste_redirect_dialog(m)
+    m.link.assert_called_once_with(code="4/abc")
+    assert res == 0
+
+
+def test_paste_redirect_dialog_returns_1_on_empty_parse(monkeypatch):
+    m = mock.Mock()
+    m.get_auth_url = mock.Mock(return_value="https://accounts.google.com/auth")
+    m.link = mock.Mock()
+
+    monkeypatch.setattr("cumulus.cli.cli_core.prompt", lambda _: "")
+
+    res = _paste_redirect_dialog(m)
+    m.link.assert_not_called()
+    assert res == 1

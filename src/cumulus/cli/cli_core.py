@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 from os import path as osp
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs, urlparse
 
 import click
 from rich.console import Console, ConsoleRenderable
@@ -135,6 +136,42 @@ def _local_server_dialog(m: "MaestralProxy | Maestral") -> int:
         return 1
 
     return m.link(refresh_token=creds.refresh_token)
+
+
+def _parse_redirect_url_or_code(value: str) -> str:
+    """Accept either the full redirect URL pasted from the browser address
+    bar (e.g. 'http://localhost:8080/?code=4/abc&state=x') or a bare code
+    ('4/abc'). Returns the bare code, or '' on failure."""
+    value = value.strip()
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        parsed = urlparse(value)
+        codes = parse_qs(parsed.query).get("code", [])
+        return codes[0] if codes else ""
+    return value
+
+
+def _paste_redirect_dialog(m: "MaestralProxy | Maestral") -> int:
+    """Shape C: ask the daemon for an auth URL, prompt the user to open it,
+    then paste back the redirected URL (or just the code). The daemon
+    consumes the code via link(code=...).
+    """
+    url = m.get_auth_url()
+    info("Open this URL in any browser to authorize Cumulus:")
+    info(f"    {url}")
+    info(
+        "After approving, your browser will fail to connect to a "
+        "localhost URL — that's expected. Copy the URL from your "
+        "browser's address bar and paste it below."
+    )
+
+    raw = prompt("Paste the redirected URL (or just the code)")
+    code = _parse_redirect_url_or_code(raw)
+    if not code:
+        warn("Could not find an authorization code in that input.")
+        return 1
+    return m.link(code=code)
 
 
 def link_dialog(m: MaestralProxy | Maestral) -> None:
