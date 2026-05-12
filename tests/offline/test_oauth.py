@@ -53,3 +53,14 @@ def test_load_client_config_malformed_override_raises_auth_error(monkeypatch, tm
 
     with pytest.raises(AuthError):
         oauth.load_client_config()
+
+
+def test_load_client_config_missing_bundled_resource_raises_auth_error(monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+
+    def _raise(*_a, **_kw):
+        raise ModuleNotFoundError("No module named 'cumulus.resources'")
+
+    monkeypatch.setattr("cumulus.oauth.files", _raise)
+    with pytest.raises(AuthError):
+        oauth.load_client_config()
