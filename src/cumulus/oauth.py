@@ -28,19 +28,24 @@ def load_client_config() -> dict[str, Any]:
     override = os.environ.get("CUMULUS_CLIENT_SECRET_PATH")
     try:
         if override:
-            with open(override) as f:
+            with open(override, encoding="utf-8") as f:
                 return json.load(f)
         return json.loads(
             files("cumulus.resources").joinpath("client_secret.json").read_text()
         )
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ModuleNotFoundError) as exc:
         raise AuthError(
             "Client credentials not found",
             f"Expected client_secret.json at: {override or '<bundled resource>'}. "
             "This is a Cumulus packaging defect — please file a bug.",
         ) from exc
-    except (json.JSONDecodeError, OSError) as exc:
+    except json.JSONDecodeError as exc:
         raise AuthError(
             "Client credentials are malformed",
             f"Could not parse client_secret.json: {exc}",
+        ) from exc
+    except OSError as exc:
+        raise AuthError(
+            "Could not read client credentials",
+            f"Could not read client_secret.json: {exc}",
         ) from exc
