@@ -174,41 +174,14 @@ def _paste_redirect_dialog(m: "MaestralProxy | Maestral") -> int:
     return m.link(code=code)
 
 
-def link_dialog(m: MaestralProxy | Maestral) -> None:
-    """
-    A CLI dialog for linking a remote account.
-
-    :param m: Proxy to Maestral daemon.
-    """
-    authorize_url = m.get_auth_url()
-
-    info(f"Linking new account for '{m.config_name}' config")
-    info("Retrieving auth code from the remote")
-    choice = select(
-        "How would you like to you link your account?",
-        options=["Open authorization website", "Print auth URL to console"],
-    )
-
-    if choice == 0:
-        click.launch(authorize_url)
-    else:
-        info("Open the URL below to retrieve an auth code:")
-        info(authorize_url)
-
-    res = -1
-    while res != 0:
-        auth_code = prompt("Enter the auth code:")
-        auth_code = auth_code.strip()
-
-        res = m.link(auth_code)
-
-        if res == 0:
-            email = m.get_state("account", "email")
-            ok(f"Linked to {email}")
-        elif res == 1:
-            warn("Invalid token, please try again")
-        elif res == 2:
-            warn("Could not connect to the remote, please try again")
+def _report_link_result(m: "MaestralProxy | Maestral", res: int) -> None:
+    if res == 0:
+        email = m.get_state("account", "email") or "your account"
+        ok(f"Linked to {email}")
+    elif res == 1:
+        warn("Invalid authorization, please try again.")
+    elif res == 2:
+        warn("Could not connect to Google, please try again.")
 
 
 @click.command(help="Start the sync daemon.")
@@ -253,7 +226,10 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         m = MaestralProxy(config_name)
 
         if m.pending_link:
-            link_dialog(m)
+            res = _local_server_dialog(m)
+            _report_link_result(m, res)
+            if res != 0:
+                return
 
         if m.pending_sync_folder:
             path = select_remote_path_dialog(config_name, allow_merge=True)
@@ -398,37 +374,44 @@ def auth() -> None:
 
 @auth.command(name="link", help="Link a new remote account.")
 @click.option(
-    "--relink",
-    "-r",
-    is_flag=True,
-    default=False,
+    "--relink", "-r", is_flag=True, default=False,
     help="Relink to the existing account. Keeps the sync state.",
 )
 @click.option(
-    "--refresh-token",
-    hidden=True,
-    help="Refresh token to bypass OAuth exchange.",
+    "--no-local-server", is_flag=True, default=False,
+    help="Use the paste-the-redirect-URL flow instead of the loopback "
+         "server. Useful for headless setups without SSH port-forwarding.",
 )
 @click.option(
-    "--access-token",
-    hidden=True,
-    help="Access token to bypass OAuth exchange.",
+    "--refresh-token", "refresh_token", default=None, hidden=True,
+)
+@click.option(
+    "--access-token", "access_token", default=None, hidden=True,
 )
 @inject_proxy(fallback=True, existing_config=False)
 @convert_api_errors
 def auth_link(
-    m: Maestral, relink: bool, refresh_token: str | None, access_token: str | None
+    m: "Maestral",
+    relink: bool,
+    no_local_server: bool,
+    refresh_token: str | None,
+    access_token: str | None,
 ) -> None:
-    if m.pending_link or relink:
-        if refresh_token or access_token:
-            m.link(refresh_token=refresh_token, access_token=access_token)
-        else:
-            link_dialog(m)
-    else:
+    if not m.pending_link and not relink:
         echo(
-            "Maestral is already linked. Use '-r' to relink to the same "
+            "Cumulus is already linked. Use '-r' to relink to the same "
             "account or specify a new config name with '-c'."
         )
+        return
+
+    if refresh_token or access_token:
+        res = m.link(refresh_token=refresh_token, access_token=access_token)
+    elif no_local_server:
+        res = _paste_redirect_dialog(m)
+    else:
+        res = _local_server_dialog(m)
+
+    _report_link_result(m, res)
 
 
 @auth.command(
