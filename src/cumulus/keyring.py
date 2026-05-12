@@ -19,8 +19,6 @@ from keyring.backend import KeyringBackend
 from keyring.core import load_keyring
 from keyring.errors import InitError, KeyringLocked, PasswordDeleteError
 
-from .cli import output
-
 # local imports
 from .config import CumulusConfig
 from .exceptions import KeyringAccessError
@@ -235,6 +233,10 @@ class CredentialStorage:
             self._token = token
             self._loaded = True
 
+            # Lazy CLI import to avoid a circular dependency (keyring → cli →
+            # cli_core → oauth → keyring) for non-CLI consumers of this module.
+            from .cli import output
+
             if isinstance(keyring, keyrings.alt.file.PlaintextKeyring):
                 output.warn("No keyring found, credentials stored in plain text")
 
@@ -271,6 +273,8 @@ class CredentialStorage:
                     self._logger.error(title, exc_info=exc_info_tuple(new_exc))
                     raise new_exc
                 else:
+                    from .cli import output
+
                     output.ok("Credentials removed")
 
             self.set_keyring_backend(None)
