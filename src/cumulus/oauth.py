@@ -15,21 +15,25 @@ from importlib.resources import files
 from typing import Any
 
 from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
 
 from .exceptions import AuthError
 from .keyring import CredentialStorage
 
 __all__ = [
     "DRIVE_SCOPES",
+    "PASTE_REDIRECT_URI",
     "load_client_config",
     "credentials_from_refresh_token",
     "save_credentials",
     "load_credentials",
     "PersistingCredentials",
     "wrap_persisting",
+    "make_paste_flow",
 ]
 
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+PASTE_REDIRECT_URI = "http://localhost:8080"
 
 
 def load_client_config() -> dict[str, Any]:
@@ -148,3 +152,18 @@ def wrap_persisting(
         cred_storage=cred_storage,
         account_id=account_id,
     )
+
+
+def make_paste_flow() -> Flow:
+    """Construct a Flow with redirect_uri=http://localhost:8080 for the
+    Shape C paste-the-redirect-URL fallback.
+
+    The caller (GoogleDriveClient) holds the returned Flow object between
+    get_auth_url() and link(code=...) — it carries PKCE state that the
+    exchange needs."""
+    flow = Flow.from_client_config(
+        load_client_config(),
+        scopes=list(DRIVE_SCOPES),
+    )
+    flow.redirect_uri = PASTE_REDIRECT_URI
+    return flow

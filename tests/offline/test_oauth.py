@@ -172,3 +172,19 @@ def test_load_credentials_returned_blob_can_be_wrapped(monkeypatch, cred_storage
     wrapped = oauth.wrap_persisting(loaded, cred_storage, account_id="perm-789")
     assert isinstance(wrapped, oauth.PersistingCredentials)
     assert wrapped.refresh_token == "rt-abc"
+
+
+def test_make_paste_flow_authorization_url_shape(monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    flow = oauth.make_paste_flow()
+
+    auth_url, _state = flow.authorization_url(
+        access_type="offline", prompt="consent"
+    )
+
+    assert auth_url.startswith("https://accounts.google.com/o/oauth2/")
+    assert "redirect_uri=http%3A%2F%2Flocalhost%3A8080" in auth_url
+    assert "access_type=offline" in auth_url
+    assert "prompt=consent" in auth_url
+    # auth/drive scope encoded into the URL.
+    assert "drive" in auth_url
