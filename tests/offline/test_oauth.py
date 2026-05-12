@@ -64,3 +64,14 @@ def test_load_client_config_missing_bundled_resource_raises_auth_error(monkeypat
     monkeypatch.setattr("cumulus.oauth.files", _raise)
     with pytest.raises(AuthError):
         oauth.load_client_config()
+
+
+def test_credentials_from_refresh_token_uses_bundled_client(monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    creds = oauth.credentials_from_refresh_token("test-refresh-token")
+    assert creds.refresh_token == "test-refresh-token"
+    assert creds.client_id  # comes from client_secret.json
+    assert creds.client_secret
+    assert creds.token_uri == "https://oauth2.googleapis.com/token"
+    assert creds.scopes == oauth.DRIVE_SCOPES
+    assert creds.token is None  # access token absent until first refresh

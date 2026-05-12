@@ -14,9 +14,11 @@ import os
 from importlib.resources import files
 from typing import Any
 
+from google.oauth2.credentials import Credentials
+
 from .exceptions import AuthError
 
-__all__ = ["DRIVE_SCOPES", "load_client_config"]
+__all__ = ["DRIVE_SCOPES", "load_client_config", "credentials_from_refresh_token"]
 
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
@@ -49,3 +51,19 @@ def load_client_config() -> dict[str, Any]:
             "Could not read client credentials",
             f"Could not read client_secret.json: {exc}",
         ) from exc
+
+
+def credentials_from_refresh_token(refresh_token: str) -> Credentials:
+    """Build a Credentials seeded only with a refresh_token plus the bundled
+    client_id/secret. The returned Credentials has token=None; the caller
+    should call .refresh(Request()) to obtain an access token (and to
+    validate that the refresh token is still valid)."""
+    cfg = load_client_config()["installed"]
+    return Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri=cfg["token_uri"],
+        client_id=cfg["client_id"],
+        client_secret=cfg["client_secret"],
+        scopes=list(DRIVE_SCOPES),
+    )
