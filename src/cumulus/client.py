@@ -23,6 +23,8 @@ from typing import (
     overload,
 )
 
+from googleapiclient.discovery import build
+
 from . import oauth
 from .config import CumulusState
 from .core import (
@@ -235,6 +237,26 @@ class GoogleDriveClient:
     def unlink(self) -> None:
         """Unlinks the Google account and deletes stored credentials."""
         _not_implemented()
+
+    # ---- Service builder -------------------------------------------------------------
+
+    def _get_service(self) -> Any:
+        """Build a fresh Drive v3 service object using cached credentials.
+
+        Every API call in Stages 3+ goes through this helper. cache_discovery
+        is disabled because the discovery cache is unsafe to share across
+        thread/process boundaries and is just disk I/O we don't need.
+        """
+        if not self.linked:
+            raise NotLinkedError(
+                "Not linked",
+                "Run 'cumulus auth link' to authorize Cumulus.",
+            )
+        return build(
+            "drive", "v3",
+            credentials=self._credentials,
+            cache_discovery=False,
+        )
 
     # ---- Properties ------------------------------------------------------------------
 

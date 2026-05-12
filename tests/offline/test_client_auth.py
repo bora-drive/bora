@@ -47,3 +47,29 @@ def test_linked_caches_loaded_credentials(client, cred_storage, monkeypatch):
     with mock.patch.object(oauth, "load_credentials") as m_load:
         _ = client.linked
         m_load.assert_not_called()
+
+
+from cumulus.exceptions import NotLinkedError
+
+
+def test_get_service_raises_not_linked_when_unlinked(client):
+    with pytest.raises(NotLinkedError):
+        client._get_service()
+
+
+def test_get_service_builds_drive_v3_with_credentials(
+    client, cred_storage, monkeypatch
+):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    from cumulus import oauth
+    base = oauth.credentials_from_refresh_token("rt-1")
+    oauth.save_credentials(cred_storage, base, account_id="perm-1")
+
+    fake_service = mock.Mock(name="drive_v3_service")
+    with mock.patch("cumulus.client.build", return_value=fake_service) as m_build:
+        result = client._get_service()
+    assert result is fake_service
+    m_build.assert_called_once()
+    assert m_build.call_args.args[:2] == ("drive", "v3")
+    assert m_build.call_args.kwargs["credentials"] is client._credentials
+    assert m_build.call_args.kwargs["cache_discovery"] is False
