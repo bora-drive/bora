@@ -349,3 +349,75 @@ def test_paste_redirect_dialog_returns_1_on_empty_parse(monkeypatch):
     res = _paste_redirect_dialog(m)
     m.link.assert_not_called()
     assert res == 1
+
+
+from cumulus.cli.cli_core import auth_link
+
+
+def _make_proxy_mock(*, pending_link: bool = True, config_name: str = "test-cli"):
+    """Return a MagicMock that acts as a context manager returning itself."""
+    m = mock.MagicMock()
+    m.__enter__ = mock.Mock(return_value=m)
+    m.__exit__ = mock.Mock(return_value=False)
+    m.pending_link = pending_link
+    m.config_name = config_name
+    return m
+
+
+def test_auth_link_uses_local_server_dialog_by_default(monkeypatch):
+    m_proxy = _make_proxy_mock()
+
+    called = []
+
+    def _fake_local(m):
+        called.append("local")
+        return 0
+
+    def _fake_paste(m):
+        called.append("paste")
+        return 0
+
+    monkeypatch.setattr("cumulus.cli.cli_core._local_server_dialog", _fake_local)
+    monkeypatch.setattr("cumulus.cli.cli_core._paste_redirect_dialog", _fake_paste)
+    monkeypatch.setattr(
+        "cumulus.cli.cli_core._report_link_result",
+        lambda m, res: None,
+    )
+    monkeypatch.setattr(
+        "cumulus.daemon.MaestralProxy",
+        lambda config_name, fallback: m_proxy,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["auth", "link", "-c", "test-cli"])
+
+    assert result.exit_code == 0, result.output
+    assert called == ["local"]
+
+
+def test_auth_link_uses_paste_redirect_when_flag_set(monkeypatch):
+    m_proxy = _make_proxy_mock()
+
+    called = []
+    monkeypatch.setattr(
+        "cumulus.cli.cli_core._local_server_dialog",
+        lambda m: called.append("local") or 0,
+    )
+    monkeypatch.setattr(
+        "cumulus.cli.cli_core._paste_redirect_dialog",
+        lambda m: called.append("paste") or 0,
+    )
+    monkeypatch.setattr(
+        "cumulus.cli.cli_core._report_link_result",
+        lambda m, res: None,
+    )
+    monkeypatch.setattr(
+        "cumulus.daemon.MaestralProxy",
+        lambda config_name, fallback: m_proxy,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["auth", "link", "--no-local-server", "-c", "test-cli"])
+
+    assert result.exit_code == 0, result.output
+    assert called == ["paste"]
