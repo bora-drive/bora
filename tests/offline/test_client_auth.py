@@ -217,3 +217,61 @@ def test_link_with_access_token_happy_path(client, cred_storage, monkeypatch):
     # Note: access_token has no refresh_token, so linked() returns False on
     # reload. Verify the in-process state was set correctly though.
     assert client._cached_account_info.account_id == "perm-12345"
+
+
+from datetime import datetime, timedelta
+
+
+def test_get_auth_url_creates_pending_flow(client, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    url = client.get_auth_url()
+    assert url.startswith("https://accounts.google.com/o/oauth2/")
+    assert client._pending_paste_flow is not None
+    assert "access_type=offline" in url
+    assert "prompt=consent" in url
+
+
+def test_link_with_code_uses_pending_flow(client, cred_storage, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    client.get_auth_url()
+    fake_flow = client._pending_paste_flow.flow
+    fake_flow.fetch_token = mock.Mock()  # short-circuit token exchange
+    fake_creds = _oauth.credentials_from_refresh_token("rt-from-paste")
+    fake_creds.token = "fresh-access-from-paste"
+    # Flow.credentials is a read-only property; use PropertyMock to stub it.
+    with mock.patch.object(type(fake_flow), "credentials",
+                           new_callable=mock.PropertyMock,
+                           return_value=fake_creds):
+        fake_service = mock.MagicMock()
+        fake_service.about().get().execute.return_value = _fake_about_response()
+        with mock.patch("cumulus.client.build", return_value=fake_service):
+            res = client.link(code="auth-code-from-redirect")
+
+    assert res == 0
+    fake_flow.fetch_token.assert_called_once_with(code="auth-code-from-redirect")
+    assert client._pending_paste_flow is None
+    assert client.linked is True
+
+
+def test_link_with_code_returns_1_when_no_pending_flow(client):
+    assert client._pending_paste_flow is None
+    res = client.link(code="any-code")
+    assert res == 1
+
+
+def test_link_with_code_returns_1_on_expired_pending_flow(client, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    client.get_auth_url()
+    # Force the state to look stale.
+    client._pending_paste_flow.created_at = datetime.utcnow() - timedelta(minutes=11)
+    res = client.link(code="too-late")
+    assert res == 1
+    assert client._pending_paste_flow is None
+
+
+def test_get_auth_url_replaces_prior_pending_flow(client, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    client.get_auth_url()
+    first = client._pending_paste_flow
+    client.get_auth_url()
+    assert client._pending_paste_flow is not first

@@ -14,7 +14,7 @@ import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -217,10 +217,18 @@ class GoogleDriveClient:
     def get_auth_url(self) -> str:
         """Returns a URL to authorize access to a Google Drive account.
 
-        :returns: URL to retrieve an authorization code.
+        Used only by the Shape C paste-the-redirect-URL fallback.
+        After the user opens this URL and approves, they pass the resulting
+        redirect URL (or just its 'code' parameter) back to link(code=...).
         """
-        _not_implemented()
-        return ""  # unreachable
+        flow = oauth.make_paste_flow()
+        auth_url, _ = flow.authorization_url(
+            access_type="offline", prompt="consent"
+        )
+        self._pending_paste_flow = _PasteFlowState(
+            flow=flow, created_at=datetime.utcnow()
+        )
+        return auth_url
 
     def link(
         self,
@@ -240,8 +248,14 @@ class GoogleDriveClient:
                     token=access_token, scopes=list(oauth.DRIVE_SCOPES)
                 )
             elif code is not None:
-                # Shape C paste-the-redirect-URL fallback. Implemented in Task 16.
-                return self._link_with_paste_code(code)
+                state = self._pending_paste_flow
+                self._pending_paste_flow = None
+                if state is None:
+                    return 1
+                if (datetime.utcnow() - state.created_at) > timedelta(minutes=10):
+                    return 1
+                state.flow.fetch_token(code=code)
+                creds = state.flow.credentials
             else:
                 return 1
 
@@ -257,9 +271,6 @@ class GoogleDriveClient:
             return 1
         except CONNECTION_ERRORS:
             return 2
-
-    def _link_with_paste_code(self, code: str) -> int:
-        raise NotImplementedError  # Task 16
 
     def unlink(self) -> None:
         """Unlinks the Google account and deletes stored credentials."""
