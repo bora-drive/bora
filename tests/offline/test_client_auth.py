@@ -203,3 +203,17 @@ def test_link_with_refresh_token_returns_2_on_connection_error(
 
 def test_link_with_no_arguments_returns_1(client):
     assert client.link() == 1
+
+
+def test_link_with_access_token_happy_path(client, cred_storage, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    fake_service = mock.MagicMock()
+    fake_service.about().get().execute.return_value = _fake_about_response()
+    with mock.patch("cumulus.client.build", return_value=fake_service):
+        res = client.link(access_token="at-abc")
+
+    assert res == 0
+    assert client._cached_account_info is not None
+    # Note: access_token has no refresh_token, so linked() returns False on
+    # reload. Verify the in-process state was set correctly though.
+    assert client._cached_account_info.account_id == "perm-12345"
