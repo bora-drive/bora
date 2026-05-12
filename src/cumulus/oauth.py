@@ -15,7 +15,7 @@ from importlib.resources import files
 from typing import Any
 
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
+from google_auth_oauthlib.flow import Flow, InstalledAppFlow
 
 from .exceptions import AuthError
 from .keyring import CredentialStorage
@@ -30,6 +30,7 @@ __all__ = [
     "PersistingCredentials",
     "wrap_persisting",
     "make_paste_flow",
+    "run_local_flow",
 ]
 
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -152,6 +153,34 @@ def wrap_persisting(
         cred_storage=cred_storage,
         account_id=account_id,
     )
+
+
+def run_local_flow(open_browser: bool = True, port: int = 8080) -> Credentials:
+    """Used by the CLI process (not the daemon). Runs
+    InstalledAppFlow.run_local_server with port=8080 by default —
+    predictable for 'ssh -L 8080:localhost:8080 <host>'.
+
+    Raises AuthError if the port is already bound; the user can free the
+    port or fall back to `cumulus auth link --no-local-server`.
+    """
+    flow = InstalledAppFlow.from_client_config(
+        load_client_config(),
+        scopes=list(DRIVE_SCOPES),
+    )
+    try:
+        return flow.run_local_server(
+            port=port,
+            open_browser=open_browser,
+            access_type="offline",
+            prompt="consent",
+        )
+    except OSError as exc:
+        raise AuthError(
+            f"Port {port} in use",
+            f"Could not bind localhost:{port} for the OAuth callback ({exc}). "
+            "Either free the port and retry, or run "
+            "'cumulus auth link --no-local-server' to use the paste-the-URL flow.",
+        ) from exc
 
 
 def make_paste_flow() -> Flow:

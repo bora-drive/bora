@@ -188,3 +188,38 @@ def test_make_paste_flow_authorization_url_shape(monkeypatch):
     assert "prompt=consent" in auth_url
     # auth/drive scope encoded into the URL.
     assert "drive" in auth_url
+
+
+def test_run_local_flow_returns_credentials(monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    fake_creds = mock.Mock(spec=Credentials)
+    fake_flow = mock.Mock()
+    fake_flow.run_local_server = mock.Mock(return_value=fake_creds)
+
+    with mock.patch(
+        "cumulus.oauth.InstalledAppFlow.from_client_config",
+        return_value=fake_flow,
+    ):
+        result = oauth.run_local_flow(port=8080)
+
+    assert result is fake_creds
+    fake_flow.run_local_server.assert_called_once()
+    kwargs = fake_flow.run_local_server.call_args.kwargs
+    assert kwargs.get("port") == 8080
+
+
+def test_run_local_flow_port_in_use_raises_auth_error(monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    fake_flow = mock.Mock()
+    fake_flow.run_local_server = mock.Mock(
+        side_effect=OSError(98, "Address already in use")
+    )
+
+    with mock.patch(
+        "cumulus.oauth.InstalledAppFlow.from_client_config",
+        return_value=fake_flow,
+    ):
+        with pytest.raises(AuthError) as excinfo:
+            oauth.run_local_flow(port=8080)
+    assert "8080" in str(excinfo.value)
+    assert "--no-local-server" in str(excinfo.value)
