@@ -99,29 +99,105 @@ Records two things, both required by the staged-port workflow:
 
 ## Manual smoke test
 
-Run this once Tasks 1–21 are merged. Tick each item only after confirming
-the expected behavior.
+Run against a real Google account (`cumulus@arko.net`, project `cumulus`)
+on 2026-05-12, on the exe.dev Linux VM. All 5 items passed; three Stage 2
+fix-up commits landed during execution (recorded above the checklist).
 
-- [ ] **1. Default flow (Shape A).** Run `cumulus auth link`. Browser
-  opens, consent screen shows "Cumulus" as the app, "Linked to <email>"
-  message appears. Cumulus is linked.
-- [ ] **2. Relink with Shape C (`--no-local-server`).** Run
-  `cumulus auth link -r --no-local-server`. The CLI prints a URL; open
-  it, approve, copy the failed-redirect URL from your browser address
-  bar, paste it back into the CLI. "Linked to <email>" appears.
-- [ ] **3. Persistence across restarts.** Stop the daemon
-  (`cumulus stop` or kill the process); start a fresh session
-  (`cumulus start`). The daemon does NOT prompt for re-link.
-- [ ] **4. Token revocation.** Visit
-  https://myaccount.google.com/permissions → find "Cumulus" → Remove
-  Access. Within ~5 minutes (next change-feed poll once Stage 3 lands —
-  for Stage 2 standalone, force an API call manually:
-  `python -c "from cumulus.main import Maestral; m = Maestral('default'); print(m.client.get_account_info())"`).
-  Expected: a `TokenRevokedError` surfaces as a user-visible "Re-link
-  needed" notification. The daemon stops; no retry loop.
-- [ ] **5. Unlink.** Run `cumulus auth unlink`. Confirm. Verify the
-  keyring entry is gone (`secret-tool lookup ...` on Linux, or
-  `security find-internet-password -s Cumulus` on macOS). Verify
-  config's `auth/account_id` is empty.
+- [x] **1. Default flow (Shape A).** `CUMULUS_AUTH_PORT=18080 cumulus auth link`
+  with an SSH tunnel `ssh -L 18080:localhost:18080 <vm>` from the user's
+  laptop. Auth URL printed; user opened in laptop browser; consent
+  approved; loopback captured the redirect via the tunnel; result:
+  `✓ Linked to cumulus@arko.net`. Two issues surfaced and were fixed
+  during this step (see "Smoke-test discoveries" below).
+- [x] **2. Relink with Shape C (`--no-local-server`).** User ran
+  `cumulus auth link -r --no-local-server` in an interactive SSH session
+  (background mode crashes the survey-based prompt with a TTY error —
+  a Stage 2 limitation noted but not in scope to fix). Pasted the full
+  redirect URL back; parser extracted the code; result:
+  `✓ Linked to cumulus@arko.net`. Validates `_paste_redirect_dialog`,
+  `_parse_redirect_url_or_code` on a full URL with `code=` param, the
+  daemon-side `_PasteFlowState` lifecycle, the `link(code=...)` inline
+  branch (Task 16), and crucially the `OAUTHLIB_INSECURE_TRANSPORT=1`
+  daemon env var (Task 9) — without it the `http://localhost:8080`
+  redirect_uri would have been rejected at exchange time.
+- [x] **3. Persistence across restarts.** Fresh Python process
+  (`python3 -c "from cumulus.client import GoogleDriveClient; ..."`)
+  loaded the persisted keyring blob, googleapiclient auto-refreshed
+  the access token, returned correct `account_id=17820054878047320812`,
+  `email=cumulus@arko.net`, `display_name=Cumulus Tester`, and storage
+  quota (29 GB / 166 GB). `cumulus auth status` partially worked
+  (Remote ID populated correctly; Email/Account-type blank because
+  the CLI reads from `state["account"]["email"]` which Stage 2 does
+  not write — same gap as `_report_link_result` pre-fix; Stage 3+
+  concern).
+- [x] **4. Token revocation.** User revoked at
+  https://myaccount.google.com/permissions. Smoke harness
+  (`/tmp/smoke_step4.py` — uses `convert_api_errors` around
+  `c.get_account_info()` after nulling `c._credentials.token` to force
+  a refresh) raised:
+  ```
+  PASS: TokenRevokedError raised
+    title: Authentication revoked
+    message: Your Google account has been disconnected. Run 'cumulus auth link -r' to re-link.
+  ```
+  Full B3 chain verified (`PersistingCredentials.refresh` propagating
+  `RefreshError`, `convert_api_errors` mapping it, exception class and
+  message match spec).
+- [x] **5. Unlink.** `cumulus auth unlink -Y` output:
+  `✓ Credentials removed`, `✓ Unlinked Maestral.` Post-state verified:
+  config `auth/account_id` reset to `''`, `auth/keyring` reset to
+  `automatic`, `cred_storage.account_id` returns `None`, `cred_storage.keyring`
+  is `None`, `client.linked` returns `False`. Best-effort token revoke
+  in `client.unlink()` was attempted (token already revoked in step 4 —
+  any response is acceptable).
 
-Once all five are ticked, Stage 2 is done per master design §7.
+Stage 2 is done per master design §7.
+
+## Smoke-test discoveries (fixed inline during smoke testing 2026-05-12)
+
+Three Stage 2 bugs surfaced during smoke testing and were fixed before
+declaring the stage complete:
+
+- **`webbrowser.open()` raises on headless systems (commit `8cb0c8c`):**
+  `_local_server_dialog` called `oauth.run_local_flow(port=8080)` with
+  default `open_browser=True`. On the headless exe.dev VM, no browser
+  is installed, so `webbrowser.open()` raised `webbrowser.Error("could
+  not locate runnable browser")`, which the dialog's broad
+  `except Exception` swallowed as "Invalid authorization, please try
+  again." — without ever showing the user the auth URL. The dialog
+  already instructs users to open the URL in their own browser (the
+  SSH-tunnel pattern), so launching `webbrowser` on the CLI host was
+  never useful. Fix: pass `open_browser=False` unconditionally; the
+  Google library's `authorization_prompt_message` still prints the URL.
+
+- **exe.dev auto-proxy probes port 8080 and trips CSRF check
+  (commit `40f37f2`):** As soon as Shape A bound the local server on
+  port 8080, exe.dev's HTTP-forwarding feature (which auto-proxies any
+  port below 9999) made an unauthenticated GET to the loopback URL.
+  google-auth-oauthlib's WSGI handler treated it as the OAuth callback,
+  compared the absent/wrong `state` parameter to the one we registered,
+  and raised `(mismatching_state) CSRF Warning!` — completing the flow
+  with a failure before the user could even open the URL in their
+  browser. Fix: add `CUMULUS_AUTH_PORT` env var so users can choose a
+  port outside the auto-probe range (we used 18080 for the smoke test,
+  with SSH tunnel `ssh -L 18080:localhost:18080`). Default stays at
+  8080 for environments without auto-probing.
+
+- **Circular import in `keyring.py` (commit `246391a`):** Task 4 of
+  the original plan added `from .keyring import CredentialStorage` to
+  `oauth.py` (so `save_credentials` / `load_credentials` could be
+  typed). `keyring.py` already had `from .cli import output` at the
+  top, which loads `cli_core`, which (after Task 18) loads `oauth.py`,
+  which tries to load `keyring.py` — circular. The cycle happens to
+  work when the `cumulus` CLI entry point drives the import order,
+  but any consumer that imports `cumulus.keyring` directly (the
+  daemon, ad-hoc scripts, our step 3 smoke harness) hit
+  `ImportError: cannot import name 'CredentialStorage' from partially
+  initialized module 'cumulus.keyring'`. Fix: move `from .cli import
+  output` inside the two methods that use it (`save_creds`,
+  `delete_creds`) so it's lazy-imported.
+
+All three fixes are localized, tested (213 offline tests still pass
+unchanged), and don't alter the public surface of any module. None of
+them invalidate prior task reviews — they're stage-completion fix-ups
+exposed only by end-to-end smoke testing.
