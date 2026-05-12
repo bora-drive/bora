@@ -144,3 +144,62 @@ def test_get_space_usage(client, cred_storage, monkeypatch):
     assert usage.used == 1024000
     assert usage.allocated == 16106127360
     assert usage.team_usage is None
+
+
+from google.auth.exceptions import RefreshError
+
+
+def test_link_with_refresh_token_happy_path(client, cred_storage, monkeypatch):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+
+    # Mock Credentials.refresh to succeed without HTTP.
+    def _mark_refreshed(self, request):
+        self.token = "fresh-access-token"
+    monkeypatch.setattr(_oauth.Credentials, "refresh", _mark_refreshed)
+
+    fake_service = mock.MagicMock()
+    fake_service.about().get().execute.return_value = _fake_about_response()
+    with mock.patch("cumulus.client.build", return_value=fake_service):
+        res = client.link(refresh_token="rt-abc")
+
+    assert res == 0
+    assert client.linked is True
+    assert client._cached_account_info is not None
+    assert client._cached_account_info.account_id == "perm-12345"
+    # account_id stored in config; refresh_token persisted in keyring.
+    assert cred_storage.account_id == "perm-12345"
+    blob = json.loads(cred_storage.token)
+    assert blob["refresh_token"] == "rt-abc"
+
+
+def test_link_with_refresh_token_rejects_revoked_token(
+    client, cred_storage, monkeypatch
+):
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    def _raise(self, request):
+        raise RefreshError("invalid_grant")
+    monkeypatch.setattr(_oauth.Credentials, "refresh", _raise)
+
+    res = client.link(refresh_token="rt-bad")
+
+    assert res == 1
+    assert client.linked is False
+    assert cred_storage.account_id is None
+
+
+def test_link_with_refresh_token_returns_2_on_connection_error(
+    client, cred_storage, monkeypatch
+):
+    import requests as _req
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    def _raise(self, request):
+        raise _req.exceptions.ConnectionError("boom")
+    monkeypatch.setattr(_oauth.Credentials, "refresh", _raise)
+
+    res = client.link(refresh_token="rt-no-net")
+    assert res == 2
+    assert client.linked is False
+
+
+def test_link_with_no_arguments_returns_1(client):
+    assert client.link() == 1
