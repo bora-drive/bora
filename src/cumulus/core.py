@@ -64,35 +64,25 @@ class Account:
     """Represents the user's account"""
 
     account_id: str
-    """Unique account ID"""
+    """Unique account ID (Drive permissionId)"""
     display_name: str
     """The user's name for display purposes"""
     email: str
     """The user's email address"""
-    email_verified: bool
-    """Whether the email address was verified"""
     profile_photo_url: str | None
-    """A URL to the user's photo"""
+    """A URL to the user's photo, or None"""
     disabled: bool
     """Whether the account is disabled"""
 
 
 @dataclass
 class FullAccount(Account):
-    """Represents the user's account and sync information"""
+    """Represents the user's account and sync information.
 
-    country: str | None
-    """The user's country"""
-    locale: str
-    """The user's locale"""
-    team: Team | None
-    """The team that a user belongs to, if any"""
-    team_member_id: str | None
-    """The member ID of user in a team, if any"""
-    account_type: AccountType
-    """The account type"""
-    root_info: RootInfo
-    """The user's root namespace to sync"""
+    For Drive there is no team or root-namespace concept; FullAccount is
+    currently just Account plus a placeholder for future Drive-specific
+    fields (e.g. domain when shared-drive support lands)."""
+    pass
 
 
 @dataclass
