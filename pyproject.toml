@@ -88,6 +88,9 @@ cumulus = "cumulus.cli:main"
 [tool.setuptools.data-files]
 "share/icons/hicolor/512x512/apps" = ["src/cumulus/resources/maestral.png"]
 
+[tool.setuptools.package-data]
+cumulus = ["resources/*.json", "resources/*.png", "py.typed"]
+
 [tool.flake8]
 ignore = "E203,E501,E704,W503,H306"
 statistics = "True"
