@@ -23,6 +23,9 @@ from typing import (
     overload,
 )
 
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request as _AuthRequest
+from google.oauth2.credentials import Credentials as _Credentials
 from googleapiclient.discovery import build
 
 from . import oauth
@@ -225,15 +228,38 @@ class GoogleDriveClient:
         refresh_token: str | None = None,
         access_token: str | None = None,
     ) -> int:
-        """Links with a Google account using the given authorization code.
-
-        :param code: Authorization code.
-        :param refresh_token: Optionally provide a refresh token directly.
-        :param access_token: Optionally provide a short-lived access token.
-        :returns: 0 on success, 1 for an invalid token, 2 for connection errors.
+        """Link with a Google account. Returns 0 / 1 / 2 (success / invalid /
+        connection failure).
         """
-        _not_implemented()
-        return 1  # unreachable
+        try:
+            if refresh_token is not None:
+                creds = oauth.credentials_from_refresh_token(refresh_token)
+                creds.refresh(_AuthRequest())
+            elif access_token is not None:
+                creds = _Credentials(
+                    token=access_token, scopes=list(oauth.DRIVE_SCOPES)
+                )
+            elif code is not None:
+                # Shape C paste-the-redirect-URL fallback. Implemented in Task 16.
+                return self._link_with_paste_code(code)
+            else:
+                return 1
+
+            account = self._fetch_account_info_for_creds(creds)
+            oauth.save_credentials(self._cred_storage, creds, account.account_id)
+            self._credentials = oauth.wrap_persisting(
+                creds, self._cred_storage, account.account_id
+            )
+            self._cached_account_info = account
+            return 0
+
+        except RefreshError:
+            return 1
+        except CONNECTION_ERRORS:
+            return 2
+
+    def _link_with_paste_code(self, code: str) -> int:
+        raise NotImplementedError  # Task 16
 
     def unlink(self) -> None:
         """Unlinks the Google account and deletes stored credentials."""
