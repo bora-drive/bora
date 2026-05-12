@@ -1,4 +1,5 @@
 import logging
+from unittest import mock
 
 from click.testing import CliRunner
 
@@ -257,3 +258,42 @@ def test_log_clear(m: Maestral) -> None:
         log_content = f.read()
 
     assert log_content == ""
+
+
+from cumulus.cli.cli_core import _local_server_dialog
+
+
+def test_local_server_dialog_invokes_run_local_flow_and_passes_refresh_token():
+    m = mock.Mock()
+    m.config_name = "test-config"
+    m.link = mock.Mock(return_value=0)
+
+    fake_creds = mock.Mock()
+    fake_creds.refresh_token = "rt-from-loopback"
+
+    with mock.patch(
+        "cumulus.cli.cli_core.oauth.run_local_flow",
+        return_value=fake_creds,
+    ):
+        res = _local_server_dialog(m)
+
+    m.link.assert_called_once_with(refresh_token="rt-from-loopback")
+    assert res == 0
+
+
+def test_local_server_dialog_returns_1_when_creds_lack_refresh_token():
+    m = mock.Mock()
+    m.config_name = "test-config"
+    m.link = mock.Mock()
+
+    fake_creds = mock.Mock()
+    fake_creds.refresh_token = None  # consent skipped; refresh_token missing.
+
+    with mock.patch(
+        "cumulus.cli.cli_core.oauth.run_local_flow",
+        return_value=fake_creds,
+    ):
+        res = _local_server_dialog(m)
+
+    assert res == 1
+    m.link.assert_not_called()
