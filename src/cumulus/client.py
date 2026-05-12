@@ -132,6 +132,7 @@ class GoogleDriveClient:
         self._state = CumulusState(config_name)
         self._timeout = timeout
         self._cached_account_info: FullAccount | None = None
+        self._cached_space_usage: PersonalSpaceUsage | None = None
 
         # Throttling config.
         self.bandwidth_limit_up = bandwidth_limit_up
@@ -293,18 +294,57 @@ class GoogleDriveClient:
     def get_account_info(self, dbid: str) -> Account: ...
 
     def get_account_info(self, dbid: str | None = None) -> Account:
-        """Gets current account information.
-
-        :param dbid: Account ID.  If not given, gets info for the linked account.
-        :returns: Account info.
-        """
-        _not_implemented()
-        return Account("", "", "", "", "")  # type: ignore[call-arg]  # unreachable
+        """Returns the current account info. The dbid param is preserved for
+        compat with the Maestral interface but is ignored for Drive (the
+        API only exposes the linked user, never arbitrary accounts)."""
+        if self._cached_account_info is None:
+            self._cached_account_info = self._fetch_account_info_for_creds(
+                self._credentials
+            )
+        return self._cached_account_info
 
     def get_space_usage(self) -> PersonalSpaceUsage:
         """Returns space usage of the currently linked account."""
-        _not_implemented()
-        return PersonalSpaceUsage(0, 0, None)  # type: ignore[call-arg]  # unreachable
+        if self._cached_space_usage is None:
+            # Refresh both account info and space usage in one round-trip.
+            self._cached_account_info = None
+            self.get_account_info()
+        assert self._cached_space_usage is not None  # set as side effect of _fetch
+        return self._cached_space_usage
+
+    def _fetch_account_info_for_creds(self, creds: Any) -> FullAccount:
+        """Validate credentials by issuing one about.get call, returning the
+        account info. Also populates self._cached_space_usage as a side effect
+        (the about.get response carries both).
+
+        Builds a one-shot service rather than going through _get_service
+        because link() may be calling us with credentials not yet stored
+        in self._credentials.
+        """
+        service = build(
+            "drive", "v3", credentials=creds, cache_discovery=False
+        )
+        response = service.about().get(
+            fields=(
+                "user(emailAddress,displayName,permissionId,photoLink),"
+                "storageQuota(usage,limit)"
+            )
+        ).execute()
+        user = response.get("user", {})
+        quota = response.get("storageQuota", {})
+
+        self._cached_space_usage = PersonalSpaceUsage(
+            used=int(quota.get("usage", 0)),
+            allocated=int(quota.get("limit", 0)),
+            team_usage=None,
+        )
+        return FullAccount(
+            account_id=user.get("permissionId", ""),
+            display_name=user.get("displayName", ""),
+            email=user.get("emailAddress", ""),
+            profile_photo_url=user.get("photoLink"),
+            disabled=False,
+        )
 
     # ---- Metadata operations ---------------------------------------------------------
 
