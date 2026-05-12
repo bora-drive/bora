@@ -12,7 +12,6 @@ import time
 from contextlib import contextmanager
 from functools import wraps
 from queue import Empty, Queue
-from tempfile import TemporaryDirectory
 from threading import Event, RLock, Thread
 from typing import Any, Callable, Generic, Iterator, TypeVar
 
@@ -24,7 +23,6 @@ from .client import API_HEALTH_URL
 from .config import CumulusConfig, CumulusState, PersistentMutableSet
 from .config.user import UserConfig
 from .constants import CONNECTED, CONNECTING, DISCONNECTED, IDLE, PAUSED, SYNCING
-from .core import TeamRootInfo, UserRootInfo
 from .exceptions import (
     CancelledError,
     ConnectionError,
@@ -38,9 +36,7 @@ from .fsevents import Observer, ObserverType
 from .logging import scoped_logger
 from .notify import CumulusDesktopNotifier
 from .sync import SyncEngine
-from .utils import removeprefix
 from .utils.integration import check_connection, get_inotify_limits
-from .utils.path import delete, is_child, is_equal_or_child, move, normalize
 
 __all__ = ["SyncManager"]
 
