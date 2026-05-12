@@ -17,8 +17,15 @@ from typing import Any
 from google.oauth2.credentials import Credentials
 
 from .exceptions import AuthError
+from .keyring import CredentialStorage
 
-__all__ = ["DRIVE_SCOPES", "load_client_config", "credentials_from_refresh_token"]
+__all__ = [
+    "DRIVE_SCOPES",
+    "load_client_config",
+    "credentials_from_refresh_token",
+    "save_credentials",
+    "load_credentials",
+]
 
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
@@ -67,3 +74,28 @@ def credentials_from_refresh_token(refresh_token: str) -> Credentials:
         client_secret=cfg["client_secret"],
         scopes=list(DRIVE_SCOPES),
     )
+
+
+def save_credentials(
+    cred_storage: CredentialStorage,
+    creds: Credentials,
+    account_id: str,
+) -> None:
+    """Serialize Credentials.to_json() and persist via cred_storage."""
+    cred_storage.save_creds(account_id, creds.to_json())
+
+
+def load_credentials(cred_storage: CredentialStorage) -> Credentials | None:
+    """Read the keyring blob and deserialize.
+    Returns None if no blob is stored or if the blob is malformed.
+    Returns a plain Credentials; pass through wrap_persisting() to upgrade
+    to a PersistingCredentials before handing to googleapiclient.
+    """
+    blob = cred_storage.token
+    if not blob:
+        return None
+    try:
+        info = json.loads(blob)
+        return Credentials.from_authorized_user_info(info, scopes=info.get("scopes"))
+    except (ValueError, json.JSONDecodeError):
+        return None
