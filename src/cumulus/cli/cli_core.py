@@ -176,7 +176,12 @@ def _paste_redirect_dialog(m: "MaestralProxy | Maestral") -> int:
 
 def _report_link_result(m: "MaestralProxy | Maestral", res: int) -> None:
     if res == 0:
-        email = m.get_state("account", "email") or "your account"
+        try:
+            email = m.get_account_info().email or "your account"
+        except Exception:
+            # In edge cases (proxy disconnect mid-link, malformed response)
+            # we still want to surface success rather than crash.
+            email = "your account"
         ok(f"Linked to {email}")
     elif res == 1:
         warn("Invalid authorization, please try again.")
