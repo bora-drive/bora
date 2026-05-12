@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import click
 from rich.console import Console, ConsoleRenderable
 
+from .. import oauth
 from ..core import FolderMetadata, SharedLinkMetadata
 from ..utils.path import delete
 from .common import (
@@ -106,6 +107,34 @@ def select_remote_path_dialog(
 
         else:
             return sync_path
+
+
+def _local_server_dialog(m: "MaestralProxy | Maestral") -> int:
+    """Shape A: run the loopback server in the CLI process, then hand the
+    resulting refresh_token to the daemon's link(refresh_token=...).
+
+    Returns the same 0/1/2 contract as Maestral.link.
+    """
+    info("A browser will open to authorize Cumulus to access your Google Drive.")
+    info("If you're on a headless server, run on your laptop first:")
+    info("    ssh -L 8080:localhost:8080 <your-host>")
+    info("Then re-run 'cumulus auth link' here.")
+
+    try:
+        creds = oauth.run_local_flow(port=8080)
+    except Exception as exc:  # AuthError already; surface message and bail.
+        warn(str(exc))
+        return 1
+
+    if not getattr(creds, "refresh_token", None):
+        warn(
+            "Authorization completed but no refresh token was returned. "
+            "Re-run with -r and approve the consent screen, or use "
+            "--no-local-server."
+        )
+        return 1
+
+    return m.link(refresh_token=creds.refresh_token)
 
 
 def link_dialog(m: MaestralProxy | Maestral) -> None:
