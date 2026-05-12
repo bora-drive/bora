@@ -404,162 +404,23 @@ class SyncManager:
         """
         self._logger.debug("Checking path root...")
 
-        account_info = self.sync.client.get_account_info()
-        return self.sync.client.namespace_id != account_info.root_info.root_namespace_id
+        # Drive has no team-namespace concept; nothing to migrate. Stage 6
+        # (master design §5.6) reviews whether to remove this method
+        # entirely or repurpose it for Drive-specific account-state changes.
+        return False
 
     def _update_path_root(self) -> None:
         """
         Changes the layout of the local sync folder if the user joins or leaves a
         team. New team folders will be downloaded, old team folders will be removed.
         """
-        current_root_type = self._state.get("account", "path_root_type")
-        current_user_home_path = self._state.get("account", "home_path")
-        current_user_home_path_lower = normalize(current_user_home_path)
-
-        if current_root_type == "team" and current_user_home_path == "":
-            raise CumulusApiError(
-                "Cannot migrate folder structure",
-                "Inconsistent namespace information found.",
-            )
-
-        root_info = self.sync.client.account_info.root_info
-        team = self.sync.client.account_info.team
-
-        team_name = team.name if team else "team"
-
-        if isinstance(root_info, UserRootInfo):
-            new_root_type = "user"
-            new_user_home_path = ""
-        elif isinstance(root_info, TeamRootInfo):
-            new_root_type = "team"
-            new_user_home_path = root_info.home_path
-        else:
-            raise CumulusApiError(
-                "Unknown root namespace type",
-                f"Got {root_info!r} but expected UserRootInfo or TeamRootInfo.",
-            )
-
-        local_user_home_path = self.sync.to_local_path_from_cased(new_user_home_path)
-
-        try:
-            local_sync_dirlist = list(os.scandir(self.sync.sync_path))
-        except (FileNotFoundError, NotADirectoryError):
-            title = "sync folder missing"
-            msg = (
-                "Please move the sync folder back to its original location or "
-                "restart Maestral to set up a new folder."
-            )
-            raise NoSyncDirError(title, msg)
-
-        with self.sync.sync_lock:
-            if new_root_type == "team" and current_root_type == "user":
-                # User joined a team.
-                self._logger.info("User joined %s. Resyncing user files.", team_name)
-                if self.desktop_notifier:
-                    self.desktop_notifier.notify(
-                        f"Joined {team_name}",
-                        "Migrating user files and downloading team folders",
-                    )
-
-                # Migrate user folder to "self.sync.sync_path/home_path". We do this
-                # by creating a temporary folder and renaming it after moving all
-                # personal items to prevent name conflicts where a folder has the same
-                # name as `root_info.home_path`.
-                tmpdir = TemporaryDirectory(dir=self.sync.sync_path)
-
-                for entry in local_sync_dirlist:
-                    if entry.path != tmpdir.name:
-                        new_path = f"{tmpdir.name}/{entry.name}"
-                        self._logger.debug(
-                            "Moving to personal folder: %r → %r", entry.path, new_path
-                        )
-                        move(entry.path, new_path, raise_error=True)
-
-                self._logger.debug("Moving %r → %r", tmpdir.name, local_user_home_path)
-                os.rename(tmpdir.name, local_user_home_path)
-
-                # Migrate all excluded items.
-                self._logger.debug("Migrating excluded items")
-                self.sync.excluded_items = {
-                    new_user_home_path + path for path in self.sync.excluded_items
-                }
-
-            elif new_root_type == "user" and current_root_type == "team":
-                # User left a team.
-                self._logger.info("User left team. Updating folder layout.")
-                if self.desktop_notifier:
-                    self.desktop_notifier.notify(
-                        "Left team",
-                        "Migrating user files and removing team folders",
-                    )
-
-                # Remove all team folders.
-                for entry in local_sync_dirlist:
-                    if entry.name != current_user_home_path.lstrip("/"):
-                        delete(entry.path, raise_error=True)
-
-                # Migrate user folders to local sync root. We do this by renaming the
-                # user home to a temporary name and then moving its contents to the
-                # parent folder.
-                old_home_root = self.sync.sync_path + current_user_home_path
-
-                tmpdir = TemporaryDirectory(dir=self.sync.sync_path)
-
-                try:
-                    os.rename(old_home_root, tmpdir.name)
-                except (FileNotFoundError, NotADirectoryError):
-                    # User folder does not (yet) exist.
-                    pass
-                else:
-                    for entry in list(os.scandir(tmpdir.name)):
-                        new_path = f"{self.sync.sync_path}/{entry.name}"
-                        move(entry.path, new_path, raise_error=True)
-                        self._logger.debug(
-                            "Moved to root folder: %r → %r", entry.path, new_path
-                        )
-
-                delete(tmpdir.name)
-
-                # Migrate excluded items:
-                # Prune all teams folders from excluded list. Remove home folder
-                # prefix from excluded items. If the user folder itself is
-                # excluded, keep it excluded.
-                self._logger.debug("Migrating excluded items")
-                self.sync.excluded_items = {
-                    removeprefix(path, current_user_home_path_lower)
-                    for path in self.sync.excluded_items
-                    if is_child(path, current_user_home_path_lower)
-                }
-
-            elif new_root_type == "team" and current_root_type == "team":
-                # User switched between different teams.
-                self._logger.info("User switched teams. Updating team folders.")
-                if self.desktop_notifier:
-                    self.desktop_notifier.notify(
-                        f"Switched teams to {team_name}", "Updating team folders"
-                    )
-
-                # Remove all team folders, leave user folder alone.
-                for entry in local_sync_dirlist:
-                    if entry.name != current_user_home_path.lstrip("/"):
-                        delete(entry.path, raise_error=True)
-                        self._logger.debug("Deleted team folder: %r", entry.path)
-
-                # Migrate excluded items:
-                # Prune all teams folders from excluded list. If the user folder
-                # itself is excluded, keep it excluded.
-                self._logger.debug("Migrating excluded items")
-                self.sync.excluded_items = {
-                    path
-                    for path in self.sync.excluded_items
-                    if is_equal_or_child(path, current_user_home_path_lower)
-                }
-
-            # Update path root of client.
-            self.sync.client.update_path_root(root_info)
-
-            #  Trigger reindex.
-            self.sync.reset_sync_state()
+        # Drive has no team-namespace concept; this method is unreachable
+        # because _needs_path_root_update always returns False. Stage 6
+        # (master design §5.6) will remove or repurpose both methods.
+        raise NotImplementedError(
+            "Drive has no team-namespace concept; "
+            "_update_path_root should not be called."
+        )
 
     # ---- thread methods --------------------------------------------------------------
 
