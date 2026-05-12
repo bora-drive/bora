@@ -13,6 +13,7 @@ import logging
 import os
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import (
     TYPE_CHECKING,
@@ -22,6 +23,7 @@ from typing import (
     overload,
 )
 
+from . import oauth
 from .config import CumulusState
 from .core import (
     Account,
@@ -83,6 +85,20 @@ def _not_implemented() -> None:
     )
 
 
+@dataclass
+class _PasteFlowState:
+    """Holds the in-flight google_auth_oauthlib.flow.Flow object between
+    get_auth_url() and link(code=...). Implementation details:
+
+    - Single flow at a time per client; calling get_auth_url() replaces
+      any prior pending state.
+    - Cleared on link() success, on unlink(), and after a 10-minute
+      expiry (auth codes from Google expire on roughly that scale).
+    """
+    flow: "Any"  # google_auth_oauthlib.flow.Flow
+    created_at: datetime
+
+
 class GoogleDriveClient:
     """Client for the Google Drive API.
 
@@ -124,6 +140,10 @@ class GoogleDriveClient:
         self._request_day: int = 0  # day-of-year when counter was last reset
         self._warned_at_threshold = False
         self._warned_at_critical = False
+
+        # Auth state.
+        self._credentials: oauth.PersistingCredentials | None = None
+        self._pending_paste_flow: _PasteFlowState | None = None
 
     # ---- Request quota tracking -----------------------------------------------------
 
@@ -176,8 +196,17 @@ class GoogleDriveClient:
     @property
     def linked(self) -> bool:
         """Whether the client is linked to a Google account."""
-        _not_implemented()
-        return False  # unreachable
+        if self._credentials is None:
+            loaded = oauth.load_credentials(self._cred_storage)
+            if loaded is not None and loaded.refresh_token is not None:
+                account_id = self._cred_storage.account_id or ""
+                self._credentials = oauth.wrap_persisting(
+                    loaded, self._cred_storage, account_id
+                )
+        return (
+            self._credentials is not None
+            and self._credentials.refresh_token is not None
+        )
 
     def get_auth_url(self) -> str:
         """Returns a URL to authorize access to a Google Drive account.
