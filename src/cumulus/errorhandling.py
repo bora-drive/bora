@@ -1,7 +1,6 @@
-"""This module contains methods to convert OSErrors and Google API exceptions
-to instances of :exc:`cumulus.exceptions.CumulusApiError`.
-
-Google Drive API error handling will be implemented in Phase 6.
+"""This module contains methods to convert OSErrors, Google auth-library
+exceptions, and HTTP errors to instances of
+:exc:`cumulus.exceptions.CumulusApiError`.
 """
 
 from __future__ import annotations
@@ -9,12 +8,11 @@ from __future__ import annotations
 import builtins
 import contextlib
 import errno
+import json
 import os
 from typing import Any, Callable, Iterator, TypeVar, Union
 
 import google.auth.exceptions
-import json
-
 import requests
 from googleapiclient.errors import HttpError
 

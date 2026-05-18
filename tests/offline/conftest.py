@@ -1,8 +1,11 @@
+import json
 import logging
 import os
 import os.path as osp
 
+import httplib2
 import pytest
+from googleapiclient.errors import HttpError
 
 from cumulus.client import DropboxClient
 from cumulus.config import list_configs, remove_configuration
@@ -70,12 +73,6 @@ def config_name(prefix: str = "test-config"):
     remove_configuration(config_name)
 
 
-import json as _json
-
-import httplib2
-from googleapiclient.errors import HttpError
-
-
 @pytest.fixture
 def make_http_error():
     """Factory fixture: build a googleapiclient HttpError with a given
@@ -89,6 +86,6 @@ def make_http_error():
         body: dict = {"error": {"code": status, "message": "test error"}}
         if reason:
             body["error"]["errors"] = [{"reason": reason, "message": "test error"}]
-        return HttpError(resp, _json.dumps(body).encode("utf-8"))
+        return HttpError(resp, json.dumps(body).encode("utf-8"))
 
     return _make

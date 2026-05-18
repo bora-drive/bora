@@ -55,6 +55,7 @@ def test_extract_reason_empty_when_absent(make_http_error):
         (403, "dailyLimitExceeded", ConnectionError),
         (403, "cannotDownloadAbusiveFile", RestrictedContentError),
         (403, "insufficientFilePermissions", InsufficientPermissionsError),
+        (403, "someUnknownReason", InsufficientPermissionsError),
         (404, "", NotFoundError),
         (429, "", ConnectionError),
         (500, "", ServerError),
