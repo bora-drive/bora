@@ -9,6 +9,7 @@ The full implementation will be built in Phases 3–5.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import random
@@ -34,6 +35,7 @@ from google.auth.transport.requests import Request as _AuthRequest
 from google.oauth2.credentials import Credentials as _Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
 
 from . import changes, oauth
 from .changes import FILE_FIELDS, parse_drive_time, to_file_metadata, to_folder_metadata
@@ -108,6 +110,10 @@ _MAX_BACKOFF = 32.0      # seconds
 
 # Page size for files.list calls.
 _LIST_PAGE_SIZE = 1000
+
+# Download chunk size — Google's recommended granularity for
+# MediaIoBaseDownload.
+_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
 
 T = TypeVar("T")
 
@@ -653,19 +659,80 @@ class GoogleDriveClient:
         local_path: str,
         sync_event: SyncEvent | None = None,
     ) -> FileMetadata:
-        """Downloads a file from Google Drive to a local path.
+        """Downloads a file from Google Drive to *local_path*.
 
-        :param remote_path: Path to file on Google Drive (or version identifier).
-        :param local_path: Path to local download destination.
-        :param sync_event: If given, updated with download progress.
-        :returns: Metadata of downloaded item.
-        :raises: :class:`~cumulus.exceptions.SyncError` if *remote_path*
-            points to a Google-native document (Docs, Sheets, etc.).
+        Downloads to a ``.cumulus-part`` sidecar, verifies the MD5
+        against Drive's ``md5Checksum``, then atomically renames into
+        place. *sync_event*, if given, has ``.completed`` updated after
+        each chunk.
 
-        .. note:: Filter point for native docs (see :mod:`cumulus.native_docs`).
+        :raises NotFoundError: if *remote_path* is unknown to the cache.
+        :raises UnsupportedFileError: if it resolves to a native doc.
+        :raises DataCorruptionError: on an MD5 mismatch.
         """
-        _not_implemented()
-        return FileMetadata("", "", "", "", None, None, "", 0, None, False, False, None)  # type: ignore[call-arg]  # unreachable
+        self._ensure_root_id()
+        file_id = self._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No item at '{remote_path}' is known to Cumulus.",
+                remote_path=remote_path,
+            )
+        tmp_path = local_path + ".cumulus-part"
+        with convert_api_errors(remote_path=remote_path, local_path=local_path):
+            meta_file = self._retry_transient(
+                lambda: self._get_service()
+                .files()
+                .get(fileId=file_id, fields=FILE_FIELDS)
+                .execute()
+            )
+            self._count_request()
+            if is_google_native(meta_file.get("mimeType")):
+                raise UnsupportedFileError(
+                    "Cannot download file",
+                    "Google-native documents (Docs, Sheets, Slides, "
+                    "etc.) cannot be synced as files.",
+                    remote_path=remote_path,
+                    local_path=local_path,
+                )
+            request = self._get_service().files().get_media(fileId=file_id)
+            with open(tmp_path, "wb") as fh:
+                downloader = MediaIoBaseDownload(
+                    fh, request, chunksize=_DOWNLOAD_CHUNK_SIZE
+                )
+                done = False
+                while not done:
+                    status, done = self._retry_transient(
+                        lambda: downloader.next_chunk()
+                    )
+                    if sync_event is not None and status is not None:
+                        sync_event.completed = status.resumable_progress
+                    self._throttle_down(_DOWNLOAD_CHUNK_SIZE)
+            self._count_request()
+
+            expected = meta_file.get("md5Checksum")
+            if expected:
+                hasher = hashlib.md5()
+                with open(tmp_path, "rb") as fh:
+                    for block in iter(lambda: fh.read(1 << 20), b""):
+                        hasher.update(block)
+                if hasher.hexdigest() != expected:
+                    os.remove(tmp_path)
+                    raise DataCorruptionError(
+                        "Download failed",
+                        "The downloaded file is corrupt (MD5 mismatch). "
+                        "Cumulus will retry.",
+                        remote_path=remote_path,
+                        local_path=local_path,
+                    )
+            os.replace(tmp_path, local_path)
+        return to_file_metadata(meta_file, remote_path)
+
+    def _throttle_down(self, nbytes: int) -> None:
+        """Crude download bandwidth throttle: sleep proportionally to the
+        configured limit. A no-op when no limit is set."""
+        if self.bandwidth_limit_down > 0:
+            time.sleep(nbytes / self.bandwidth_limit_down)
 
     def upload(
         self,
