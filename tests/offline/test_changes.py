@@ -255,6 +255,24 @@ def test_iter_changes_drops_native_doc():
     assert cache.get_entry("G1") is None
 
 
+def test_iter_changes_drops_shortcut():
+    cache = _cache()
+    page = {
+        "newStartPageToken": "NEXT",
+        "changes": [
+            {"removed": False, "fileId": "S1",
+             "file": {"id": "S1", "name": "Link", "parents": ["ROOT"],
+                      "mimeType": "application/vnd.google-apps.shortcut",
+                      "trashed": False}},
+        ],
+    }
+    results = list(iter_remote_changes(
+        _changes_service(page), _passthrough_retry, cache, "CURSOR"
+    ))
+    assert results[0].entries == []
+    assert cache.get_entry("S1") is None
+
+
 def test_iter_changes_drops_unknown_delete():
     cache = _cache()
     page = {

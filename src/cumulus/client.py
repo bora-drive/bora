@@ -1,10 +1,12 @@
-"""This module contains the Google Drive API client.
+"""Google Drive API client for the Cumulus sync engine.
 
-It will wrap calls to the Google Drive API via ``google-api-python-client``
-and handle exceptions, resumable uploads/downloads, etc.
+Implemented (Stage 3): authentication/linking, account info, file/folder
+metadata, directory listing (non-recursive and recursive bootstrap),
+file download with MD5 verification, the change feed, and the retry/backoff
+layer.
 
-This is a stub — all methods raise :exc:`NotImplementedError`.
-The full implementation will be built in Phases 3–5.
+Still stubbed for later stages: write operations (upload, move, remove,
+mkdir), file restore, and sharing.
 """
 
 from __future__ import annotations

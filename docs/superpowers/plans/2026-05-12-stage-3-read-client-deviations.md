@@ -62,3 +62,11 @@ builds a `GoogleDriveClient` with a fresh `PathIDCache`.
   logs success.
 
 **Result:** _(record PASS/FAIL per item, date, and account here)_
+
+## Notes for Stage 4 / Stage 5
+
+- Stage 4 (write client) must implement `restore()` (currently a `NotImplementedError` stub) once `upload` exists.
+- `Maestral.shutdown_daemon()` does not yet call `self.client.close()`. Stage 3 built the `_poll_event` shutdown-interrupt mechanism (`close()`/`unlink()` set it; `wait_for_remote_changes` and `_retry_transient` honor it), but nothing calls `client.close()` on daemon shutdown yet. Stage 5's manager/poll-loop wiring must add `self.client.close()` to `shutdown_daemon()` so a sync thread blocked in the poll sleep stops promptly.
+- `list_folder_iterator(recursive=False)` yields `cursor=""` on its final page (it is not a change cursor). Only the `recursive=True` bootstrap yields a real change cursor (from `getStartPageToken`). Stage 5's sync engine must take the change-feed start cursor from the bootstrap, not from a non-recursive listing.
+- `Maestral` opens a separate `Database`/`PathIDCache` for the client; `SyncEngine` has its own DB connection. Stage 5 consolidates these onto one shared `PathIDCache`.
+- `_count_request` quota tracking does not cover `changes.list` calls made inside `changes.iter_remote_changes` (that module receives only `service_factory` + `retry`, not the counter). Stage 4/5 may thread the counter through if precise quota accounting is needed.
