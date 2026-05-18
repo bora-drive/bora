@@ -194,7 +194,7 @@ def iter_remote_changes(
             if decision is ChangeDecision.OUT_OF_SCOPE:
                 continue
             if decision is ChangeDecision.DELETE:
-                path = path_cache.id_to_path(change["fileId"])
+                path = path_cache.id_to_path(change.get("fileId"))
                 if path is None:
                     logger.debug(
                         "Delete for unknown fileId %s; nothing to remove",
