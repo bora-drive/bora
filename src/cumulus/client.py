@@ -421,8 +421,9 @@ class GoogleDriveClient:
                 .get(fileId="root", fields="id")
                 .execute()
             )
-        self._path_cache.root_id = resp["id"]
-        return resp["id"]
+        root_id = resp["id"]
+        self._path_cache.root_id = root_id
+        return root_id
 
     # ---- Properties ------------------------------------------------------------------
 
