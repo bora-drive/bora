@@ -390,3 +390,98 @@ def test_list_folder_flattens(client, cache):
 
     result = client.list_folder("/Documents")
     assert {e.id for e in result.entries} == {"F1", "F2"}
+
+
+# ==== list_folder_iterator (recursive bootstrap) ==========================
+
+def _bootstrap_service(files_pages, start_token="TOK1"):
+    """Build a fake service for the recursive bootstrap: a
+    changes.getStartPageToken call plus paginated files.list calls."""
+    service = fake_service()
+    service.changes.return_value.getStartPageToken.return_value.execute.return_value = {
+        "startPageToken": start_token
+    }
+    service.files.return_value.list.return_value.execute.side_effect = files_pages
+    return service
+
+
+def test_bootstrap_populates_cache_and_yields(client, cache):
+    cache.root_id = "ROOT"
+    pages = [{
+        "files": [
+            {"id": "D1", "name": "Docs",
+             "mimeType": "application/vnd.google-apps.folder",
+             "parents": ["ROOT"], "trashed": False},
+            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
+             "parents": ["D1"], "trashed": False, "size": "1"},
+        ]
+    }]
+    client._get_service = Mock(return_value=_bootstrap_service(pages))
+
+    result_pages = list(client.list_folder_iterator("/", recursive=True))
+    ids = {e.id for page in result_pages for e in page.entries}
+    assert ids == {"D1", "F1"}
+    # Cache populated for path resolution.
+    assert cache.path_to_id("/Docs") == "D1"
+    assert cache.path_to_id("/Docs/a.pdf") == "F1"
+    # Last page carries the change cursor captured before listing.
+    assert result_pages[-1].cursor == "TOK1"
+    assert result_pages[-1].has_more is False
+
+
+def test_bootstrap_excludes_native_docs(client, cache):
+    cache.root_id = "ROOT"
+    pages = [{
+        "files": [
+            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
+             "parents": ["ROOT"], "trashed": False, "size": "1"},
+            {"id": "G1", "name": "Doc",
+             "mimeType": "application/vnd.google-apps.document",
+             "parents": ["ROOT"], "trashed": False},
+        ]
+    }]
+    client._get_service = Mock(return_value=_bootstrap_service(pages))
+
+    result_pages = list(client.list_folder_iterator("/", recursive=True))
+    ids = {e.id for page in result_pages for e in page.entries}
+    assert ids == {"F1"}
+    assert cache.get_entry("G1") is None
+
+
+def test_bootstrap_drops_items_outside_root(client, cache, caplog):
+    import logging
+
+    cache.root_id = "ROOT"
+    pages = [{
+        "files": [
+            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
+             "parents": ["ROOT"], "trashed": False, "size": "1"},
+            # Parent OUTSIDE_ROOT is not reachable from ROOT.
+            {"id": "F2", "name": "shared.pdf", "mimeType": "application/pdf",
+             "parents": ["OUTSIDE_ROOT"], "trashed": False, "size": "1"},
+        ]
+    }]
+    client._get_service = Mock(return_value=_bootstrap_service(pages))
+
+    with caplog.at_level(logging.INFO, logger="cumulus.client"):
+        result_pages = list(client.list_folder_iterator("/", recursive=True))
+    ids = {e.id for page in result_pages for e in page.entries}
+    assert ids == {"F1"}
+    assert cache.get_entry("F2") is None
+    assert any("skipped" in rec.message for rec in caplog.records)
+
+
+def test_bootstrap_fetches_all_pages(client, cache):
+    cache.root_id = "ROOT"
+    pages = [
+        {"files": [{"id": "F1", "name": "a", "mimeType": "application/pdf",
+                    "parents": ["ROOT"], "trashed": False, "size": "1"}],
+         "nextPageToken": "p2"},
+        {"files": [{"id": "F2", "name": "b", "mimeType": "application/pdf",
+                    "parents": ["ROOT"], "trashed": False, "size": "1"}]},
+    ]
+    client._get_service = Mock(return_value=_bootstrap_service(pages))
+
+    result_pages = list(client.list_folder_iterator("/", recursive=True))
+    ids = {e.id for page in result_pages for e in page.entries}
+    assert ids == {"F1", "F2"}

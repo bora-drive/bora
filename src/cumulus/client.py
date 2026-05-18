@@ -885,6 +885,109 @@ class GoogleDriveClient:
             if not page_token:
                 break
 
+    def _bootstrap_recursive(
+        self, include_non_downloadable_files: bool = False
+    ) -> Iterator[ListFolderResult]:
+        """Initial-sync bootstrap: enumerate the whole Drive, populate
+        the path cache atomically, and yield the result as pages.
+
+        This is the *only* method that builds the path cache from
+        scratch. It must be called only on initial sync — it clears and
+        rebuilds the cache, discarding any change-feed deltas. See spec
+        §5.5.
+        """
+        # Capture the change cursor BEFORE listing so a change that
+        # lands mid-listing is not missed by the first poll cycle.
+        with convert_api_errors():
+            token_resp = self._retry_transient(
+                lambda: self._get_service()
+                .changes()
+                .getStartPageToken()
+                .execute()
+            )
+        start_token = token_resp["startPageToken"]
+
+        # Page through every non-trashed item visible to the user.
+        raw_items: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            with convert_api_errors():
+                resp = self._retry_transient(
+                    lambda pt=page_token: self._get_service()
+                    .files()
+                    .list(
+                        q="trashed=false",
+                        fields=f"nextPageToken, files({FILE_FIELDS})",
+                        pageSize=_LIST_PAGE_SIZE,
+                        pageToken=pt,
+                    )
+                    .execute()
+                )
+            self._count_request()
+            raw_items.extend(resp.get("files", []))
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+
+        root_id = self._path_cache.root_id
+        # Drop the sync root itself (it is implicit) and, unless asked
+        # otherwise, Google-native docs. populate_from_listing keeps
+        # folders regardless; is_google_native already excludes folders.
+        filtered = [
+            it
+            for it in raw_items
+            if it.get("id") != root_id
+            and (
+                include_non_downloadable_files
+                or not is_google_native(it.get("mimeType"))
+            )
+        ]
+
+        # Atomic populate. The cache BFS-filters to items reachable from
+        # root_id; Computers/Backup, shared-with-me and orphans drop out.
+        self._path_cache.populate_from_listing(filtered)
+        indexed = self._path_cache.count()
+        skipped = len(filtered) - indexed
+        if skipped > 0:
+            logger.info(
+                "Indexed %d items from Google Drive; skipped %d items "
+                "outside My Drive root (Computers/Backup, shared-with-me, "
+                "orphans) — see debug log for detail.",
+                indexed,
+                skipped,
+            )
+        else:
+            logger.info("Indexed %d items from Google Drive.", indexed)
+
+        # Yield the in-scope items as pages. An item is in scope iff the
+        # cache resolved a path for it. The final page carries the
+        # change cursor captured above.
+        in_scope = [
+            it
+            for it in filtered
+            if self._path_cache.id_to_path(it["id"]) is not None
+        ]
+        if not in_scope:
+            yield ListFolderResult(
+                entries=[], has_more=False, cursor=start_token
+            )
+            return
+        for start in range(0, len(in_scope), _LIST_PAGE_SIZE):
+            chunk = in_scope[start : start + _LIST_PAGE_SIZE]
+            is_last = start + _LIST_PAGE_SIZE >= len(in_scope)
+            entries: list[Metadata] = []
+            for file in chunk:
+                path = self._path_cache.id_to_path(file["id"])
+                if is_google_folder(file.get("mimeType")):
+                    entries.append(to_folder_metadata(file, path))
+                else:
+                    entries.append(to_file_metadata(file, path))
+            yield ListFolderResult(
+                entries=entries,
+                has_more=not is_last,
+                cursor=start_token if is_last else "",
+            )
+
     def wait_for_remote_changes(
         self, last_cursor: str, timeout: int = DEFAULT_POLL_INTERVAL
     ) -> bool:
