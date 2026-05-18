@@ -407,6 +407,23 @@ class GoogleDriveClient:
             backoff = min(backoff * 2, _MAX_BACKOFF)
             attempt += 1
 
+    def _ensure_root_id(self) -> str:
+        """Resolve the Drive 'root' alias to a concrete file ID and cache
+        it on the path cache. Idempotent — one round-trip per daemon
+        lifetime. Every method that hits the Drive API calls this first.
+        """
+        if self._path_cache.root_id is not None:
+            return self._path_cache.root_id
+        with convert_api_errors():
+            resp = self._retry_transient(
+                lambda: self._get_service()
+                .files()
+                .get(fileId="root", fields="id")
+                .execute()
+            )
+        self._path_cache.root_id = resp["id"]
+        return resp["id"]
+
     # ---- Properties ------------------------------------------------------------------
 
     @property

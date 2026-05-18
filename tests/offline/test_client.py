@@ -128,3 +128,31 @@ def test_retry_retries_connection_error(client):
     call = Mock(side_effect=[requests.exceptions.ConnectionError("net"), "ok"])
     assert client._retry_transient(call) == "ok"
     assert call.call_count == 2
+
+
+# ==== _ensure_root_id =====================================================
+
+def test_ensure_root_id_resolves_and_caches(cache):
+    cred = CredentialStorage(_CONFIG + "-root")
+    cl = GoogleDriveClient(_CONFIG + "-root", cred, cache)
+    cache.root_id = None  # force resolution
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "ROOT_XYZ"
+    }
+    cl._get_service = Mock(return_value=service)
+
+    assert cl._ensure_root_id() == "ROOT_XYZ"
+    assert cache.root_id == "ROOT_XYZ"
+    # Second call must not hit the service again.
+    assert cl._ensure_root_id() == "ROOT_XYZ"
+    assert service.files.return_value.get.call_count == 1
+
+    cred.delete_creds()
+    remove_configuration(_CONFIG + "-root")
+
+
+def test_ensure_root_id_short_circuits_when_set(client):
+    # cache.root_id was pre-seeded to "ROOT" by the fixture.
+    client._get_service = Mock(side_effect=AssertionError("should not be called"))
+    assert client._ensure_root_id() == "ROOT"
