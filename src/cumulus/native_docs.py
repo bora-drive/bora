@@ -61,7 +61,10 @@ def is_google_native(mime_type: str | None) -> bool:
 
 
 def is_google_folder(mime_type: str | None) -> bool:
-    """Return ``True`` if *mime_type* is the Google Drive folder type."""
+    """Return ``True`` if *mime_type* is the Google Drive folder type.
+
+    ``None`` safely returns ``False`` via the ``==`` comparison.
+    """
     return mime_type == GOOGLE_FOLDER_MIME_TYPE
 
 
