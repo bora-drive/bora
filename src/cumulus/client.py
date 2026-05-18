@@ -17,7 +17,7 @@ import threading
 import time
 
 import requests
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import (
@@ -696,36 +696,40 @@ class GoogleDriveClient:
                     local_path=local_path,
                 )
             request = self._get_service().files().get_media(fileId=file_id)
-            with open(tmp_path, "wb") as fh:
-                downloader = MediaIoBaseDownload(
-                    fh, request, chunksize=_DOWNLOAD_CHUNK_SIZE
-                )
-                done = False
-                while not done:
-                    status, done = self._retry_transient(
-                        lambda: downloader.next_chunk()
+            try:
+                with open(tmp_path, "wb") as fh:
+                    downloader = MediaIoBaseDownload(
+                        fh, request, chunksize=_DOWNLOAD_CHUNK_SIZE
                     )
-                    if sync_event is not None and status is not None:
-                        sync_event.completed = status.resumable_progress
-                    self._throttle_down(_DOWNLOAD_CHUNK_SIZE)
-            self._count_request()
+                    done = False
+                    while not done:
+                        status, done = self._retry_transient(
+                            lambda: downloader.next_chunk()
+                        )
+                        if sync_event is not None and status is not None:
+                            sync_event.completed = status.resumable_progress
+                        self._throttle_down(_DOWNLOAD_CHUNK_SIZE)
+                self._count_request()
 
-            expected = meta_file.get("md5Checksum")
-            if expected:
-                hasher = hashlib.md5()
-                with open(tmp_path, "rb") as fh:
-                    for block in iter(lambda: fh.read(1 << 20), b""):
-                        hasher.update(block)
-                if hasher.hexdigest() != expected:
+                expected = meta_file.get("md5Checksum")
+                if expected:
+                    hasher = hashlib.md5(usedforsecurity=False)
+                    with open(tmp_path, "rb") as fh:
+                        for block in iter(lambda: fh.read(1 << 20), b""):
+                            hasher.update(block)
+                    if hasher.hexdigest() != expected:
+                        raise DataCorruptionError(
+                            "Download failed",
+                            "The downloaded file is corrupt (MD5 mismatch). "
+                            "Cumulus will retry.",
+                            remote_path=remote_path,
+                            local_path=local_path,
+                        )
+                os.replace(tmp_path, local_path)
+            except BaseException:
+                with suppress(OSError):
                     os.remove(tmp_path)
-                    raise DataCorruptionError(
-                        "Download failed",
-                        "The downloaded file is corrupt (MD5 mismatch). "
-                        "Cumulus will retry.",
-                        remote_path=remote_path,
-                        local_path=local_path,
-                    )
-            os.replace(tmp_path, local_path)
+                raise
         return to_file_metadata(meta_file, remote_path)
 
     def _throttle_down(self, nbytes: int) -> None:

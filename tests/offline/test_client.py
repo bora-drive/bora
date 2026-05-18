@@ -580,6 +580,32 @@ def test_download_cache_miss_raises(client, tmp_path):
         client.download("/missing", str(tmp_path / "x"))
 
 
+def test_download_cleans_up_sidecar_on_error(client, cache, tmp_path, monkeypatch):
+    from googleapiclient.errors import HttpError
+
+    class FailingDownloader:
+        def __init__(self, fh, request, chunksize=None):
+            pass
+
+        def next_chunk(self):
+            raise RuntimeError("network died mid-download")
+
+    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FailingDownloader)
+    _seed(cache, "/a.bin", "F1", "a.bin")
+    meta = {
+        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
+        "parents": ["ROOT"], "trashed": False, "size": "5",
+        "md5Checksum": "x", "version": 1,
+    }
+    client._get_service = Mock(return_value=_download_service(meta, b"data"))
+
+    dest = tmp_path / "a.bin"
+    with pytest.raises(RuntimeError):
+        client.download("/a.bin", str(dest))
+    assert not dest.exists()
+    assert not (tmp_path / "a.bin.cumulus-part").exists()
+
+
 def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
     monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
     _seed(cache, "/a.bin", "F1", "a.bin")
