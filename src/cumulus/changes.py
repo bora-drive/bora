@@ -24,10 +24,11 @@ from __future__ import annotations
 import enum
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
-from .core import FileMetadata, FolderMetadata
-from .path_codec import fold_path
+from .core import DeletedMetadata, FileMetadata, FolderMetadata, ListFolderResult
+from .native_docs import GOOGLE_FOLDER_MIME_TYPE, is_google_native
+from .path_codec import compose_path, fold_path
 
 if TYPE_CHECKING:
     from .path_cache import PathIDCache
@@ -38,6 +39,7 @@ __all__ = [
     "FILE_FIELDS",
     "ChangeDecision",
     "classify",
+    "iter_remote_changes",
     "parse_drive_time",
     "to_file_metadata",
     "to_folder_metadata",
@@ -49,6 +51,16 @@ __all__ = [
 FILE_FIELDS = (
     "id, name, parents, mimeType, modifiedTime, size, md5Checksum, "
     "shared, version, trashed, lastModifyingUser(permissionId)"
+)
+
+# Page size for changes.list. 100 keeps each cache-write batch modest.
+_CHANGE_PAGE_SIZE = 100
+
+# Field selector for changes.list — the file sub-resource mirrors
+# FILE_FIELDS so projected metadata is identical to the listing path.
+_CHANGE_FIELDS = (
+    f"nextPageToken, newStartPageToken, "
+    f"changes(removed, fileId, file({FILE_FIELDS}))"
 )
 
 
@@ -138,3 +150,101 @@ def classify(
             return ChangeDecision.DELETE
         return ChangeDecision.OUT_OF_SCOPE
     return ChangeDecision.APPLY
+
+
+def iter_remote_changes(
+    service_factory: "Callable[[], Any]",
+    retry: "Callable[[Callable[[], Any]], Any]",
+    path_cache: "PathIDCache",
+    last_cursor: str,
+) -> "Iterator[ListFolderResult]":
+    """Page Drive's ``changes.list`` and yield one
+    :class:`~cumulus.core.ListFolderResult` per page.
+
+    Each yielded entry has its path resolved via *path_cache*, and the
+    cache is mutated as a side effect (``set`` / ``move`` / ``remove``).
+    Native docs and shortcuts are dropped. The cursor on each page is
+    the next ``pageToken``; on the final page it is the
+    ``newStartPageToken`` to resume polling from.
+
+    :param service_factory: zero-arg callable returning a Drive service.
+    :param retry: the client's ``_retry_transient`` helper.
+    :param path_cache: the path cache to resolve and mutate.
+    :param last_cursor: the page token to start from.
+    """
+    cursor = last_cursor
+    while True:
+        resp = retry(
+            lambda c=cursor: service_factory()
+            .changes()
+            .list(
+                pageToken=c,
+                fields=_CHANGE_FIELDS,
+                pageSize=_CHANGE_PAGE_SIZE,
+                includeRemoved=True,
+            )
+            .execute()
+        )
+        out_entries: list[Any] = []
+        for change in resp.get("changes", []):
+            decision = classify(change, path_cache)
+            if decision is ChangeDecision.UNKNOWN_FILE:
+                logger.debug("Skipping malformed change entry: %r", change)
+                continue
+            if decision is ChangeDecision.OUT_OF_SCOPE:
+                continue
+            if decision is ChangeDecision.DELETE:
+                path = path_cache.id_to_path(change["fileId"])
+                if path is None:
+                    logger.debug(
+                        "Delete for unknown fileId %s; nothing to remove",
+                        change.get("fileId"),
+                    )
+                    continue
+                path_cache.remove(path)
+                out_entries.append(
+                    DeletedMetadata(
+                        name=path.rsplit("/", 1)[-1],
+                        path_lower=fold_path(path),
+                        path_display=path,
+                    )
+                )
+                continue
+            # decision is APPLY.
+            file = change["file"]
+            mime = file.get("mimeType")
+            # is_google_native already covers shortcuts via the wildcard.
+            if is_google_native(mime):
+                continue
+            parents = file.get("parents") or []
+            parent_id = next(
+                (p for p in parents if path_cache.id_to_path(p) is not None),
+                None,
+            )
+            # classify() guaranteed at least one in-scope parent.
+            parent_path = path_cache.id_to_path(parent_id)
+            new_path = compose_path(parent_path, file["name"])
+            old_path = path_cache.id_to_path(file["id"])
+            is_folder = mime == GOOGLE_FOLDER_MIME_TYPE
+            if old_path is None:
+                path_cache.set(
+                    new_path, file["id"], parent_id, file["name"], is_folder
+                )
+            elif old_path != new_path:
+                path_cache.move(old_path, new_path)
+            # else: pure content update; cache path already correct.
+            if is_folder:
+                out_entries.append(to_folder_metadata(file, new_path))
+            else:
+                out_entries.append(to_file_metadata(file, new_path))
+
+        next_token = resp.get("nextPageToken")
+        new_start = resp.get("newStartPageToken")
+        cursor = next_token or new_start or ""
+        yield ListFolderResult(
+            entries=out_entries,
+            has_more=bool(next_token),
+            cursor=cursor,
+        )
+        if not next_token:
+            break
