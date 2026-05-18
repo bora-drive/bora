@@ -604,6 +604,9 @@ class GoogleDriveClient:
         name = remote_path.rsplit("/", 1)[-1]
         path_lower = fold_path(remote_path)
         result: list[FileMetadata] = []
+        # Each entry's `id` is the file ID (shared by all revisions); `rev`
+        # holds the revision ID — that is the per-revision discriminator.
+        # `shared` is left False here (revision listings don't carry it).
         for rev in raw[:limit]:
             modified = parse_drive_time(rev.get("modifiedTime"))
             last_user = rev.get("lastModifyingUser") or {}
