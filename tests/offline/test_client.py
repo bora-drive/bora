@@ -151,3 +151,75 @@ def test_ensure_root_id_short_circuits_when_set(client):
     # cache.root_id was pre-seeded to "ROOT" by the fixture.
     client._get_service = Mock(side_effect=AssertionError("should not be called"))
     assert client._ensure_root_id() == "ROOT"
+
+
+# ==== get_metadata ========================================================
+
+def _seed(cache, path, file_id, name, parent="ROOT", is_folder=False):
+    cache.set(path, file_id, parent, name, is_folder)
+
+
+def test_get_metadata_returns_file_metadata(client, cache):
+    from cumulus.core import FileMetadata
+
+    _seed(cache, "/report.pdf", "F1", "report.pdf")
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "F1", "name": "report.pdf", "mimeType": "application/pdf",
+        "parents": ["ROOT"], "modifiedTime": "2026-04-30T00:00:00Z",
+        "size": "10", "md5Checksum": "h", "version": 2, "trashed": False,
+    }
+    client._get_service = Mock(return_value=service)
+
+    meta = client.get_metadata("/report.pdf")
+    assert isinstance(meta, FileMetadata)
+    assert meta.id == "F1"
+
+
+def test_get_metadata_returns_folder_metadata(client, cache):
+    from cumulus.core import FolderMetadata
+
+    _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "D1", "name": "Documents",
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": ["ROOT"], "trashed": False,
+    }
+    client._get_service = Mock(return_value=service)
+
+    meta = client.get_metadata("/Documents")
+    assert isinstance(meta, FolderMetadata)
+
+
+def test_get_metadata_returns_none_for_native_doc(client, cache):
+    _seed(cache, "/Notes", "G1", "Notes")
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "G1", "name": "Notes",
+        "mimeType": "application/vnd.google-apps.document",
+        "parents": ["ROOT"], "trashed": False,
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.get_metadata("/Notes") is None
+
+
+def test_get_metadata_raises_not_found_on_cache_miss(client):
+    from cumulus.exceptions import NotFoundError
+
+    client._get_service = Mock(side_effect=AssertionError("should not call API"))
+    with pytest.raises(NotFoundError):
+        client.get_metadata("/no-such-file")
+
+
+def test_get_metadata_trashed_returns_none(client, cache):
+    _seed(cache, "/old.pdf", "F9", "old.pdf")
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "F9", "name": "old.pdf", "mimeType": "application/pdf",
+        "parents": ["ROOT"], "trashed": True,
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.get_metadata("/old.pdf", include_deleted=False) is None
