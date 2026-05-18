@@ -21,11 +21,13 @@ from cumulus.sync import SyncEngine
 
 @pytest.fixture
 def sync():
+    _cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    _cache.root_id = "ROOT"
     sync = SyncEngine(
         DropboxClient(
             "test-config",
             CredentialStorage("test-config"),
-            PathIDCache(Database(sqlite3.connect(":memory:"))),
+            _cache,
         )
     )
     sync.sync_path = "/"

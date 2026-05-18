@@ -120,6 +120,7 @@ class GoogleDriveClient:
 
     :param config_name: Name of the config to use.
     :param cred_storage: Credential storage instance.
+    :param path_cache: Bidirectional Drive file-ID ↔ path cache.
     :param timeout: Request timeout in seconds.
     :param bandwidth_limit_up: Upload bandwidth limit in bytes/sec (0 = unlimited).
     :param bandwidth_limit_down: Download bandwidth limit in bytes/sec (0 = unlimited).
