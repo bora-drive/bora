@@ -79,3 +79,62 @@ def test_to_folder_metadata_maps_fields():
     assert meta.path_display == "/Documents"
     assert meta.id == "D1"
     assert meta.shared is True
+
+
+# ==== classify ============================================================
+
+import sqlite3
+
+from cumulus.changes import ChangeDecision, classify
+from cumulus.database.core import Database
+from cumulus.path_cache import PathIDCache
+
+
+def _cache() -> PathIDCache:
+    c = PathIDCache(Database(sqlite3.connect(":memory:")))
+    c.root_id = "ROOT"
+    return c
+
+
+def test_classify_removed_true_is_delete():
+    change = {"removed": True, "fileId": "F1"}
+    assert classify(change, _cache()) is ChangeDecision.DELETE
+
+
+def test_classify_trashed_is_delete():
+    cache = _cache()
+    change = {"removed": False, "fileId": "F1",
+              "file": {"id": "F1", "name": "a", "parents": ["ROOT"],
+                       "trashed": True}}
+    assert classify(change, cache) is ChangeDecision.DELETE
+
+
+def test_classify_move_out_is_delete():
+    cache = _cache()
+    cache.set("/a.pdf", "F1", "ROOT", "a.pdf", False)
+    change = {"removed": False, "fileId": "F1",
+              "file": {"id": "F1", "name": "a.pdf",
+                       "parents": ["OUTSIDE"], "trashed": False}}
+    assert classify(change, cache) is ChangeDecision.DELETE
+
+
+def test_classify_never_in_scope_is_out_of_scope():
+    cache = _cache()
+    change = {"removed": False, "fileId": "F9",
+              "file": {"id": "F9", "name": "x", "parents": ["OUTSIDE"],
+                       "trashed": False}}
+    assert classify(change, cache) is ChangeDecision.OUT_OF_SCOPE
+
+
+def test_classify_in_scope_is_apply():
+    cache = _cache()
+    change = {"removed": False, "fileId": "F1",
+              "file": {"id": "F1", "name": "a.pdf", "parents": ["ROOT"],
+                       "trashed": False}}
+    assert classify(change, cache) is ChangeDecision.APPLY
+
+
+def test_classify_missing_file_body_is_unknown():
+    cache = _cache()
+    change = {"removed": False, "fileId": "F1", "file": None}
+    assert classify(change, cache) is ChangeDecision.UNKNOWN_FILE
