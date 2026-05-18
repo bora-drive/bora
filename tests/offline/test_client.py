@@ -223,3 +223,19 @@ def test_get_metadata_trashed_returns_none(client, cache):
     client._get_service = Mock(return_value=service)
 
     assert client.get_metadata("/old.pdf", include_deleted=False) is None
+
+
+def test_get_metadata_trashed_with_include_deleted_returns_metadata(client, cache):
+    from cumulus.core import FileMetadata
+
+    _seed(cache, "/old.pdf", "F9", "old.pdf")
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "F9", "name": "old.pdf", "mimeType": "application/pdf",
+        "parents": ["ROOT"], "trashed": True, "version": 1, "size": "5",
+    }
+    client._get_service = Mock(return_value=service)
+
+    meta = client.get_metadata("/old.pdf", include_deleted=True)
+    assert isinstance(meta, FileMetadata)
+    assert meta.id == "F9"
