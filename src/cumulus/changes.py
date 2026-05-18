@@ -21,14 +21,23 @@ See ``docs/superpowers/specs/2026-05-12-stage-3-read-client-design.md``
 
 from __future__ import annotations
 
+import enum
+import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .core import FileMetadata, FolderMetadata
 from .path_codec import fold_path
 
+if TYPE_CHECKING:
+    from .path_cache import PathIDCache
+
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "FILE_FIELDS",
+    "ChangeDecision",
+    "classify",
     "parse_drive_time",
     "to_file_metadata",
     "to_folder_metadata",
@@ -88,3 +97,44 @@ def to_folder_metadata(
         id=file["id"],
         shared=bool(file.get("shared", False)),
     )
+
+
+class ChangeDecision(enum.Enum):
+    """How :func:`iter_remote_changes` should treat a change entry."""
+
+    APPLY = "apply"
+    """Create / update / in-scope move — apply via the path cache."""
+    DELETE = "delete"
+    """Hard-delete, trash, or move-out — propagate a local deletion."""
+    OUT_OF_SCOPE = "out_of_scope"
+    """A file that was never inside the sync root — drop silently."""
+    UNKNOWN_FILE = "unknown_file"
+    """A malformed change entry with no file body — drop with a log."""
+
+
+def classify(
+    change: dict[str, Any], path_cache: "PathIDCache"
+) -> ChangeDecision:
+    """Classify a Drive ``changes.list`` entry per the A4 disambiguation
+    table (spec §6.3).
+
+    Row 3 of the spec table — "no parent in scope" — is split here into
+    *move-out* (the file ID is still in the cache, so it left the sync
+    root and the local mirror must delete it) and *never-in-scope* (the
+    file ID is not in the cache, so it was created outside the sync root
+    and is simply ignored).
+    """
+    if change.get("removed"):
+        return ChangeDecision.DELETE
+    file = change.get("file")
+    if file is None:
+        return ChangeDecision.UNKNOWN_FILE
+    if file.get("trashed"):
+        return ChangeDecision.DELETE
+    parents = file.get("parents") or []
+    in_scope = any(path_cache.id_to_path(p) is not None for p in parents)
+    if not in_scope:
+        if path_cache.id_to_path(file["id"]) is not None:
+            return ChangeDecision.DELETE
+        return ChangeDecision.OUT_OF_SCOPE
+    return ChangeDecision.APPLY
