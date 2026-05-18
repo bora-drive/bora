@@ -67,6 +67,11 @@ def test_to_file_metadata_tolerates_missing_optional_fields():
     assert meta.modified_by is None
 
 
+def test_to_file_metadata_handles_null_version():
+    meta = to_file_metadata({"id": "F3", "name": "f.bin", "version": None}, "/f.bin")
+    assert meta.rev == ""
+
+
 def test_to_folder_metadata_maps_fields():
     meta = to_folder_metadata(SAMPLE_FOLDER, "/Documents")
     assert isinstance(meta, FolderMetadata)
