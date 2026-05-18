@@ -847,14 +847,22 @@ class GoogleDriveClient:
     def get_latest_cursor(
         self, remote_path: str, include_non_downloadable_files: bool = False
     ) -> str:
-        """Gets the latest change token for the given folder and subfolders.
+        """Gets the latest change token for the account.
 
-        :param remote_path: Path of folder.
-        :param include_non_downloadable_files: Whether to include non-downloadable files.
-        :returns: The latest change token (``startPageToken`` for Google Drive).
+        :param remote_path: Ignored — Drive's ``startPageToken`` is
+            account-global, not folder-scoped. The parameter is kept for
+            compatibility with the sync engine's call sites.
+        :returns: Drive's ``startPageToken``.
         """
-        _not_implemented()
-        return ""  # unreachable
+        with convert_api_errors():
+            resp = self._retry_transient(
+                lambda: self._get_service()
+                .changes()
+                .getStartPageToken()
+                .execute()
+            )
+        self._count_request()
+        return resp["startPageToken"]
 
     def list_folder(
         self,

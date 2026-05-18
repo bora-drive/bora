@@ -620,3 +620,26 @@ def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
     sync_event = Mock()
     client.download("/a.bin", str(tmp_path / "a.bin"), sync_event=sync_event)
     assert sync_event.completed == len(data)
+
+
+# ==== get_latest_cursor ===================================================
+
+def test_get_latest_cursor_returns_start_page_token(client):
+    service = fake_service()
+    service.changes.return_value.getStartPageToken.return_value.execute.return_value = {
+        "startPageToken": "TOK99"
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.get_latest_cursor("/") == "TOK99"
+
+
+def test_get_latest_cursor_ignores_remote_path(client):
+    service = fake_service()
+    service.changes.return_value.getStartPageToken.return_value.execute.return_value = {
+        "startPageToken": "TOK99"
+    }
+    client._get_service = Mock(return_value=service)
+
+    # Any remote_path must produce the same account-global token.
+    assert client.get_latest_cursor("/Documents/Sub") == "TOK99"
