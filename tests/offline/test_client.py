@@ -7,6 +7,7 @@ returning it.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from unittest.mock import MagicMock, Mock
 
@@ -449,8 +450,6 @@ def test_bootstrap_excludes_native_docs(client, cache):
 
 
 def test_bootstrap_drops_items_outside_root(client, cache, caplog):
-    import logging
-
     cache.root_id = "ROOT"
     pages = [{
         "files": [
@@ -485,3 +484,5 @@ def test_bootstrap_fetches_all_pages(client, cache):
     result_pages = list(client.list_folder_iterator("/", recursive=True))
     ids = {e.id for page in result_pages for e in page.entries}
     assert ids == {"F1", "F2"}
+    assert result_pages[-1].cursor == "TOK1"
+    assert result_pages[-1].has_more is False
