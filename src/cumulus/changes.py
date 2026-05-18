@@ -152,6 +152,73 @@ def classify(
     return ChangeDecision.APPLY
 
 
+def _emit_delete(
+    change: dict[str, Any],
+    path_cache: "PathIDCache",
+    out_entries: list[Any],
+) -> None:
+    """Apply a hard-delete / trash / move-out: drop the file from the
+    cache and append a :class:`DeletedMetadata`.
+
+    A delete for a fileId the cache never knew about is a silent no-op
+    (debug log only) — there is nothing in the local mirror to remove.
+    """
+    path = path_cache.id_to_path(change.get("fileId"))
+    if path is None:
+        logger.debug(
+            "Delete for unknown fileId %s; nothing to remove",
+            change.get("fileId"),
+        )
+        return
+    path_cache.remove(path)
+    out_entries.append(
+        DeletedMetadata(
+            name=path.rsplit("/", 1)[-1],
+            path_lower=fold_path(path),
+            path_display=path,
+        )
+    )
+
+
+def _emit_apply(
+    change: dict[str, Any],
+    path_cache: "PathIDCache",
+    out_entries: list[Any],
+) -> None:
+    """Apply an in-scope create / content-update / move: write the path
+    cache and append the projected metadata.
+
+    Native docs and shortcuts are dropped (no cache write, no entry).
+    The caller invokes this only when :func:`classify` returned
+    ``APPLY``, which guarantees at least one in-scope parent.
+    """
+    file = change["file"]
+    mime = file.get("mimeType")
+    # is_google_native already covers shortcuts via the wildcard.
+    if is_google_native(mime):
+        return
+    parents = file.get("parents") or []
+    parent_id = next(
+        (p for p in parents if path_cache.id_to_path(p) is not None),
+        None,
+    )
+    parent_path = path_cache.id_to_path(parent_id)
+    new_path = compose_path(parent_path, file["name"])
+    old_path = path_cache.id_to_path(file["id"])
+    is_folder = mime == GOOGLE_FOLDER_MIME_TYPE
+    if old_path is None:
+        path_cache.set(
+            new_path, file["id"], parent_id, file["name"], is_folder
+        )
+    elif old_path != new_path:
+        path_cache.move(old_path, new_path)
+    # else: pure content update; cache path already correct.
+    if is_folder:
+        out_entries.append(to_folder_metadata(file, new_path))
+    else:
+        out_entries.append(to_file_metadata(file, new_path))
+
+
 def iter_remote_changes(
     service_factory: "Callable[[], Any]",
     retry: "Callable[[Callable[[], Any]], Any]",
@@ -166,6 +233,17 @@ def iter_remote_changes(
     Native docs and shortcuts are dropped. The cursor on each page is
     the next ``pageToken``; on the final page it is the
     ``newStartPageToken`` to resume polling from.
+
+    Within a page, entries are *not* applied in Drive's delivery order.
+    ``changes.list`` does not guarantee parent-before-child ordering — a
+    file created inside a brand-new folder can be delivered before the
+    folder's own change (verified against a real account). Applying in
+    delivery order would resolve such a file against a path cache that
+    does not yet know its parent, misclassifying it as out-of-scope and
+    silently dropping it. So each page is resolved with a fixpoint:
+    parent-dependent changes are replayed until a pass resolves nothing
+    new. (A parent/child split *across* page boundaries is still
+    delivery-order dependent — see the plan deviations file.)
 
     :param service_factory: zero-arg callable returning a Drive service.
     :param retry: the client's ``_retry_transient`` helper.
@@ -186,57 +264,43 @@ def iter_remote_changes(
             .execute()
         )
         out_entries: list[Any] = []
+
+        # Handle terminal changes up front — a hard-delete, a trash, or
+        # a malformed entry needs no parent, so its outcome does not
+        # depend on what else is in the page. Everything else is
+        # parent-dependent and goes to the fixpoint below.
+        pending: list[dict[str, Any]] = []
         for change in resp.get("changes", []):
-            decision = classify(change, path_cache)
-            if decision is ChangeDecision.UNKNOWN_FILE:
+            file = change.get("file")
+            if change.get("removed") or (
+                file is not None and file.get("trashed")
+            ):
+                _emit_delete(change, path_cache, out_entries)
+            elif file is None:
                 logger.debug("Skipping malformed change entry: %r", change)
-                continue
-            if decision is ChangeDecision.OUT_OF_SCOPE:
-                continue
-            if decision is ChangeDecision.DELETE:
-                path = path_cache.id_to_path(change.get("fileId"))
-                if path is None:
-                    logger.debug(
-                        "Delete for unknown fileId %s; nothing to remove",
-                        change.get("fileId"),
-                    )
-                    continue
-                path_cache.remove(path)
-                out_entries.append(
-                    DeletedMetadata(
-                        name=path.rsplit("/", 1)[-1],
-                        path_lower=fold_path(path),
-                        path_display=path,
-                    )
-                )
-                continue
-            # decision is APPLY.
-            file = change["file"]
-            mime = file.get("mimeType")
-            # is_google_native already covers shortcuts via the wildcard.
-            if is_google_native(mime):
-                continue
-            parents = file.get("parents") or []
-            parent_id = next(
-                (p for p in parents if path_cache.id_to_path(p) is not None),
-                None,
-            )
-            # classify() guaranteed at least one in-scope parent.
-            parent_path = path_cache.id_to_path(parent_id)
-            new_path = compose_path(parent_path, file["name"])
-            old_path = path_cache.id_to_path(file["id"])
-            is_folder = mime == GOOGLE_FOLDER_MIME_TYPE
-            if old_path is None:
-                path_cache.set(
-                    new_path, file["id"], parent_id, file["name"], is_folder
-                )
-            elif old_path != new_path:
-                path_cache.move(old_path, new_path)
-            # else: pure content update; cache path already correct.
-            if is_folder:
-                out_entries.append(to_folder_metadata(file, new_path))
             else:
-                out_entries.append(to_file_metadata(file, new_path))
+                pending.append(change)
+
+        # Fixpoint: apply every change whose parent now resolves, then
+        # repeat — a folder applied this pass unblocks its children.
+        # Stop once a pass resolves nothing new.
+        while pending:
+            deferred: list[dict[str, Any]] = []
+            for change in pending:
+                if classify(change, path_cache) is ChangeDecision.APPLY:
+                    _emit_apply(change, path_cache, out_entries)
+                else:
+                    deferred.append(change)
+            if len(deferred) == len(pending):
+                break  # no parent resolved this pass; the rest never will
+            pending = deferred
+
+        # Survivors are genuinely outside the sync root: a move-out of a
+        # file the cache knew (propagate the delete) or a never-in-scope
+        # create (drop silently).
+        for change in pending:
+            if classify(change, path_cache) is ChangeDecision.DELETE:
+                _emit_delete(change, path_cache, out_entries)
 
         next_token = resp.get("nextPageToken")
         new_start = resp.get("newStartPageToken")

@@ -237,6 +237,59 @@ def test_iter_changes_intra_batch_dependency():
     assert {type(e) for e in results[0].entries} == {FolderMetadata, FileMetadata}
 
 
+def test_iter_changes_intra_batch_dependency_reversed_order():
+    # Same as above but Drive delivers the child F1 BEFORE its new
+    # parent folder D1. changes.list does not guarantee parent-first
+    # order, so F1 must still be resolved (not dropped as out-of-scope).
+    cache = _cache()
+    page = {
+        "newStartPageToken": "NEXT",
+        "changes": [
+            {"removed": False, "fileId": "F1",
+             "file": {"id": "F1", "name": "a.pdf", "parents": ["D1"],
+                      "mimeType": "application/pdf", "trashed": False,
+                      "size": "1", "version": 1}},
+            {"removed": False, "fileId": "D1",
+             "file": {"id": "D1", "name": "Docs", "parents": ["ROOT"],
+                      "mimeType": "application/vnd.google-apps.folder",
+                      "trashed": False}},
+        ],
+    }
+    results = list(iter_remote_changes(
+        _changes_service(page), _passthrough_retry, cache, "CURSOR"
+    ))
+    assert cache.path_to_id("/Docs/a.pdf") == "F1"
+    assert {type(e) for e in results[0].entries} == {FolderMetadata, FileMetadata}
+
+
+def test_iter_changes_move_into_new_folder_is_not_a_delete():
+    # F1 already lives at /a.pdf. In one batch it is moved into a
+    # brand-new folder D1, and Drive delivers F1's change BEFORE D1's.
+    # F1 must be re-homed under /Docs — not misread as a move-out and
+    # deleted, because its new parent is created later in the same page.
+    cache = _cache()
+    cache.set("/a.pdf", "F1", "ROOT", "a.pdf", False)
+    page = {
+        "newStartPageToken": "NEXT",
+        "changes": [
+            {"removed": False, "fileId": "F1",
+             "file": {"id": "F1", "name": "a.pdf", "parents": ["D1"],
+                      "mimeType": "application/pdf", "trashed": False,
+                      "size": "1", "version": 2}},
+            {"removed": False, "fileId": "D1",
+             "file": {"id": "D1", "name": "Docs", "parents": ["ROOT"],
+                      "mimeType": "application/vnd.google-apps.folder",
+                      "trashed": False}},
+        ],
+    }
+    results = list(iter_remote_changes(
+        _changes_service(page), _passthrough_retry, cache, "CURSOR"
+    ))
+    assert cache.path_to_id("/a.pdf") is None
+    assert cache.path_to_id("/Docs/a.pdf") == "F1"
+    assert DeletedMetadata not in {type(e) for e in results[0].entries}
+
+
 def test_iter_changes_drops_native_doc():
     cache = _cache()
     page = {
