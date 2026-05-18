@@ -73,3 +73,9 @@ def test_filter_native_docs_keeps_folders_and_files():
     ]
     kept = filter_native_docs(items)
     assert [it["id"] for it in kept] == ["1", "2"]
+
+
+def test_filter_native_docs_keeps_items_without_mimetype():
+    items = [{"id": "1"}, {"id": "2", "mimeType": "application/vnd.google-apps.document"}]
+    kept = filter_native_docs(items)
+    assert [it["id"] for it in kept] == ["1"]
