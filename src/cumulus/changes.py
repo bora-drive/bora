@@ -67,7 +67,7 @@ def to_file_metadata(file: dict[str, Any], path_display: str) -> FileMetadata:
         id=file["id"],
         client_modified=modified,
         server_modified=modified,
-        rev=str(file.get("version", "")),
+        rev=str(file.get("version") or ""),
         size=int(file.get("size", 0) or 0),
         symlink_target=None,
         shared=bool(file.get("shared", False)),
