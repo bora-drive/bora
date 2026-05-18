@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient
+from cumulus.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
 from cumulus.config import remove_configuration
 from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
@@ -90,7 +90,7 @@ def test_retry_exhausts_and_raises_last(client, make_http_error):
     call = Mock(side_effect=[make_http_error(500)] * 10)
     with pytest.raises(HttpError):
         client._retry_transient(call)
-    assert call.call_count == 5  # _MAX_RETRY_ATTEMPTS
+    assert call.call_count == _MAX_RETRY_ATTEMPTS
 
 
 def test_retry_retries_rate_limited_403(client, make_http_error):
@@ -118,3 +118,13 @@ def test_retry_aborts_on_shutdown(client, make_http_error):
     call = Mock(side_effect=make_http_error(503))
     with pytest.raises(CancelledError):
         client._retry_transient(call)
+
+
+def test_retry_retries_connection_error(client):
+    import requests
+
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False
+    call = Mock(side_effect=[requests.exceptions.ConnectionError("net"), "ok"])
+    assert client._retry_transient(call) == "ok"
+    assert call.call_count == 2
