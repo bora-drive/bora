@@ -1075,23 +1075,32 @@ class GoogleDriveClient:
     def wait_for_remote_changes(
         self, last_cursor: str, timeout: int = DEFAULT_POLL_INTERVAL
     ) -> bool:
-        """Waits for remote changes since ``last_cursor``.
+        """Waits for remote changes since *last_cursor*.
 
-        Google Drive has no long-poll endpoint.  Instead, we sleep for
-        :data:`DEFAULT_POLL_INTERVAL` seconds (180 s), then check
-        ``changes.list`` for new changes.  This keeps polling cost to
-        ~480 requests/day, well within the 12k daily quota.
+        Google Drive has no long-poll endpoint, so this sleeps for
+        *timeout* seconds (interruptibly, via ``_poll_event``) and then
+        checks ``changes.list`` for at least one change.
 
-        :param last_cursor: Last change token (``startPageToken``).
-        :param timeout: Seconds to sleep before polling.  Defaults to
-            :data:`DEFAULT_POLL_INTERVAL`.
-        :returns: ``True`` if changes are available, ``False`` otherwise.
+        :returns: ``True`` if changes are available; ``False`` on a
+            clean timeout with no changes, or if the sleep was
+            interrupted by daemon shutdown.
         """
-        # TODO (Phase 5g): Implement actual polling via changes.list.
-        # Sleep, then query changes.list with pageToken=last_cursor.
-        # Return True if the response contains any change entries.
-        _not_implemented()
-        return False  # unreachable
+        interrupted = self._poll_event.wait(timeout)
+        if interrupted:
+            return False
+        with convert_api_errors():
+            resp = self._retry_transient(
+                lambda: self._get_service()
+                .changes()
+                .list(
+                    pageToken=last_cursor,
+                    pageSize=1,
+                    fields="changes(fileId)",
+                )
+                .execute()
+            )
+        self._count_request()
+        return len(resp.get("changes", [])) > 0
 
     def list_remote_changes(self, last_cursor: str) -> ListFolderResult:
         """Lists changes since ``last_cursor``.

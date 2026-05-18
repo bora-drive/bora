@@ -643,3 +643,37 @@ def test_get_latest_cursor_ignores_remote_path(client):
 
     # Any remote_path must produce the same account-global token.
     assert client.get_latest_cursor("/Documents/Sub") == "TOK99"
+
+
+# ==== wait_for_remote_changes =============================================
+
+def test_wait_returns_true_when_changes_present(client):
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False  # timed out normally
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "changes": [{"fileId": "F1"}]
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.wait_for_remote_changes("CURSOR", timeout=1) is True
+
+
+def test_wait_returns_false_when_no_changes(client):
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "changes": []
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.wait_for_remote_changes("CURSOR", timeout=1) is False
+
+
+def test_wait_returns_false_on_shutdown_without_polling(client):
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = True  # shutdown during sleep
+    client._get_service = Mock(side_effect=AssertionError("must not poll"))
+
+    assert client.wait_for_remote_changes("CURSOR", timeout=1) is False
