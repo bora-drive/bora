@@ -322,3 +322,10 @@ def test_unlink_when_not_linked_is_a_noop(client):
     with mock.patch("cumulus.client.requests.post") as m_post:
         client.unlink()
     m_post.assert_not_called()
+
+
+def test_unlink_sets_poll_event(client):
+    # No credentials → revoke is skipped; only check the poll event is set.
+    assert client._poll_event.is_set() is False
+    client.unlink()
+    assert client._poll_event.is_set() is True

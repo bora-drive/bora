@@ -18,7 +18,7 @@ from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
 from cumulus.path_cache import PathIDCache
 
-_CONFIG = "test-config-s3-client"
+_CONFIG = "test-config-client-offline"
 
 
 @pytest.fixture
