@@ -486,3 +486,111 @@ def test_bootstrap_fetches_all_pages(client, cache):
     assert ids == {"F1", "F2"}
     assert result_pages[-1].cursor == "TOK1"
     assert result_pages[-1].has_more is False
+
+
+# ==== download ============================================================
+
+import hashlib as _hashlib
+
+
+class FakeDownloader:
+    """Stand-in for googleapiclient.http.MediaIoBaseDownload. Writes the
+    bytes stashed on the request mock to the file handle in one chunk."""
+
+    def __init__(self, fh, request, chunksize=None):
+        self._fh = fh
+        self._data = request._fake_data
+        self._done = False
+
+    def next_chunk(self):
+        self._fh.write(self._data)
+        self._done = True
+        status = Mock(resumable_progress=len(self._data))
+        return status, True
+
+
+def _download_service(file_meta, file_bytes):
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = file_meta
+    media_request = Mock()
+    media_request._fake_data = file_bytes
+    service.files.return_value.get_media.return_value = media_request
+    return service
+
+
+def test_download_writes_file_and_verifies_md5(client, cache, tmp_path, monkeypatch):
+    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+    _seed(cache, "/a.bin", "F1", "a.bin")
+    data = b"hello world"
+    meta = {
+        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
+        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
+        "md5Checksum": _hashlib.md5(data).hexdigest(), "version": 1,
+    }
+    client._get_service = Mock(return_value=_download_service(meta, data))
+
+    dest = tmp_path / "a.bin"
+    result = client.download("/a.bin", str(dest))
+    assert dest.read_bytes() == data
+    assert result.id == "F1"
+
+
+def test_download_native_doc_raises(client, cache, tmp_path):
+    from cumulus.exceptions import UnsupportedFileError
+
+    _seed(cache, "/Doc", "G1", "Doc")
+    meta = {
+        "id": "G1", "name": "Doc",
+        "mimeType": "application/vnd.google-apps.document",
+        "parents": ["ROOT"], "trashed": False,
+    }
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = meta
+    client._get_service = Mock(return_value=service)
+
+    with pytest.raises(UnsupportedFileError):
+        client.download("/Doc", str(tmp_path / "Doc"))
+
+
+def test_download_md5_mismatch_raises_and_cleans_up(client, cache, tmp_path, monkeypatch):
+    from cumulus.exceptions import DataCorruptionError
+
+    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+    _seed(cache, "/a.bin", "F1", "a.bin")
+    data = b"hello world"
+    meta = {
+        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
+        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
+        "md5Checksum": "deadbeef" * 4, "version": 1,  # wrong hash
+    }
+    client._get_service = Mock(return_value=_download_service(meta, data))
+
+    dest = tmp_path / "a.bin"
+    with pytest.raises(DataCorruptionError):
+        client.download("/a.bin", str(dest))
+    assert not dest.exists()
+    assert not (tmp_path / "a.bin.cumulus-part").exists()
+
+
+def test_download_cache_miss_raises(client, tmp_path):
+    from cumulus.exceptions import NotFoundError
+
+    client._get_service = Mock(side_effect=AssertionError("no API call"))
+    with pytest.raises(NotFoundError):
+        client.download("/missing", str(tmp_path / "x"))
+
+
+def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
+    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+    _seed(cache, "/a.bin", "F1", "a.bin")
+    data = b"abcdef"
+    meta = {
+        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
+        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
+        "md5Checksum": _hashlib.md5(data).hexdigest(), "version": 1,
+    }
+    client._get_service = Mock(return_value=_download_service(meta, data))
+
+    sync_event = Mock()
+    client.download("/a.bin", str(tmp_path / "a.bin"), sync_event=sync_event)
+    assert sync_event.completed == len(data)
