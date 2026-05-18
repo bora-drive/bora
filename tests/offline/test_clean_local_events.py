@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 from watchdog.events import (
     DirCreatedEvent,
@@ -11,13 +13,21 @@ from watchdog.events import (
 
 from cumulus.client import DropboxClient
 from cumulus.config import remove_configuration
+from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
+from cumulus.path_cache import PathIDCache
 from cumulus.sync import SyncEngine
 
 
 @pytest.fixture
 def sync():
-    sync = SyncEngine(DropboxClient("test-config", CredentialStorage("test-config")))
+    sync = SyncEngine(
+        DropboxClient(
+            "test-config",
+            CredentialStorage("test-config"),
+            PathIDCache(Database(sqlite3.connect(":memory:"))),
+        )
+    )
     sync.sync_path = "/"
 
     yield sync

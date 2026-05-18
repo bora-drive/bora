@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import os.path as osp
+import sqlite3
 
 import httplib2
 import pytest
@@ -9,6 +10,8 @@ from googleapiclient.errors import HttpError
 
 from cumulus.client import DropboxClient
 from cumulus.config import list_configs, remove_configuration
+from cumulus.database.core import Database
+from cumulus.path_cache import PathIDCache
 from cumulus.daemon import Stop, stop_cumulus_daemon_process
 from cumulus.fsevents import Observer
 from cumulus.keyring import CredentialStorage
@@ -16,6 +19,12 @@ from cumulus.main import Maestral
 from cumulus.sync import SyncEngine
 from cumulus.utils.appdirs import get_home_dir
 from cumulus.utils.path import delete
+
+
+def _make_path_cache() -> PathIDCache:
+    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    cache.root_id = "ROOT"
+    return cache
 
 
 @pytest.fixture
@@ -31,7 +40,7 @@ def sync():
     local_dir = osp.join(get_home_dir(), "dummy_dir")
     os.mkdir(local_dir)
 
-    sync = SyncEngine(DropboxClient("test-config", CredentialStorage("test-config")))
+    sync = SyncEngine(DropboxClient("test-config", CredentialStorage("test-config"), _make_path_cache()))
     sync.fs_events.enable()
     sync.sync_path = local_dir
 
@@ -50,7 +59,9 @@ def sync():
 
 @pytest.fixture
 def client():
-    yield DropboxClient("test-config", CredentialStorage("test-config"))
+    yield DropboxClient(
+        "test-config", CredentialStorage("test-config"), _make_path_cache()
+    )
     remove_configuration("test-config")
 
 

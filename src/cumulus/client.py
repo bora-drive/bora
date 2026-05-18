@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 
 import requests
@@ -32,6 +33,7 @@ from googleapiclient.discovery import build
 
 from . import oauth
 from .config import CumulusState
+from .path_cache import PathIDCache
 from .core import (
     Account,
     AccountType,
@@ -127,6 +129,7 @@ class GoogleDriveClient:
         self,
         config_name: str,
         cred_storage: Any,
+        path_cache: PathIDCache,
         timeout: float = 100,
         session: Any | None = None,
         bandwidth_limit_up: float = 0,
@@ -134,6 +137,7 @@ class GoogleDriveClient:
     ) -> None:
         self.config_name = config_name
         self._cred_storage = cred_storage
+        self._path_cache = path_cache
         self._state = CumulusState(config_name)
         self._timeout = timeout
         self._cached_account_info: FullAccount | None = None
@@ -152,6 +156,11 @@ class GoogleDriveClient:
         # Auth state.
         self._credentials: oauth.PersistingCredentials | None = None
         self._pending_paste_flow: _PasteFlowState | None = None
+
+        # Shutdown signal: set on close()/unlink(), cleared on link().
+        # Interrupts the change-feed poll sleep and retry backoff sleeps
+        # so the daemon stops within ~1 ms instead of waiting them out.
+        self._poll_event = threading.Event()
 
     # ---- Request quota tracking -----------------------------------------------------
 
@@ -241,6 +250,7 @@ class GoogleDriveClient:
         """Link with a Google account. Returns 0 / 1 / 2 (success / invalid /
         connection failure).
         """
+        self._poll_event.clear()
         try:
             if refresh_token is not None:
                 creds = oauth.credentials_from_refresh_token(refresh_token)
@@ -294,6 +304,7 @@ class GoogleDriveClient:
         self._pending_paste_flow = None
         self._cached_account_info = None
         self._cached_space_usage = None
+        self._poll_event.set()
 
     # ---- Service builder -------------------------------------------------------------
 
@@ -332,8 +343,9 @@ class GoogleDriveClient:
     # ---- Session management ----------------------------------------------------------
 
     def close(self) -> None:
-        """Cleans up resources."""
-        pass
+        """Cleans up resources and signals any in-flight poll/retry sleep
+        to abort (daemon shutdown)."""
+        self._poll_event.set()
 
     def __enter__(self) -> GoogleDriveClient:
         return self
