@@ -1103,28 +1103,28 @@ class GoogleDriveClient:
         return len(resp.get("changes", [])) > 0
 
     def list_remote_changes(self, last_cursor: str) -> ListFolderResult:
-        """Lists changes since ``last_cursor``.
-
-        :param last_cursor: Last change token.
-        :returns: Remote changes since given token.
-        """
-        _not_implemented()
-        return ListFolderResult([], False, "")  # type: ignore[call-arg]  # unreachable
+        """Lists changes since *last_cursor*, exhausting all pages."""
+        pages = list(self.list_remote_changes_iterator(last_cursor))
+        return self.flatten_results(pages)
 
     def list_remote_changes_iterator(
         self, last_cursor: str
     ) -> Iterator[ListFolderResult]:
         """Lists remote changes as a paginated iterator.
 
-        Google-native documents (Docs, Sheets, etc.) must be stripped from
-        results before yielding.  Use :func:`cumulus.native_docs.filter_native_docs`
-        or check :func:`cumulus.native_docs.is_google_native` per item.
-
-        :param last_cursor: Last change token.
-        :returns: Iterator over pages of remote changes.
+        Delegates to :func:`cumulus.changes.iter_remote_changes`, which
+        classifies each change, resolves paths, mutates the path cache,
+        and strips Google-native documents. HTTP errors raised mid-stream
+        are converted to Cumulus exceptions.
         """
-        _not_implemented()
-        return iter([])  # unreachable
+        self._ensure_root_id()
+        with convert_api_errors():
+            yield from changes.iter_remote_changes(
+                self._get_service,
+                self._retry_transient,
+                self._path_cache,
+                last_cursor,
+            )
 
     # ---- Sharing ---------------------------------------------------------------------
 
