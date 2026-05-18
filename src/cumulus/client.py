@@ -36,11 +36,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from . import changes, oauth
-from .changes import FILE_FIELDS, to_file_metadata, to_folder_metadata
+from .changes import FILE_FIELDS, parse_drive_time, to_file_metadata, to_folder_metadata
 from .config import CumulusState
 from .native_docs import is_google_folder, is_google_native
 from .path_cache import PathIDCache
-from .path_codec import compose_path
+from .path_codec import compose_path, fold_path
 from .core import (
     Account,
     AccountType,
@@ -557,27 +557,87 @@ class GoogleDriveClient:
         return to_file_metadata(file, remote_path)
 
     def list_revisions(
-        self, remote_path: str, mode: str = "path", limit: int = 10
+        self, remote_path: str, limit: int = 10
     ) -> list[FileMetadata]:
-        """Lists all file revisions for the given file.
+        """Lists revisions for the file at *remote_path*, most recent
+        first, capped at *limit*.
 
-        :param remote_path: Path to file.
-        :param mode: Must be 'path' or 'id'.
-        :param limit: Maximum number of revisions to list.
-        :returns: File revision history.
+        The Dropbox-era ``mode`` parameter is dropped — Drive's
+        ``revisions.list`` only accepts a file ID.
+
+        :raises NotFoundError: if *remote_path* is not in the path cache.
         """
-        _not_implemented()
-        return []  # unreachable
+        self._ensure_root_id()
+        file_id = self._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No item at '{remote_path}' is known to Cumulus.",
+                remote_path=remote_path,
+            )
+        raw: list[dict[str, Any]] = []
+        page_token: str | None = None
+        with convert_api_errors(remote_path=remote_path):
+            while True:
+                resp = self._retry_transient(
+                    lambda pt=page_token: self._get_service()
+                    .revisions()
+                    .list(
+                        fileId=file_id,
+                        fields=(
+                            "nextPageToken, revisions(id, modifiedTime, "
+                            "size, md5Checksum, "
+                            "lastModifyingUser(permissionId))"
+                        ),
+                        pageSize=100,
+                        pageToken=pt,
+                    )
+                    .execute()
+                )
+                self._count_request()
+                raw.extend(resp.get("revisions", []))
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+        # Drive returns revisions oldest-first; we want newest-first.
+        raw.reverse()
+        name = remote_path.rsplit("/", 1)[-1]
+        path_lower = fold_path(remote_path)
+        result: list[FileMetadata] = []
+        for rev in raw[:limit]:
+            modified = parse_drive_time(rev.get("modifiedTime"))
+            last_user = rev.get("lastModifyingUser") or {}
+            result.append(
+                FileMetadata(
+                    name=name,
+                    path_lower=path_lower,
+                    path_display=remote_path,
+                    id=file_id,
+                    client_modified=modified,
+                    server_modified=modified,
+                    rev=rev["id"],
+                    size=int(rev.get("size", 0) or 0),
+                    symlink_target=None,
+                    shared=False,
+                    modified_by=last_user.get("permissionId"),
+                    is_downloadable=True,
+                    content_hash=rev.get("md5Checksum", ""),
+                )
+            )
+        return result
 
     def restore(self, remote_path: str, rev: str) -> FileMetadata:
         """Restore an old revision of a file.
 
-        :param remote_path: The path to save the restored file.
-        :param rev: The revision to restore.
-        :returns: Metadata of restored file.
+        Not available until Stage 4 (write client) lands ``upload``:
+        Google Drive has no single-call revision-restore, so restore is
+        implemented as download-revision + re-upload, which needs the
+        write client.
         """
-        _not_implemented()
-        return FileMetadata("", "", "", "", None, None, "", 0, None, False, False, None)  # type: ignore[call-arg]  # unreachable
+        raise NotImplementedError(
+            "restore() is not available until Stage 4 (write client) "
+            "lands upload support."
+        )
 
     # ---- Download / Upload -----------------------------------------------------------
 

@@ -239,3 +239,63 @@ def test_get_metadata_trashed_with_include_deleted_returns_metadata(client, cach
     meta = client.get_metadata("/old.pdf", include_deleted=True)
     assert isinstance(meta, FileMetadata)
     assert meta.id == "F9"
+
+
+# ==== list_revisions / restore ============================================
+
+def test_list_revisions_returns_newest_first(client, cache):
+    _seed(cache, "/report.pdf", "F1", "report.pdf")
+    service = fake_service()
+    service.revisions.return_value.list.return_value.execute.return_value = {
+        "revisions": [
+            {"id": "r1", "modifiedTime": "2026-01-01T00:00:00Z", "size": "10"},
+            {"id": "r2", "modifiedTime": "2026-02-01T00:00:00Z", "size": "20"},
+        ]
+    }
+    client._get_service = Mock(return_value=service)
+
+    revs = client.list_revisions("/report.pdf")
+    assert [r.rev for r in revs] == ["r2", "r1"]
+
+
+def test_list_revisions_respects_limit(client, cache):
+    _seed(cache, "/report.pdf", "F1", "report.pdf")
+    service = fake_service()
+    service.revisions.return_value.list.return_value.execute.return_value = {
+        "revisions": [
+            {"id": f"r{i}", "modifiedTime": "2026-01-01T00:00:00Z", "size": "1"}
+            for i in range(20)
+        ]
+    }
+    client._get_service = Mock(return_value=service)
+
+    revs = client.list_revisions("/report.pdf", limit=5)
+    assert len(revs) == 5
+
+
+def test_list_revisions_paginates(client, cache):
+    _seed(cache, "/report.pdf", "F1", "report.pdf")
+    service = fake_service()
+    service.revisions.return_value.list.return_value.execute.side_effect = [
+        {"revisions": [{"id": "r1", "modifiedTime": "2026-01-01T00:00:00Z",
+                        "size": "1"}], "nextPageToken": "p2"},
+        {"revisions": [{"id": "r2", "modifiedTime": "2026-02-01T00:00:00Z",
+                        "size": "1"}]},
+    ]
+    client._get_service = Mock(return_value=service)
+
+    revs = client.list_revisions("/report.pdf")
+    assert {r.rev for r in revs} == {"r1", "r2"}
+
+
+def test_list_revisions_cache_miss_raises(client):
+    from cumulus.exceptions import NotFoundError
+
+    client._get_service = Mock(side_effect=AssertionError("no API call"))
+    with pytest.raises(NotFoundError):
+        client.list_revisions("/missing")
+
+
+def test_restore_raises_not_implemented(client):
+    with pytest.raises(NotImplementedError):
+        client.restore("/report.pdf", "r1")
