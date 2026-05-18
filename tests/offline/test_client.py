@@ -286,6 +286,9 @@ def test_list_revisions_paginates(client, cache):
 
     revs = client.list_revisions("/report.pdf")
     assert {r.rev for r in revs} == {"r1", "r2"}
+    # The second call must forward the nextPageToken from page 1.
+    calls = service.revisions.return_value.list.call_args_list
+    assert calls[1].kwargs["pageToken"] == "p2"
 
 
 def test_list_revisions_cache_miss_raises(client):
