@@ -35,9 +35,12 @@ from google.oauth2.credentials import Credentials as _Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from . import oauth
+from . import changes, oauth
+from .changes import FILE_FIELDS, to_file_metadata, to_folder_metadata
 from .config import CumulusState
+from .native_docs import is_google_folder, is_google_native
 from .path_cache import PathIDCache
+from .path_codec import compose_path
 from .core import (
     Account,
     AccountType,
@@ -520,16 +523,38 @@ class GoogleDriveClient:
     ) -> Metadata | None:
         """Gets metadata for an item on Google Drive.
 
-        :param remote_path: Path of file or folder.
+        :param remote_path: Encoded virtual path of the item.
         :param include_deleted: Whether to return data for trashed items.
-        :returns: Metadata of item at the given path or ``None`` if not found.
-            Returns ``None`` for Google-native documents (Docs, Sheets, etc.)
-            since they cannot be synced as regular files.
-
-        .. note:: Filter point for native docs (see :mod:`cumulus.native_docs`).
+        :returns: Metadata of the item, or ``None`` for Google-native
+            documents (which cannot be synced) and for trashed items
+            when *include_deleted* is ``False``.
+        :raises NotFoundError: if *remote_path* is not known to the
+            path cache.
         """
-        _not_implemented()
-        return None  # unreachable
+        self._ensure_root_id()
+        file_id = self._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No item at '{remote_path}' is known to Cumulus.",
+                remote_path=remote_path,
+            )
+        with convert_api_errors(remote_path=remote_path):
+            file = self._retry_transient(
+                lambda: self._get_service()
+                .files()
+                .get(fileId=file_id, fields=FILE_FIELDS)
+                .execute()
+            )
+        self._count_request()
+        if file.get("trashed") and not include_deleted:
+            return None
+        mime = file.get("mimeType")
+        if is_google_native(mime):
+            return None
+        if is_google_folder(mime):
+            return to_folder_metadata(file, remote_path)
+        return to_file_metadata(file, remote_path)
 
     def list_revisions(
         self, remote_path: str, mode: str = "path", limit: int = 10
