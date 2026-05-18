@@ -287,11 +287,15 @@ def test_iter_changes_paginates():
                       "size": "1", "version": 1}},
         ],
     }
+    factory = _changes_service(page1, page2)
     results = list(iter_remote_changes(
-        _changes_service(page1, page2), _passthrough_retry, cache, "CURSOR"
+        factory, _passthrough_retry, cache, "CURSOR"
     ))
     assert len(results) == 2
     assert results[0].has_more is True
     assert results[0].cursor == "p2"
     assert results[1].has_more is False
     assert results[1].cursor == "NEXT"
+    # The second changes.list call must forward page 1's nextPageToken.
+    list_calls = factory().changes.return_value.list.call_args_list
+    assert list_calls[1].kwargs["pageToken"] == "p2"
