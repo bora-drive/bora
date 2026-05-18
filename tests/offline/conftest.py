@@ -68,3 +68,27 @@ def config_name(prefix: str = "test-config"):
         raise RuntimeError("Could not stop test daemon")
 
     remove_configuration(config_name)
+
+
+import json as _json
+
+import httplib2
+from googleapiclient.errors import HttpError
+
+
+@pytest.fixture
+def make_http_error():
+    """Factory fixture: build a googleapiclient HttpError with a given
+    status code and optional Drive sub-reason string."""
+
+    def _make(status: int, reason: str = "", retry_after: str | None = None):
+        headers = {"status": status}
+        if retry_after is not None:
+            headers["retry-after"] = retry_after
+        resp = httplib2.Response(headers)
+        body: dict = {"error": {"code": status, "message": "test error"}}
+        if reason:
+            body["error"]["errors"] = [{"reason": reason, "message": "test error"}]
+        return HttpError(resp, _json.dumps(body).encode("utf-8"))
+
+    return _make
