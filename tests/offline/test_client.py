@@ -363,6 +363,9 @@ def test_list_folder_non_recursive_paginates(client, cache):
     assert len(pages) == 2
     assert pages[0].has_more is True
     assert pages[1].has_more is False
+    # The second call must forward the nextPageToken from page 1.
+    calls = service.files.return_value.list.call_args_list
+    assert calls[1].kwargs["pageToken"] == "p2"
 
 
 def test_list_folder_non_recursive_cache_miss_raises(client):
