@@ -906,8 +906,11 @@ class GoogleDriveClient:
                 .execute()
             )
         start_token = token_resp["startPageToken"]
+        self._count_request()
 
         # Page through every non-trashed item visible to the user.
+        # The full flat listing is buffered in memory before processing;
+        # acceptable for the v1 scale target (see spec §5.2 / §10).
         raw_items: list[dict[str, Any]] = []
         page_token: str | None = None
         while True:
@@ -951,8 +954,8 @@ class GoogleDriveClient:
         if skipped > 0:
             logger.info(
                 "Indexed %d items from Google Drive; skipped %d items "
-                "outside My Drive root (Computers/Backup, shared-with-me, "
-                "orphans) — see debug log for detail.",
+                "outside sync scope (Computers/Backup, shared-with-me, "
+                "orphans, or duplicate names) — see debug log for detail.",
                 indexed,
                 skipped,
             )
@@ -977,6 +980,8 @@ class GoogleDriveClient:
             is_last = start + _LIST_PAGE_SIZE >= len(in_scope)
             entries: list[Metadata] = []
             for file in chunk:
+                # Safe to re-resolve: the cache is not mutated after
+                # populate_from_listing completed above.
                 path = self._path_cache.id_to_path(file["id"])
                 if is_google_folder(file.get("mimeType")):
                     entries.append(to_folder_metadata(file, path))
