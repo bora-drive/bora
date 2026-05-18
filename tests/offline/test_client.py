@@ -132,24 +132,19 @@ def test_retry_retries_connection_error(client):
 
 # ==== _ensure_root_id =====================================================
 
-def test_ensure_root_id_resolves_and_caches(cache):
-    cred = CredentialStorage(_CONFIG + "-root")
-    cl = GoogleDriveClient(_CONFIG + "-root", cred, cache)
-    cache.root_id = None  # force resolution
+def test_ensure_root_id_resolves_and_caches(client):
+    client._path_cache.root_id = None  # force resolution
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
         "id": "ROOT_XYZ"
     }
-    cl._get_service = Mock(return_value=service)
+    client._get_service = Mock(return_value=service)
 
-    assert cl._ensure_root_id() == "ROOT_XYZ"
-    assert cache.root_id == "ROOT_XYZ"
+    assert client._ensure_root_id() == "ROOT_XYZ"
+    assert client._path_cache.root_id == "ROOT_XYZ"
     # Second call must not hit the service again.
-    assert cl._ensure_root_id() == "ROOT_XYZ"
+    assert client._ensure_root_id() == "ROOT_XYZ"
     assert service.files.return_value.get.call_count == 1
-
-    cred.delete_creds()
-    remove_configuration(_CONFIG + "-root")
 
 
 def test_ensure_root_id_short_circuits_when_set(client):
