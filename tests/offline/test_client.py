@@ -677,3 +677,50 @@ def test_wait_returns_false_on_shutdown_without_polling(client):
     client._get_service = Mock(side_effect=AssertionError("must not poll"))
 
     assert client.wait_for_remote_changes("CURSOR", timeout=1) is False
+
+
+# ==== list_remote_changes(_iterator) ======================================
+
+def test_list_remote_changes_iterator_delegates(client, cache):
+    from cumulus.core import FileMetadata
+
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "newStartPageToken": "NEXT",
+        "changes": [
+            {"removed": False, "fileId": "F1",
+             "file": {"id": "F1", "name": "a.pdf", "parents": ["ROOT"],
+                      "mimeType": "application/pdf", "trashed": False,
+                      "size": "1", "version": 1}},
+        ],
+    }
+    client._get_service = Mock(return_value=service)
+
+    pages = list(client.list_remote_changes_iterator("CURSOR"))
+    assert isinstance(pages[0].entries[0], FileMetadata)
+    assert cache.path_to_id("/a.pdf") == "F1"
+
+
+def test_list_remote_changes_iterator_converts_http_error(client, make_http_error):
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.side_effect = (
+        make_http_error(404)
+    )
+    client._get_service = Mock(return_value=service)
+
+    from cumulus.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError):
+        list(client.list_remote_changes_iterator("CURSOR"))
+
+
+def test_list_remote_changes_flattens(client, cache):
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "newStartPageToken": "NEXT", "changes": [],
+    }
+    client._get_service = Mock(return_value=service)
+
+    result = client.list_remote_changes("CURSOR")
+    assert result.entries == []
+    assert result.cursor == "NEXT"
