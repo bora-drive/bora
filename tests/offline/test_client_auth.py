@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from unittest import mock
 
 import pytest
 
 from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
+from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
+from cumulus.path_cache import PathIDCache
 
 
 @pytest.fixture
@@ -20,7 +23,9 @@ def cred_storage():
 
 @pytest.fixture
 def client(cred_storage):
-    yield GoogleDriveClient("test-config-client", cred_storage)
+    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    cache.root_id = "ROOT"
+    yield GoogleDriveClient("test-config-client", cred_storage, cache)
 
 
 def test_linked_is_false_when_keyring_empty(client):
