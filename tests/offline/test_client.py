@@ -302,3 +302,88 @@ def test_list_revisions_cache_miss_raises(client):
 def test_restore_raises_not_implemented(client):
     with pytest.raises(NotImplementedError):
         client.restore("/report.pdf", "r1")
+
+
+# ==== list_folder_iterator (non-recursive) ================================
+
+def test_list_folder_non_recursive_yields_entries(client, cache):
+    from cumulus.core import FileMetadata, FolderMetadata
+
+    _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
+    service = fake_service()
+    service.files.return_value.list.return_value.execute.return_value = {
+        "files": [
+            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
+             "parents": ["D1"], "trashed": False, "size": "1"},
+            {"id": "D2", "name": "Sub",
+             "mimeType": "application/vnd.google-apps.folder",
+             "parents": ["D1"], "trashed": False},
+        ]
+    }
+    client._get_service = Mock(return_value=service)
+
+    pages = list(client.list_folder_iterator("/Documents"))
+    entries = pages[0].entries
+    assert len(entries) == 2
+    assert any(isinstance(e, FileMetadata) for e in entries)
+    assert any(isinstance(e, FolderMetadata) for e in entries)
+
+
+def test_list_folder_non_recursive_filters_native_docs(client, cache):
+    _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
+    service = fake_service()
+    service.files.return_value.list.return_value.execute.return_value = {
+        "files": [
+            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
+             "parents": ["D1"], "trashed": False, "size": "1"},
+            {"id": "G1", "name": "Doc",
+             "mimeType": "application/vnd.google-apps.document",
+             "parents": ["D1"], "trashed": False},
+        ]
+    }
+    client._get_service = Mock(return_value=service)
+
+    entries = list(client.list_folder_iterator("/Documents"))[0].entries
+    assert [e.id for e in entries] == ["F1"]
+
+
+def test_list_folder_non_recursive_paginates(client, cache):
+    _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
+    service = fake_service()
+    service.files.return_value.list.return_value.execute.side_effect = [
+        {"files": [{"id": "F1", "name": "a", "mimeType": "application/pdf",
+                    "parents": ["D1"], "trashed": False, "size": "1"}],
+         "nextPageToken": "p2"},
+        {"files": [{"id": "F2", "name": "b", "mimeType": "application/pdf",
+                    "parents": ["D1"], "trashed": False, "size": "1"}]},
+    ]
+    client._get_service = Mock(return_value=service)
+
+    pages = list(client.list_folder_iterator("/Documents"))
+    assert len(pages) == 2
+    assert pages[0].has_more is True
+    assert pages[1].has_more is False
+
+
+def test_list_folder_non_recursive_cache_miss_raises(client):
+    from cumulus.exceptions import NotFoundError
+
+    client._get_service = Mock(side_effect=AssertionError("no API call"))
+    with pytest.raises(NotFoundError):
+        list(client.list_folder_iterator("/missing-folder"))
+
+
+def test_list_folder_flattens(client, cache):
+    _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
+    service = fake_service()
+    service.files.return_value.list.return_value.execute.side_effect = [
+        {"files": [{"id": "F1", "name": "a", "mimeType": "application/pdf",
+                    "parents": ["D1"], "trashed": False, "size": "1"}],
+         "nextPageToken": "p2"},
+        {"files": [{"id": "F2", "name": "b", "mimeType": "application/pdf",
+                    "parents": ["D1"], "trashed": False, "size": "1"}]},
+    ]
+    client._get_service = Mock(return_value=service)
+
+    result = client.list_folder("/Documents")
+    assert {e.id for e in result.entries} == {"F1", "F2"}

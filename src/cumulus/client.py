@@ -106,6 +106,9 @@ _MAX_RETRY_ATTEMPTS = 5
 _INITIAL_BACKOFF = 1.0   # seconds
 _MAX_BACKOFF = 32.0      # seconds
 
+# Page size for files.list calls.
+_LIST_PAGE_SIZE = 1000
+
 T = TypeVar("T")
 
 
@@ -790,17 +793,20 @@ class GoogleDriveClient:
         include_mounted_folders: bool = True,
         include_non_downloadable_files: bool = False,
     ) -> ListFolderResult:
-        """Lists the contents of a folder.
+        """Lists the contents of a folder, exhausting all pages.
 
-        :param remote_path: Path of folder.
-        :param recursive: Whether to list recursively.
-        :param include_deleted: Whether to include trashed items.
-        :param include_mounted_folders: Whether to include shared folders.
-        :param include_non_downloadable_files: Whether to include non-downloadable files.
-        :returns: Content of given folder.
+        See :meth:`list_folder_iterator` for parameter meaning.
         """
-        _not_implemented()
-        return ListFolderResult([], False, "")  # type: ignore[call-arg]  # unreachable
+        pages = list(
+            self.list_folder_iterator(
+                remote_path,
+                recursive=recursive,
+                include_deleted=include_deleted,
+                include_mounted_folders=include_mounted_folders,
+                include_non_downloadable_files=include_non_downloadable_files,
+            )
+        )
+        return self.flatten_results(pages)
 
     def list_folder_iterator(
         self,
@@ -813,20 +819,66 @@ class GoogleDriveClient:
     ) -> Iterator[ListFolderResult]:
         """Lists folder contents as a paginated iterator.
 
-        :param remote_path: Path of folder.
-        :param recursive: Whether to list recursively.
-        :param include_deleted: Whether to include trashed items.
-        :param include_mounted_folders: Whether to include shared folders.
-        :param limit: Approximate max results per page.
-        :param include_non_downloadable_files: Whether to include non-downloadable files.
-        :returns: Iterator over pages of folder content.  Google-native
-            documents (Docs, Sheets, etc.) should be filtered out of results
-            unless *include_non_downloadable_files* is ``True``.
+        ``recursive=True`` (only meaningful for the sync root ``"/"``) is
+        the initial-sync bootstrap: it enumerates the whole reachable
+        subtree and atomically populates the path cache. See
+        :meth:`_bootstrap_recursive`.
 
-        .. note:: Filter point for native docs (see :mod:`cumulus.native_docs`).
+        ``recursive=False`` lists one folder's direct children;
+        *remote_path* must already be known to the path cache.
+
+        Google-native documents are filtered out unless
+        *include_non_downloadable_files* is ``True``.
         """
-        _not_implemented()
-        return iter([])  # unreachable
+        self._ensure_root_id()
+        if recursive:
+            yield from self._bootstrap_recursive(include_non_downloadable_files)
+            return
+
+        parent_id = self._path_cache.path_to_id(remote_path)
+        if parent_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No folder at '{remote_path}' is known to Cumulus.",
+                remote_path=remote_path,
+            )
+        query = f"'{parent_id}' in parents"
+        if not include_deleted:
+            query += " and trashed=false"
+        page_size = limit or _LIST_PAGE_SIZE
+        page_token: str | None = None
+        while True:
+            with convert_api_errors(remote_path=remote_path):
+                resp = self._retry_transient(
+                    lambda pt=page_token: self._get_service()
+                    .files()
+                    .list(
+                        q=query,
+                        fields=f"nextPageToken, files({FILE_FIELDS})",
+                        pageSize=page_size,
+                        pageToken=pt,
+                    )
+                    .execute()
+                )
+            self._count_request()
+            entries: list[Metadata] = []
+            for file in resp.get("files", []):
+                mime = file.get("mimeType")
+                if is_google_native(mime) and not include_non_downloadable_files:
+                    continue
+                child_path = compose_path(remote_path, file["name"])
+                if is_google_folder(mime):
+                    entries.append(to_folder_metadata(file, child_path))
+                else:
+                    entries.append(to_file_metadata(file, child_path))
+            page_token = resp.get("nextPageToken")
+            yield ListFolderResult(
+                entries=entries,
+                has_more=bool(page_token),
+                cursor=page_token or "",
+            )
+            if not page_token:
+                break
 
     def wait_for_remote_changes(
         self, last_cursor: str, timeout: int = DEFAULT_POLL_INTERVAL
