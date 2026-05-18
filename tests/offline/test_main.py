@@ -5,6 +5,7 @@ import cumulus.main
 from cumulus.constants import GITHUB_RELEASES_API
 from cumulus.exceptions import NotLinkedError
 from cumulus.main import Maestral
+from cumulus.path_cache import PathIDCache
 
 
 def test_check_for_updates(m: Maestral) -> None:
@@ -49,8 +50,6 @@ def test_not_linked_error(m: Maestral) -> None:
         m.get_metadata("/test")
 
 
-def test_maestral_wires_path_cache_into_client(m):
+def test_maestral_wires_path_cache_into_client(m: Maestral) -> None:
     """Stage 3: the client must receive a PathIDCache from Maestral."""
-    from cumulus.path_cache import PathIDCache
-
     assert isinstance(m.client._path_cache, PathIDCache)

@@ -33,7 +33,6 @@ except ImportError:
 # local imports
 from . import __version__
 from .client import GoogleDriveClient as DropboxClient  # TODO: rename all usages
-from .path_cache import PathIDCache
 from .config import CumulusConfig, CumulusState, validate_config_name
 from .constants import (
     CONNECTING,
@@ -78,6 +77,7 @@ from .logging import (
 from .manager import SyncManager
 from .models import SyncErrorEntry, SyncEvent, SyncStatus
 from .notify import CumulusDesktopNotifier
+from .path_cache import PathIDCache
 from .sync import SyncDirection, SyncEngine, pf_repr
 from .utils import get_newer_version
 from .utils.appdirs import get_cache_path, get_data_path
@@ -1485,6 +1485,7 @@ class Maestral:
         Stop syncing and notify anyone monitoring ``shutdown_future`` that we are done.
         """
         self.stop_sync()
+        self._client_db.close()
 
         if self.shutdown_future and self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self.shutdown_future.set_result, True)
