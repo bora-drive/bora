@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import threading
 import time
 
@@ -21,8 +22,10 @@ from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Iterator,
     Sequence,
+    TypeVar,
     overload,
 )
 
@@ -30,6 +33,7 @@ from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request as _AuthRequest
 from google.oauth2.credentials import Credentials as _Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from . import oauth
 from .config import CumulusState
@@ -58,11 +62,18 @@ from .core import (
 )
 from .errorhandling import (
     CONNECTION_ERRORS,
+    RETRYABLE_403_REASONS,
+    RETRYABLE_HTTP_STATUS,
     convert_api_errors,
+    extract_http_reason,
 )
 from .exceptions import (
+    CancelledError,
     CumulusApiError,
+    DataCorruptionError,
+    NotFoundError,
     NotLinkedError,
+    UnsupportedFileError,
 )
 
 if TYPE_CHECKING:
@@ -86,6 +97,37 @@ _QUOTA_CRITICAL_THRESHOLD = int(_DAILY_QUOTA * 0.95)  # 11,400
 # 180 s keeps daily polling cost to ~480 requests, leaving headroom for
 # file operations within the 12k/day quota.
 DEFAULT_POLL_INTERVAL = 180
+
+# Transient-error retry policy (Stage 3 spec §7.2).
+_MAX_RETRY_ATTEMPTS = 5
+_INITIAL_BACKOFF = 1.0   # seconds
+_MAX_BACKOFF = 32.0      # seconds
+
+T = TypeVar("T")
+
+
+def _is_retryable_http_error(exc: HttpError) -> bool:
+    """Whether an HttpError is a transient failure worth retrying."""
+    status = exc.resp.status
+    if status in RETRYABLE_HTTP_STATUS:
+        return True
+    if status == 403:
+        return extract_http_reason(exc) in RETRYABLE_403_REASONS
+    return False
+
+
+def _retry_after_seconds(exc: HttpError) -> float | None:
+    """Parse a numeric Retry-After header from an HttpError, if present.
+
+    Returns ``None`` when the header is absent or is an HTTP-date form
+    (we fall back to exponential backoff in that case)."""
+    retry_after = exc.resp.get("retry-after")
+    if not retry_after:
+        return None
+    try:
+        return float(retry_after)
+    except (TypeError, ValueError):
+        return None
 
 
 def _not_implemented() -> None:
@@ -326,6 +368,44 @@ class GoogleDriveClient:
             credentials=self._credentials,
             cache_discovery=False,
         )
+
+    def _retry_transient(self, call: Callable[[], T]) -> T:
+        """Run *call* and retry it on transient Google Drive errors.
+
+        Retries 429 / 5xx / rate-limit-403 HttpErrors and connection
+        errors with exponential backoff (1s → 32s) plus jitter, honoring
+        a numeric ``Retry-After`` header when present. After
+        ``_MAX_RETRY_ATTEMPTS`` it re-raises the last exception unchanged
+        so the caller's ``convert_api_errors`` can map it.
+
+        Raises :exc:`~cumulus.exceptions.CancelledError` if the client's
+        ``_poll_event`` fires during a backoff sleep (daemon shutdown).
+        """
+        attempt = 0
+        backoff = _INITIAL_BACKOFF
+        while True:
+            try:
+                return call()
+            except HttpError as exc:
+                if (
+                    not _is_retryable_http_error(exc)
+                    or attempt >= _MAX_RETRY_ATTEMPTS - 1
+                ):
+                    raise
+                sleep_for = _retry_after_seconds(exc)
+                if sleep_for is None:
+                    sleep_for = backoff + random.uniform(0, 0.5)
+            except CONNECTION_ERRORS:
+                if attempt >= _MAX_RETRY_ATTEMPTS - 1:
+                    raise
+                sleep_for = backoff + random.uniform(0, 0.5)
+            if self._poll_event.wait(sleep_for):
+                raise CancelledError(
+                    "Sync cancelled",
+                    "Google Drive request interrupted by daemon shutdown.",
+                )
+            backoff = min(backoff * 2, _MAX_BACKOFF)
+            attempt += 1
 
     # ---- Properties ------------------------------------------------------------------
 
