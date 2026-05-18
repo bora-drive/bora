@@ -829,6 +829,11 @@ class GoogleDriveClient:
 
         Google-native documents are filtered out unless
         *include_non_downloadable_files* is ``True``.
+
+        ``include_mounted_folders`` and ``limit`` are accepted for interface
+        compatibility with the sync engine; ``limit`` sizes the API page,
+        and ``include_mounted_folders`` is currently a no-op (all children
+        are listed regardless of mount status).
         """
         self._ensure_root_id()
         if recursive:
