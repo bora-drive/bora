@@ -47,3 +47,10 @@ def test_check_for_updates(m: Maestral) -> None:
 def test_not_linked_error(m: Maestral) -> None:
     with pytest.raises(NotLinkedError):
         m.get_metadata("/test")
+
+
+def test_maestral_wires_path_cache_into_client(m):
+    """Stage 3: the client must receive a PathIDCache from Maestral."""
+    from cumulus.path_cache import PathIDCache
+
+    assert isinstance(m.client._path_cache, PathIDCache)

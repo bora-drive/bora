@@ -33,6 +33,7 @@ except ImportError:
 # local imports
 from . import __version__
 from .client import GoogleDriveClient as DropboxClient  # TODO: rename all usages
+from .path_cache import PathIDCache
 from .config import CumulusConfig, CumulusState, validate_config_name
 from .constants import (
     CONNECTING,
@@ -193,9 +194,22 @@ class Maestral:
             self._dn = CumulusDesktopNotifier(self._config_name, self._loop)
 
         # Set up sync infrastructure.
+        #
+        # Stage 3 gives the read client its own DB-backed path cache.
+        # The SyncEngine still opens its own connection to the same DB
+        # file; Stage 5's sync-engine port consolidates the two onto a
+        # single shared Database/PathIDCache.
+        self._client_db_path = get_data_path(
+            "cumulus", f"{self.config_name}.db"
+        )
+        self._client_db = Database(
+            sqlite3.connect(self._client_db_path, check_same_thread=False)
+        )
+        self._path_cache = PathIDCache(self._client_db)
         self.client = DropboxClient(
             self.config_name,
             self.cred_storage,
+            self._path_cache,
             bandwidth_limit_up=self.bandwidth_limit_up,
             bandwidth_limit_down=self.bandwidth_limit_down,
         )
