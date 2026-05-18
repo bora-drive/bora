@@ -131,6 +131,15 @@ def test_retry_retries_connection_error(client):
     assert call.call_count == 2
 
 
+def test_retry_honors_retry_after_header(client, make_http_error):
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False
+    call = Mock(side_effect=[make_http_error(429, retry_after="7"), "ok"])
+    assert client._retry_transient(call) == "ok"
+    # The backoff sleep must use the Retry-After value, not the default.
+    client._poll_event.wait.assert_called_once_with(7.0)
+
+
 # ==== _ensure_root_id =====================================================
 
 def test_ensure_root_id_resolves_and_caches(client):
@@ -620,6 +629,22 @@ def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
     sync_event = Mock()
     client.download("/a.bin", str(tmp_path / "a.bin"), sync_event=sync_event)
     assert sync_event.completed == len(data)
+
+
+def test_throttle_down_sleeps_when_limit_set(client, monkeypatch):
+    slept = []
+    monkeypatch.setattr("cumulus.client.time.sleep", lambda s: slept.append(s))
+    client.bandwidth_limit_down = 1000  # bytes/sec
+    client._throttle_down(2000)
+    assert slept == [2.0]
+
+
+def test_throttle_down_noop_when_no_limit(client, monkeypatch):
+    slept = []
+    monkeypatch.setattr("cumulus.client.time.sleep", lambda s: slept.append(s))
+    client.bandwidth_limit_down = 0
+    client._throttle_down(2000)
+    assert slept == []
 
 
 # ==== get_latest_cursor ===================================================
