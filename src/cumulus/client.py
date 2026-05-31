@@ -746,6 +746,7 @@ class GoogleDriveClient:
         self,
         local_path: str,
         remote_path: str,
+        *,
         write_mode: WriteMode = WriteMode.Add,
         update_rev: str | None = None,
         autorename: bool = False,
@@ -799,7 +800,11 @@ class GoogleDriveClient:
         return self._writes.remove_batch(entries, batch_size=batch_size)
 
     def move(
-        self, remote_path: str, new_path: str, autorename: bool = False
+        self,
+        remote_path: str,
+        new_path: str,
+        *,
+        autorename: bool = False,
     ) -> FileMetadata | FolderMetadata:
         """Moves / renames a file or folder.
 
@@ -810,7 +815,7 @@ class GoogleDriveClient:
         """
         return self._writes.move(remote_path, new_path, autorename=autorename)
 
-    def make_dir(self, remote_path: str, autorename: bool = False) -> FolderMetadata:
+    def make_dir(self, remote_path: str, *, autorename: bool = False) -> FolderMetadata:
         """Creates a folder.
 
         :param remote_path: Path of folder.
