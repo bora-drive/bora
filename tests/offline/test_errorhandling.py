@@ -107,3 +107,23 @@ def test_os_error_enospc_maps_to_insufficient_space():
     exc = OSError(errno.ENOSPC, "no space")
     result = os_to_cumulus_error(exc)
     assert isinstance(result, InsufficientSpaceError)
+
+
+def test_http_error_412_condition_not_met_maps_to_data_changed(make_http_error):
+    from cumulus.errorhandling import http_error_to_cumulus
+    from cumulus.exceptions import DataChangedError
+
+    exc = make_http_error(412, reason="conditionNotMet")
+    out = http_error_to_cumulus(412, "conditionNotMet", exc, remote_path="/foo.txt")
+    assert isinstance(out, DataChangedError)
+    assert "/foo.txt" in str(out) or out.remote_path == "/foo.txt"
+
+
+def test_http_error_412_other_reason_falls_through(make_http_error):
+    from cumulus.errorhandling import http_error_to_cumulus
+    from cumulus.exceptions import DataChangedError
+
+    # Any 412 should map to DataChangedError regardless of sub-reason.
+    exc = make_http_error(412, reason="")
+    out = http_error_to_cumulus(412, "", exc)
+    assert isinstance(out, DataChangedError)

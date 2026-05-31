@@ -20,6 +20,7 @@ from .exceptions import (
     BadInputError,
     ConflictError,
     CursorResetError,
+    DataChangedError,
     DataCorruptionError,
     AuthError,
     ConnectionError,
@@ -173,6 +174,14 @@ def http_error_to_cumulus(
         return NotFoundError(
             "Not found",
             "The requested item does not exist on Google Drive.",
+            remote_path=remote_path,
+            local_path=local_path,
+        )
+    if status == 412:
+        return DataChangedError(
+            "Item changed on Google Drive",
+            "The item changed on Drive since Cumulus last checked. "
+            "Cumulus will reconcile on the next sync pass.",
             remote_path=remote_path,
             local_path=local_path,
         )
