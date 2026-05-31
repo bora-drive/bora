@@ -219,6 +219,11 @@ class GoogleDriveClient:
         # so the daemon stops within ~1 ms instead of waiting them out.
         self._poll_event = threading.Event()
 
+        # Write-side helper (Stage 4). Local import avoids a module-level
+        # cycle between client.py and writes.py.
+        from .writes import _WriteHelper
+        self._writes = _WriteHelper(self)
+
     # ---- Request quota tracking -----------------------------------------------------
 
     def _count_request(self, n: int = 1) -> None:
@@ -648,10 +653,7 @@ class GoogleDriveClient:
         implemented as download-revision + re-upload, which needs the
         write client.
         """
-        raise NotImplementedError(
-            "restore() is not available until Stage 4 (write client) "
-            "lands upload support."
-        )
+        return self._writes.restore(remote_path, rev)
 
     # ---- Download / Upload -----------------------------------------------------------
 
@@ -759,8 +761,11 @@ class GoogleDriveClient:
         :param sync_event: If given, updated with upload progress.
         :returns: Metadata of uploaded item.
         """
-        _not_implemented()
-        return FileMetadata("", "", "", "", None, None, "", 0, None, False, False, None)  # type: ignore[call-arg]  # unreachable
+        return self._writes.upload(
+            local_path, remote_path,
+            write_mode=write_mode, update_rev=update_rev,
+            autorename=autorename, sync_event=sync_event,
+        )
 
     # ---- File / folder operations ----------------------------------------------------
 
@@ -773,8 +778,7 @@ class GoogleDriveClient:
         :param parent_rev: If given, only delete if rev matches (files only).
         :returns: Metadata of deleted item.
         """
-        _not_implemented()
-        return FolderMetadata("", "", "", "", False)  # type: ignore[call-arg]  # unreachable
+        return self._writes.remove(remote_path, parent_rev=parent_rev)
 
     def remove_batch(
         self, entries: Sequence[tuple[str, str | None]], batch_size: int = 100
@@ -792,8 +796,7 @@ class GoogleDriveClient:
         :param batch_size: Number of items per batch (max 100 for Google).
         :returns: List of metadata or errors.
         """
-        _not_implemented()
-        return []  # unreachable
+        return self._writes.remove_batch(entries, batch_size=batch_size)
 
     def move(
         self, remote_path: str, new_path: str, autorename: bool = False
@@ -805,8 +808,7 @@ class GoogleDriveClient:
         :param autorename: Whether to auto-rename on conflict.
         :returns: Metadata of moved item.
         """
-        _not_implemented()
-        return FolderMetadata("", "", "", "", False)  # type: ignore[call-arg]  # unreachable
+        return self._writes.move(remote_path, new_path, autorename=autorename)
 
     def make_dir(self, remote_path: str, autorename: bool = False) -> FolderMetadata:
         """Creates a folder.
@@ -815,8 +817,7 @@ class GoogleDriveClient:
         :param autorename: Whether to auto-rename on conflict.
         :returns: Metadata of created folder.
         """
-        _not_implemented()
-        return FolderMetadata("", "", "", "", False)  # type: ignore[call-arg]  # unreachable
+        return self._writes.make_dir(remote_path, autorename=autorename)
 
     def make_dir_batch(
         self, remote_paths: list[str]
@@ -829,8 +830,7 @@ class GoogleDriveClient:
         :param remote_paths: List of folder paths.
         :returns: List of metadata or errors.
         """
-        _not_implemented()
-        return []  # unreachable
+        return self._writes.make_dir_batch(remote_paths)
 
     def share_dir(
         self, remote_path: str, force_async: bool = False

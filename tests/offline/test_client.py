@@ -749,3 +749,110 @@ def test_list_remote_changes_flattens(client, cache):
     result = client.list_remote_changes("CURSOR")
     assert result.entries == []
     assert result.cursor == "NEXT"
+
+
+# ==== writes.py wiring + delegators =======================================
+
+def test_client_constructs_write_helper(client):
+    from cumulus.writes import _WriteHelper
+
+    assert isinstance(client._writes, _WriteHelper)
+    assert client._writes._client is client
+
+
+def test_upload_delegates_to_helper(client, monkeypatch):
+    captured = {}
+
+    def fake_upload(local_path, remote_path, *, write_mode, update_rev,
+                    autorename, sync_event):
+        captured.update(
+            local_path=local_path, remote_path=remote_path,
+            write_mode=write_mode, update_rev=update_rev,
+            autorename=autorename, sync_event=sync_event,
+        )
+        return "sentinel-result"
+
+    monkeypatch.setattr(client._writes, "upload", fake_upload)
+    from cumulus.core import WriteMode
+
+    out = client.upload(
+        "/local/a.txt", "/a.txt",
+        write_mode=WriteMode.Overwrite, update_rev="rev1",
+        autorename=True, sync_event=None,
+    )
+    assert out == "sentinel-result"
+    assert captured == {
+        "local_path": "/local/a.txt", "remote_path": "/a.txt",
+        "write_mode": WriteMode.Overwrite, "update_rev": "rev1",
+        "autorename": True, "sync_event": None,
+    }
+
+
+def test_remove_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "remove",
+        lambda remote_path, parent_rev=None: captured.update(
+            remote_path=remote_path, parent_rev=parent_rev,
+        ) or "sentinel",
+    )
+    assert client.remove("/a.txt", parent_rev="r1") == "sentinel"
+    assert captured == {"remote_path": "/a.txt", "parent_rev": "r1"}
+
+
+def test_move_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "move",
+        lambda remote_path, new_path, *, autorename=False: captured.update(
+            remote_path=remote_path, new_path=new_path, autorename=autorename,
+        ) or "sentinel",
+    )
+    assert client.move("/a.txt", "/b/a.txt", autorename=True) == "sentinel"
+    assert captured == {"remote_path": "/a.txt", "new_path": "/b/a.txt", "autorename": True}
+
+
+def test_make_dir_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "make_dir",
+        lambda remote_path, *, autorename=False: captured.update(
+            remote_path=remote_path, autorename=autorename,
+        ) or "sentinel",
+    )
+    assert client.make_dir("/foo", autorename=True) == "sentinel"
+    assert captured == {"remote_path": "/foo", "autorename": True}
+
+
+def test_make_dir_batch_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "make_dir_batch",
+        lambda remote_paths: captured.update(paths=list(remote_paths)) or ["s"],
+    )
+    assert client.make_dir_batch(["/a", "/b"]) == ["s"]
+    assert captured == {"paths": ["/a", "/b"]}
+
+
+def test_remove_batch_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "remove_batch",
+        lambda entries, batch_size=100: captured.update(
+            entries=list(entries), batch_size=batch_size,
+        ) or ["s"],
+    )
+    assert client.remove_batch([("/a", None), ("/b", "r")]) == ["s"]
+    assert captured == {"entries": [("/a", None), ("/b", "r")], "batch_size": 100}
+
+
+def test_restore_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "restore",
+        lambda remote_path, rev: captured.update(
+            remote_path=remote_path, rev=rev,
+        ) or "sentinel",
+    )
+    assert client.restore("/a.txt", "rev5") == "sentinel"
+    assert captured == {"remote_path": "/a.txt", "rev": "rev5"}
