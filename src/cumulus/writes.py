@@ -24,6 +24,7 @@ from .core import FileMetadata, FolderMetadata, WriteMode
 from .errorhandling import convert_api_errors
 from .exceptions import (
     BadInputError,
+    CancelledError,
     CumulusApiError,
     DataChangedError,
     DataCorruptionError,
@@ -195,7 +196,7 @@ class _WriteHelper:
 
         drive_name = self._decode_segment(raw_name)
 
-        # update_rev precondition (Update mode only).
+        # update_rev precondition (Update mode and Overwrite-when-existing).
         if mode == "update" and update_rev is not None:
             with convert_api_errors(remote_path=remote_path, local_path=local_path):
                 meta = client._retry_transient(
@@ -284,7 +285,7 @@ class _WriteHelper:
 
     @staticmethod
     def _md5_file(local_path: str) -> str:
-        h = hashlib.md5()
+        h = hashlib.md5(usedforsecurity=False)
         with open(local_path, "rb") as f:
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 h.update(chunk)
@@ -310,9 +311,42 @@ class _WriteHelper:
             content_hash=resp.get("md5Checksum", ""),
         )
 
-    def _upload_resumable(self, **kwargs) -> dict[str, Any]:
-        # Task 7 fills this in.
-        raise NotImplementedError("resumable upload pending Task 7")
+    def _upload_resumable(
+        self, *, mode: str, target_id: str | None, parent_id: str | None,
+        drive_name: str, media: Any, fields: str,
+        remote_path: str, local_path: str,
+        sync_event: "SyncEvent | None",
+    ) -> dict[str, Any]:
+        client = self._client
+
+        with convert_api_errors(remote_path=remote_path, local_path=local_path):
+            if mode == "create":
+                body = {"name": drive_name, "parents": [parent_id]}
+                request = (
+                    client._get_service().files().create(
+                        body=body, media_body=media, fields=fields,
+                    )
+                )
+            else:
+                request = (
+                    client._get_service().files().update(
+                        fileId=target_id, media_body=media, fields=fields,
+                    )
+                )
+
+            response: dict[str, Any] | None = None
+            while response is None:
+                if client._poll_event.is_set():
+                    raise CancelledError(
+                        "Upload cancelled",
+                        f"Upload of {local_path!r} was interrupted by shutdown.",
+                    )
+                status, response = client._retry_transient(request.next_chunk)
+                if sync_event is not None and status is not None:
+                    sync_event.completed = status.resumable_progress
+
+        client._count_request()
+        return response
 
     def remove(
         self, remote_path: str, parent_rev: str | None = None
