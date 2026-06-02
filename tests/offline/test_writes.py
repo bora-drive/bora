@@ -271,3 +271,113 @@ def test_hard_delete_primitive(client, cache):
 
     svc.files.return_value.delete.assert_called_once_with(fileId="F1")
     assert cache.path_to_id("/foo.txt") is None
+
+
+# ==== move ================================================================
+
+def test_move_renames_in_place(client, cache):
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "bar.txt", "mimeType": "application/pdf",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.move("/foo.txt", "/bar.txt")
+
+    update = svc.files.return_value.update
+    body = update.call_args.kwargs
+    assert body["fileId"] == "F1"
+    assert body["body"] == {"name": "bar.txt"}
+    # Same parent on both sides — no addParents / removeParents needed.
+    assert "addParents" not in body or body["addParents"] in (None, "", "ROOT")
+    assert "removeParents" not in body or body["removeParents"] in (None, "", "ROOT")
+    # Cache write-through
+    assert cache.path_to_id("/foo.txt") is None
+    assert cache.path_to_id("/bar.txt") == "F1"
+
+
+def test_move_changes_parent(client, cache):
+    cache.set("/src", "DSRC", parent_id="ROOT", name="src", is_folder=True)
+    cache.set("/dst", "DDST", parent_id="ROOT", name="dst", is_folder=True)
+    cache.set("/src/foo.txt", "F1", parent_id="DSRC", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "foo.txt", "mimeType": "application/pdf",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.move("/src/foo.txt", "/dst/foo.txt")
+
+    body = svc.files.return_value.update.call_args.kwargs
+    assert body["body"] == {"name": "foo.txt"}
+    assert body["addParents"] == "DDST"
+    assert body["removeParents"] == "DSRC"
+    assert cache.path_to_id("/src/foo.txt") is None
+    assert cache.path_to_id("/dst/foo.txt") == "F1"
+
+
+def test_move_combined_rename_and_reparent(client, cache):
+    cache.set("/src", "DSRC", parent_id="ROOT", name="src", is_folder=True)
+    cache.set("/dst", "DDST", parent_id="ROOT", name="dst", is_folder=True)
+    cache.set("/src/foo.txt", "F1", parent_id="DSRC", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "bar.txt", "mimeType": "application/pdf",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.move("/src/foo.txt", "/dst/bar.txt")
+
+    body = svc.files.return_value.update.call_args.kwargs
+    assert body["body"] == {"name": "bar.txt"}
+    assert body["addParents"] == "DDST"
+    assert body["removeParents"] == "DSRC"
+
+
+def test_move_missing_source_raises_not_found(client):
+    client._get_service = Mock(return_value=fake_service())
+    with pytest.raises(NotFoundError):
+        client._writes.move("/nope.txt", "/dst.txt")
+
+
+def test_move_missing_dest_parent_raises_not_found(client, cache):
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
+    client._get_service = Mock(return_value=fake_service())
+    with pytest.raises(NotFoundError):
+        client._writes.move("/foo.txt", "/no/such/dir/foo.txt")
+
+
+def test_move_autorename_on_dest_collision(client, cache):
+    cache.set("/src", "DSRC", parent_id="ROOT", name="src", is_folder=True)
+    cache.set("/dst", "DDST", parent_id="ROOT", name="dst", is_folder=True)
+    cache.set("/src/foo.txt", "F1", parent_id="DSRC", name="foo.txt", is_folder=False)
+    cache.set("/dst/foo.txt", "Fexisting", parent_id="DDST", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "foo (1).txt", "mimeType": "application/pdf",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.move("/src/foo.txt", "/dst/foo.txt", autorename=True)
+
+    body = svc.files.return_value.update.call_args.kwargs
+    # Drive gets the decoded name (no special chars to encode here, so equal).
+    assert body["body"] == {"name": "foo (1).txt"}
+    # Cache stores the encoded form. For "foo (1).txt", encoded form is
+    # "foo %281%29.txt" (parens encode).
+    assert cache.path_to_id("/dst/foo %281%29.txt") == "F1"
+
+
+def test_move_decodes_new_name_segment(client, cache):
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "a/b", "mimeType": "application/pdf",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.move("/foo.txt", "/a%2Fb")
+
+    body = svc.files.return_value.update.call_args.kwargs
+    assert body["body"]["name"] == "a/b"

@@ -252,7 +252,47 @@ class _WriteHelper:
     def move(
         self, remote_path: str, new_path: str, *, autorename: bool = False
     ) -> "FileMetadata | FolderMetadata":
-        raise NotImplementedError  # task 5
+        client = self._client
+        client._ensure_root_id()
+        cache = client._path_cache
+
+        file_id = self._resolve_file_id(remote_path)
+
+        old_parent_path, _ = self._split_parent_name(remote_path)
+        new_parent_path, raw_new_name = self._split_parent_name(new_path)
+
+        if autorename:
+            raw_new_name = self._autorename_unique(new_parent_path, raw_new_name)
+            new_path = new_parent_path + "/" + raw_new_name
+
+        new_name = self._decode_segment(raw_new_name)
+
+        old_parent_id = self._resolve_parent_id(
+            old_parent_path, for_path=remote_path
+        )
+        new_parent_id = self._resolve_parent_id(
+            new_parent_path, for_path=new_path
+        )
+
+        update_kwargs: dict[str, Any] = {
+            "fileId": file_id,
+            "body": {"name": new_name},
+            "fields": "id,name,mimeType,modifiedTime,size,headRevisionId,md5Checksum",
+        }
+        if old_parent_id != new_parent_id:
+            update_kwargs["addParents"] = new_parent_id
+            update_kwargs["removeParents"] = old_parent_id
+
+        with convert_api_errors(remote_path=remote_path):
+            resp = client._retry_transient(
+                lambda: client._get_service()
+                .files()
+                .update(**update_kwargs)
+                .execute()
+            )
+        client._count_request()
+        cache.move(remote_path, new_path)
+        return self._wrap_metadata(resp, new_path)
 
     def make_dir(
         self, remote_path: str, *, autorename: bool = False
