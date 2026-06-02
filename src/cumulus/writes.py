@@ -13,9 +13,12 @@ for the design and behaviour table.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from typing import TYPE_CHECKING, Any, Sequence
+
+from googleapiclient.http import MediaFileUpload
 
 from .core import FileMetadata, FolderMetadata, WriteMode
 from .errorhandling import convert_api_errors
@@ -23,6 +26,8 @@ from .exceptions import (
     BadInputError,
     CumulusApiError,
     DataChangedError,
+    DataCorruptionError,
+    FileConflictError,
     NotFoundError,
 )
 from .path_codec import decode_name, encode_name, fold_path
@@ -35,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 _AUTORENAME_LIMIT = 999
+_SIMPLE_UPLOAD_THRESHOLD = 5 * 1024 * 1024  # 5 MB
+_RESUMABLE_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
 
 
 class _WriteHelper:
@@ -140,7 +147,172 @@ class _WriteHelper:
         autorename: bool = False,
         sync_event: "SyncEvent | None" = None,
     ) -> FileMetadata:
-        raise NotImplementedError  # task 6 / task 7
+        client = self._client
+        client._ensure_root_id()
+
+        parent_path, raw_name = self._split_parent_name(remote_path)
+
+        cache = client._path_cache
+        existing_id = cache.path_to_id(remote_path)
+
+        # WriteMode resolution per spec §4.1.1.
+        if write_mode is WriteMode.Add:
+            if existing_id is not None and not autorename:
+                raise FileConflictError(
+                    "File already exists",
+                    f"An item already exists at {remote_path!r}.",
+                    remote_path=remote_path,
+                    local_path=local_path,
+                )
+            if existing_id is not None and autorename:
+                raw_name = self._autorename_unique(parent_path, raw_name)
+                remote_path = parent_path + "/" + raw_name
+            mode = "create"
+            target_id: str | None = None
+        elif write_mode is WriteMode.Update:
+            if existing_id is None:
+                raise NotFoundError(
+                    "Not found",
+                    f"No item at {remote_path!r} to update.",
+                    remote_path=remote_path,
+                )
+            mode = "update"
+            target_id = existing_id
+        elif write_mode is WriteMode.Overwrite:
+            if existing_id is None:
+                mode = "create"
+                target_id = None
+            else:
+                mode = "update"
+                target_id = existing_id
+        else:
+            raise BadInputError(
+                "Invalid WriteMode",
+                f"Unknown write_mode {write_mode!r}.",
+                remote_path=remote_path,
+                local_path=local_path,
+            )
+
+        drive_name = self._decode_segment(raw_name)
+
+        # update_rev precondition (Update mode only).
+        if mode == "update" and update_rev is not None:
+            with convert_api_errors(remote_path=remote_path, local_path=local_path):
+                meta = client._retry_transient(
+                    lambda: client._get_service()
+                    .files()
+                    .get(fileId=target_id, fields="headRevisionId")
+                    .execute()
+                )
+            client._count_request()
+            if meta.get("headRevisionId") != update_rev:
+                raise DataChangedError(
+                    "Item changed on Google Drive",
+                    f"{remote_path!r} changed on Drive since Cumulus last saw it.",
+                    remote_path=remote_path,
+                    local_path=local_path,
+                )
+
+        # Resolve parent for create.
+        if mode == "create":
+            parent_id = self._resolve_parent_id(
+                parent_path, for_path=remote_path
+            )
+        else:
+            parent_id = None  # update has no parent change in upload
+
+        # Compute local MD5 while reading.
+        local_md5 = self._md5_file(local_path)
+
+        size = os.path.getsize(local_path)
+        media = MediaFileUpload(
+            local_path,
+            resumable=(size > _SIMPLE_UPLOAD_THRESHOLD),
+            chunksize=_RESUMABLE_CHUNK_SIZE,
+        )
+
+        fields = ("id,name,mimeType,md5Checksum,modifiedTime,size,"
+                  "headRevisionId")
+
+        if size > _SIMPLE_UPLOAD_THRESHOLD:
+            # Resumable path — Task 7 fills this in.
+            resp = self._upload_resumable(
+                mode=mode, target_id=target_id, parent_id=parent_id,
+                drive_name=drive_name, media=media, fields=fields,
+                remote_path=remote_path, local_path=local_path,
+                sync_event=sync_event,
+            )
+        else:
+            # Simple path.
+            with convert_api_errors(remote_path=remote_path, local_path=local_path):
+                if mode == "create":
+                    body = {"name": drive_name, "parents": [parent_id]}
+                    request = client._get_service().files().create(
+                        body=body, media_body=media, fields=fields,
+                    )
+                else:
+                    request = client._get_service().files().update(
+                        fileId=target_id, media_body=media, fields=fields,
+                    )
+                resp = client._retry_transient(request.execute)
+            client._count_request()
+
+        # MD5 verify.
+        drive_md5 = resp.get("md5Checksum")
+        if drive_md5 is None:
+            logger.warning(
+                "Drive omitted md5Checksum for %s; skipping verify.",
+                remote_path,
+            )
+        elif drive_md5 != local_md5:
+            raise DataCorruptionError(
+                "Upload checksum mismatch",
+                f"Drive returned md5={drive_md5!r} but local md5={local_md5!r} "
+                f"for {remote_path!r}.",
+                remote_path=remote_path,
+                local_path=local_path,
+            )
+
+        if mode == "create":
+            cache.set(
+                remote_path, resp["id"],
+                parent_id=parent_id, name=drive_name,
+                is_folder=False,
+            )
+
+        return self._project_file_metadata(resp, remote_path)
+
+    @staticmethod
+    def _md5_file(local_path: str) -> str:
+        h = hashlib.md5()
+        with open(local_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def _project_file_metadata(
+        self, resp: dict[str, Any], remote_path: str
+    ) -> FileMetadata:
+        from .changes import parse_drive_time
+        return FileMetadata(
+            name=resp.get("name", ""),
+            path_lower=fold_path(remote_path),
+            path_display=remote_path,
+            id=resp["id"],
+            client_modified=parse_drive_time(resp.get("modifiedTime")),
+            server_modified=parse_drive_time(resp.get("modifiedTime")),
+            rev=resp.get("headRevisionId", ""),
+            size=int(resp.get("size", 0) or 0),
+            symlink_target=None,
+            shared=False,
+            modified_by=None,
+            is_downloadable=True,
+            content_hash=resp.get("md5Checksum", ""),
+        )
+
+    def _upload_resumable(self, **kwargs) -> dict[str, Any]:
+        # Task 7 fills this in.
+        raise NotImplementedError("resumable upload pending Task 7")
 
     def remove(
         self, remote_path: str, parent_rev: str | None = None
