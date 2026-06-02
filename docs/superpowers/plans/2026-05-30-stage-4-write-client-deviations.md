@@ -142,6 +142,42 @@ caller actually needs to tune the batch size.
   the case but the batch-path test is missing. Low-risk; the logic is a
   near-clone of the single-entry path.
 
+- **No bandwidth-throttle in resumable upload** — Spec §4.1 step 7 says
+  "report progress, honor the bandwidth throttle, honor `_poll_event`
+  between chunks." `_upload_resumable` honors `_poll_event` and
+  `sync_event` but never calls a `_throttle_up` (which would mirror
+  `client.download`'s `_throttle_down`). No `_throttle_up` exists on
+  the client today. Acceptable for Stage 4 (no upload throttle has
+  been specced project-wide); Stage 5 should add one when the sync
+  engine surfaces real bandwidth policy.
+
+- **`writes.move` does not check `path_cache.move()`'s return value** —
+  `PathIDCache.move(old, new)` returns False on a case-folded path
+  conflict at the destination (a different `file_id` already occupies
+  the destination's case-folded key). In that case, the Drive call has
+  already mutated the remote, but the local cache still maps the old
+  path → file_id. The sync engine would see a phantom "remote item
+  exists at old path" until the change feed corrects it. The Task 10
+  polish commit (`3206598`) adds a WARNING log when this
+  happens so the desync mode is observable.
+
+- **`move` lacks an `update_rev` parameter** — `upload(WriteMode.Update,
+  update_rev=...)` and `remove(parent_rev=...)` both let the caller
+  precondition the mutation on the current `headRevisionId`. `move`
+  does not. Stage 5's sync engine may want a "rename only if the file
+  is still revision X" guard; without it, the engine has to do a
+  separate `files.get` + check before calling `move`, which races.
+  Adding `update_rev` to `move` is a localized change but the API
+  surface is frozen for Stage 4. Defer to Stage 5 or 6.
+
+- **"Shouldn't happen" backfill in batch returns** — Both
+  `make_dir_batch` and `remove_batch` end with
+  `CumulusApiError("batch slot empty", "")` for any slot that somehow
+  wasn't filled. The error carries no `remote_path` and no useful
+  message — if it ever fires (e.g. `googleapiclient` drops a callback),
+  the caller sees a near-useless error. Low-probability defensive
+  code; harden in Stage 5 if it ever fires.
+
 ## Smoke test checklist
 
 Run against the real `cumulus@arko.net` Drive account, ideally on a
