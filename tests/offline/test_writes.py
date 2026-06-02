@@ -16,6 +16,7 @@ from cumulus.config import remove_configuration
 from cumulus.database.core import Database
 from cumulus.exceptions import (
     BadInputError,
+    CumulusApiError,
     DataChangedError,
     NotFoundError,
 )
@@ -798,3 +799,121 @@ def test_upload_resumable_shutdown_aborts(client, cache):
         with pytest.raises(CancelledError):
             client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
     _os.unlink(local)
+
+
+# ==== make_dir_batch ======================================================
+
+def _batch_request_double(responses_per_id: dict):
+    """Build a fake BatchHttpRequest that, on execute(), invokes each
+    registered callback with (request_id, response, exception)."""
+    class _Batch:
+        def __init__(self):
+            self._calls = []
+
+        def add(self, request, callback, request_id=None):
+            self._calls.append((request_id, callback))
+
+        def execute(self):
+            for rid, cb in self._calls:
+                resp_or_exc = responses_per_id.get(rid)
+                if isinstance(resp_or_exc, Exception):
+                    cb(rid, None, resp_or_exc)
+                else:
+                    cb(rid, resp_or_exc, None)
+
+    return _Batch()
+
+
+def test_make_dir_batch_creates_each_folder(client, cache):
+    from cumulus.writes import _FOLDER_MIME
+    svc = fake_service()
+    responses = {
+        "0": {"id": "DA", "name": "a", "mimeType": _FOLDER_MIME},
+        "1": {"id": "DB", "name": "b", "mimeType": _FOLDER_MIME},
+        "2": {"id": "DC", "name": "c", "mimeType": _FOLDER_MIME},
+    }
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double(responses)
+    )
+    client._get_service = Mock(return_value=svc)
+
+    result = client._writes.make_dir_batch(["/a", "/b", "/c"])
+
+    assert [r.id for r in result] == ["DA", "DB", "DC"]
+    assert cache.path_to_id("/a") == "DA"
+    assert cache.path_to_id("/b") == "DB"
+    assert cache.path_to_id("/c") == "DC"
+
+
+def test_make_dir_batch_chunks_at_100(client, cache):
+    from cumulus.writes import _FOLDER_MIME
+    svc = fake_service()
+    batches = []
+
+    def new_batch(*a, **kw):
+        # All 101 indices populated; only those in the chunk are invoked
+        # via _Batch._calls anyway.
+        responses = {str(i): {"id": f"D{i}", "name": str(i),
+                              "mimeType": _FOLDER_MIME}
+                     for i in range(101)}
+        b = _batch_request_double(responses)
+        batches.append(b)
+        return b
+
+    svc.new_batch_http_request = Mock(side_effect=new_batch)
+    client._get_service = Mock(return_value=svc)
+
+    paths = [f"/d{i}" for i in range(101)]
+    result = client._writes.make_dir_batch(paths)
+
+    # Two batch round-trips: sizes 100 + 1.
+    assert len(batches) == 2
+    assert len(batches[0]._calls) == 100
+    assert len(batches[1]._calls) == 1
+    assert len(result) == 101
+
+
+def test_make_dir_batch_handles_mixed_success_and_error(
+    client, cache, make_http_error,
+):
+    from cumulus.writes import _FOLDER_MIME
+    svc = fake_service()
+    err = make_http_error(404, reason="notFound")
+    responses = {
+        "0": {"id": "DA", "name": "a", "mimeType": _FOLDER_MIME},
+        "1": err,
+        "2": {"id": "DC", "name": "c", "mimeType": _FOLDER_MIME},
+    }
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double(responses)
+    )
+    client._get_service = Mock(return_value=svc)
+
+    result = client._writes.make_dir_batch(["/a", "/b", "/c"])
+
+    assert result[0].id == "DA"
+    assert isinstance(result[1], CumulusApiError)
+    assert result[2].id == "DC"
+    # Only successful entries write through to the cache.
+    assert cache.path_to_id("/a") == "DA"
+    assert cache.path_to_id("/b") is None
+    assert cache.path_to_id("/c") == "DC"
+
+
+def test_make_dir_batch_counts_subrequests(client, cache):
+    from cumulus.writes import _FOLDER_MIME
+    svc = fake_service()
+    responses = {
+        "0": {"id": "DA", "name": "a", "mimeType": _FOLDER_MIME},
+        "1": {"id": "DB", "name": "b", "mimeType": _FOLDER_MIME},
+    }
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double(responses)
+    )
+    client._get_service = Mock(return_value=svc)
+    client._count_request = Mock()
+
+    client._writes.make_dir_batch(["/a", "/b"])
+
+    # 2 sub-requests in 1 batch -> _count_request(2).
+    client._count_request.assert_called_once_with(2)
