@@ -11,8 +11,10 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from cumulus.changes import parse_drive_time
 from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
+from cumulus.core import FileMetadata, WriteMode
 from cumulus.database.core import Database
 from cumulus.exceptions import (
     BadInputError,
@@ -1057,3 +1059,152 @@ def test_remove_batch_counts_subrequests(client, cache):
     # _count_request may also have been called during precondition gets,
     # but for entries without parent_rev, there are no pre-batch GETs.
     client._count_request.assert_called_once_with(2)
+
+
+# ==== restore =============================================================
+
+def test_restore_missing_path_raises_not_found(client):
+    client._get_service = Mock(return_value=fake_service())
+    with pytest.raises(NotFoundError):
+        client._writes.restore("/nope.txt", "rev1")
+
+
+def test_restore_native_doc_raises_unsupported(client, cache):
+    cache.set("/notes.gdoc", "FN",
+              parent_id="ROOT", name="notes.gdoc", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "mimeType": "application/vnd.google-apps.document",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.exceptions import UnsupportedFileError
+
+    with pytest.raises(UnsupportedFileError):
+        client._writes.restore("/notes.gdoc", "rev1")
+    # No revision download attempted.
+    svc.revisions.return_value.get_media.assert_not_called()
+
+
+def test_restore_downloads_revision_and_reuploads(client, cache, monkeypatch):
+    cache.set("/foo.txt", "F1",
+              parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "mimeType": "text/plain",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    captured_uploads = []
+
+    def fake_upload(local_path, remote_path, *, write_mode, **kwargs):
+        with open(local_path, "rb") as f:
+            captured_uploads.append((remote_path, write_mode, f.read()))
+        return FileMetadata(
+            name="foo.txt",
+            path_lower=remote_path.lower(),
+            path_display=remote_path,
+            id="F1",
+            client_modified=parse_drive_time(None),
+            server_modified=parse_drive_time(None),
+            rev="rev-new",
+            size=3, symlink_target=None, shared=False,
+            modified_by=None, is_downloadable=True,
+            content_hash="abc",
+        )
+
+    monkeypatch.setattr(client._writes, "upload", fake_upload)
+
+    # Patch the helper's revision-to-tempfile downloader to write a known payload.
+    def fake_download(file_id, rev):
+        import tempfile
+        fd, p = tempfile.mkstemp()
+        with _os.fdopen(fd, "wb") as f:
+            f.write(b"OLD")
+        return p
+
+    monkeypatch.setattr(
+        client._writes, "_download_revision_to_tempfile", fake_download,
+    )
+
+    result = client._writes.restore("/foo.txt", "rev-old")
+
+    assert len(captured_uploads) == 1
+    assert captured_uploads[0][0] == "/foo.txt"
+    assert captured_uploads[0][1] is WriteMode.Update
+    assert captured_uploads[0][2] == b"OLD"
+    assert result.id == "F1"
+
+
+def test_restore_cleans_up_tempfile_on_success(client, cache, monkeypatch):
+    cache.set("/foo.txt", "F1",
+              parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "mimeType": "text/plain",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    tmp_paths: list[str] = []
+
+    def fake_download(file_id, rev):
+        import tempfile
+        fd, p = tempfile.mkstemp()
+        _os.close(fd)
+        tmp_paths.append(p)
+        return p
+
+    monkeypatch.setattr(
+        client._writes, "_download_revision_to_tempfile", fake_download
+    )
+    monkeypatch.setattr(
+        client._writes, "upload",
+        lambda *a, **kw: FileMetadata(
+            name="foo.txt", path_lower="/foo.txt", path_display="/foo.txt",
+            id="F1",
+            client_modified=parse_drive_time(None),
+            server_modified=parse_drive_time(None),
+            rev="x",
+            size=0, symlink_target=None, shared=False, modified_by=None,
+            is_downloadable=True, content_hash="",
+        ),
+    )
+
+    client._writes.restore("/foo.txt", "rev-old")
+
+    assert tmp_paths
+    for p in tmp_paths:
+        assert not _os.path.exists(p), f"tempfile {p} was not cleaned up"
+
+
+def test_restore_cleans_up_tempfile_on_upload_exception(client, cache, monkeypatch):
+    cache.set("/foo.txt", "F1",
+              parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "mimeType": "text/plain",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    tmp_paths: list[str] = []
+
+    def fake_download(file_id, rev):
+        import tempfile
+        fd, p = tempfile.mkstemp()
+        _os.close(fd)
+        tmp_paths.append(p)
+        return p
+
+    def boom(*a, **kw):
+        raise RuntimeError("upload failed")
+
+    monkeypatch.setattr(
+        client._writes, "_download_revision_to_tempfile", fake_download
+    )
+    monkeypatch.setattr(client._writes, "upload", boom)
+
+    with pytest.raises(RuntimeError):
+        client._writes.restore("/foo.txt", "rev-old")
+
+    assert tmp_paths
+    for p in tmp_paths:
+        assert not _os.path.exists(p)

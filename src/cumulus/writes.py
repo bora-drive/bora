@@ -19,7 +19,7 @@ import os
 from typing import TYPE_CHECKING, Any, Sequence
 
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from .core import FileMetadata, FolderMetadata, WriteMode
 from .errorhandling import convert_api_errors, extract_http_reason, http_error_to_cumulus
@@ -31,7 +31,9 @@ from .exceptions import (
     DataCorruptionError,
     FileConflictError,
     NotFoundError,
+    UnsupportedFileError,
 )
+from .native_docs import is_google_native
 from .path_codec import decode_name, encode_name, fold_path
 
 if TYPE_CHECKING:  # avoid runtime cycle
@@ -730,4 +732,60 @@ class _WriteHelper:
         )
 
     def restore(self, remote_path: str, rev: str) -> FileMetadata:
-        raise NotImplementedError  # task 10
+        client = self._client
+        client._ensure_root_id()
+        file_id = self._resolve_file_id(remote_path)
+
+        with convert_api_errors(remote_path=remote_path):
+            meta = client._retry_transient(
+                lambda: client._get_service()
+                .files()
+                .get(fileId=file_id, fields="mimeType")
+                .execute()
+            )
+        client._count_request()
+        if is_google_native(meta.get("mimeType", "")):
+            raise UnsupportedFileError(
+                "Cannot restore native Google Doc",
+                "restore() is not supported for Google Docs / Sheets / "
+                "Slides — their revisions cannot be round-tripped as bytes.",
+                remote_path=remote_path,
+            )
+
+        tmp_path = self._download_revision_to_tempfile(file_id, rev)
+        try:
+            return self.upload(
+                tmp_path, remote_path, write_mode=WriteMode.Update,
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def _download_revision_to_tempfile(self, file_id: str, rev: str) -> str:
+        import tempfile as _t
+        client = self._client
+        fd, path = _t.mkstemp(prefix="cumulus-restore-")
+        os.close(fd)
+        with convert_api_errors():
+            request = client._get_service().revisions().get_media(
+                fileId=file_id, revisionId=rev,
+            )
+            with open(path, "wb") as fh:
+                downloader = MediaIoBaseDownload(
+                    fh, request, chunksize=_RESUMABLE_CHUNK_SIZE,
+                )
+                done = False
+                while not done:
+                    if client._poll_event.is_set():
+                        raise CancelledError(
+                            "Restore cancelled",
+                            f"Restore of {file_id!r}@{rev!r} interrupted "
+                            "by shutdown.",
+                        )
+                    _status, done = client._retry_transient(
+                        downloader.next_chunk
+                    )
+        client._count_request()
+        return path
