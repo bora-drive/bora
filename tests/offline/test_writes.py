@@ -636,3 +636,165 @@ def test_upload_decodes_name_segment(client, cache):
     # Drive name is decoded.
     assert body["name"] == "a/b"
     _os.unlink(local)
+
+
+# ==== upload — resumable (>5MB) ===========================================
+
+def _big_tempfile(size_bytes: int) -> str:
+    """Sparse-ish big file for size-threshold tests. Content is the byte 'a'."""
+    fd, path = tempfile.mkstemp()
+    with _os.fdopen(fd, "wb") as f:
+        f.write(b"a" * size_bytes)
+    return path
+
+
+def test_upload_simple_at_threshold(client, cache):
+    # 5 MB exactly -> simple path (threshold is >, not >=).
+    size = 5 * 1024 * 1024
+    local = _big_tempfile(size)
+    md5 = hashlib.md5(b"a" * size).hexdigest()
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "Fa", "name": "big.bin",
+        "mimeType": "application/octet-stream",
+        "md5Checksum": md5,
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(size), "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    # Patch MediaFileUpload to capture the resumable flag.
+    with patch("cumulus.writes.MediaFileUpload") as mfu:
+        mfu.return_value = Mock()
+        client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
+    assert mfu.call_args.kwargs.get("resumable") is False
+    _os.unlink(local)
+
+
+def test_upload_resumable_above_threshold(client, cache):
+    # 5 MB + 1 byte -> resumable path.
+    size = 5 * 1024 * 1024 + 1
+    local = _big_tempfile(size)
+    md5 = hashlib.md5(b"a" * size).hexdigest()
+
+    # next_chunk returns (status, None) twice then (status, response).
+    progress_status = Mock()
+    progress_status.resumable_progress = 0
+    progress_status.total_size = size
+
+    final_resp = {
+        "id": "Fa", "name": "big.bin",
+        "mimeType": "application/octet-stream",
+        "md5Checksum": md5,
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(size), "headRevisionId": "rev1",
+    }
+
+    request = Mock()
+    request.next_chunk = Mock(side_effect=[
+        (progress_status, None),
+        (progress_status, None),
+        (progress_status, final_resp),
+    ])
+
+    svc = fake_service()
+    svc.files.return_value.create.return_value = request
+    client._get_service = Mock(return_value=svc)
+
+    from cumulus.core import WriteMode
+    with patch("cumulus.writes.MediaFileUpload") as mfu:
+        mfu.return_value = Mock()
+        client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
+
+    assert mfu.call_args.kwargs["resumable"] is True
+    assert mfu.call_args.kwargs["chunksize"] == 8 * 1024 * 1024
+    assert request.next_chunk.call_count == 3
+    assert cache.path_to_id("/big.bin") == "Fa"
+    _os.unlink(local)
+
+
+def test_upload_resumable_storage_quota_exceeded(client, cache, make_http_error):
+    size = 5 * 1024 * 1024 + 1
+    local = _big_tempfile(size)
+
+    request = Mock()
+    request.next_chunk = Mock(side_effect=make_http_error(
+        403, reason="storageQuotaExceeded",
+    ))
+    svc = fake_service()
+    svc.files.return_value.create.return_value = request
+    client._get_service = Mock(return_value=svc)
+    # Disable retry sleep.
+    client._retry_transient = lambda fn: fn()
+
+    from cumulus.core import WriteMode
+    from cumulus.exceptions import InsufficientSpaceError
+
+    with patch("cumulus.writes.MediaFileUpload") as mfu:
+        mfu.return_value = Mock()
+        with pytest.raises(InsufficientSpaceError):
+            client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
+
+    # Cache must NOT have been mutated.
+    assert cache.path_to_id("/big.bin") is None
+    _os.unlink(local)
+
+
+def test_upload_resumable_progress_reported(client, cache):
+    size = 5 * 1024 * 1024 + 1
+    local = _big_tempfile(size)
+    md5 = hashlib.md5(b"a" * size).hexdigest()
+    final_resp = {
+        "id": "Fa", "name": "big.bin",
+        "mimeType": "application/octet-stream",
+        "md5Checksum": md5,
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(size), "headRevisionId": "rev1",
+    }
+    s1 = Mock(); s1.resumable_progress = 4 * 1024 * 1024
+    s2 = Mock(); s2.resumable_progress = size
+    request = Mock()
+    request.next_chunk = Mock(side_effect=[
+        (s1, None), (s2, final_resp),
+    ])
+    svc = fake_service()
+    svc.files.return_value.create.return_value = request
+    client._get_service = Mock(return_value=svc)
+
+    sync_event = Mock()
+    from cumulus.core import WriteMode
+    with patch("cumulus.writes.MediaFileUpload") as mfu:
+        mfu.return_value = Mock()
+        client._writes.upload(
+            local, "/big.bin",
+            write_mode=WriteMode.Add, sync_event=sync_event,
+        )
+
+    # Progress is reported via sync_event.completed = status.resumable_progress,
+    # matching Stage 3 download's pattern (client.py line 714).
+    assert sync_event.completed == size
+    _os.unlink(local)
+
+
+def test_upload_resumable_shutdown_aborts(client, cache):
+    size = 5 * 1024 * 1024 + 1
+    local = _big_tempfile(size)
+    s = Mock(); s.resumable_progress = 1 * 1024 * 1024
+    request = Mock()
+    request.next_chunk = Mock(return_value=(s, None))
+    svc = fake_service()
+    svc.files.return_value.create.return_value = request
+    client._get_service = Mock(return_value=svc)
+    client._poll_event = Mock()
+    # First .is_set() check: False (proceed). Second: True (abort).
+    client._poll_event.is_set = Mock(side_effect=[False, True])
+
+    from cumulus.core import WriteMode
+    from cumulus.exceptions import CancelledError
+
+    with patch("cumulus.writes.MediaFileUpload") as mfu:
+        mfu.return_value = Mock()
+        with pytest.raises(CancelledError):
+            client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
+    _os.unlink(local)
