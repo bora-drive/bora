@@ -18,10 +18,11 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any, Sequence
 
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from .core import FileMetadata, FolderMetadata, WriteMode
-from .errorhandling import convert_api_errors
+from .errorhandling import convert_api_errors, extract_http_reason, http_error_to_cumulus
 from .exceptions import (
     BadInputError,
     CancelledError,
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 _AUTORENAME_LIMIT = 999
+_BATCH_LIMIT = 100
 _SIMPLE_UPLOAD_THRESHOLD = 5 * 1024 * 1024  # 5 MB
 _RESUMABLE_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
 
@@ -543,7 +545,104 @@ class _WriteHelper:
     def make_dir_batch(
         self, remote_paths: list[str]
     ) -> "list[FolderMetadata | CumulusApiError]":
-        raise NotImplementedError  # task 8
+        client = self._client
+        client._ensure_root_id()
+        results: list[FolderMetadata | CumulusApiError | None] = [None] * len(
+            remote_paths
+        )
+
+        for chunk_start in range(0, len(remote_paths), _BATCH_LIMIT):
+            chunk = list(enumerate(
+                remote_paths[chunk_start:chunk_start + _BATCH_LIMIT],
+                start=chunk_start,
+            ))
+            batch = client._get_service().new_batch_http_request()
+            scheduled_count = 0
+            for idx, remote_path in chunk:
+                try:
+                    parent_path, raw_name = self._split_parent_name(
+                        remote_path
+                    )
+                    drive_name = self._decode_segment(raw_name)
+                    parent_id = self._resolve_parent_id(
+                        parent_path, for_path=remote_path
+                    )
+                except CumulusApiError as e:
+                    results[idx] = e
+                    continue
+                body = {
+                    "name": drive_name,
+                    "mimeType": _FOLDER_MIME,
+                    "parents": [parent_id],
+                }
+                request = (
+                    client._get_service().files().create(
+                        body=body, fields="id,name,mimeType",
+                    )
+                )
+                batch.add(
+                    request,
+                    callback=self._make_dir_batch_callback(
+                        results, idx, remote_path, raw_name, parent_id,
+                    ),
+                    request_id=str(idx),
+                )
+                scheduled_count += 1
+
+            if scheduled_count > 0:
+                with convert_api_errors():
+                    client._retry_transient(batch.execute)
+                client._count_request(scheduled_count)
+
+        # Backfill any None slots (shouldn't happen, but defensive)
+        return [r if r is not None else CumulusApiError(
+            "batch slot empty", "")
+                for r in results]
+
+    def _make_dir_batch_callback(
+        self, results: list, idx: int, remote_path: str,
+        raw_name: str, parent_id: str,
+    ):
+        """Build a per-sub-request callback for make_dir_batch."""
+        client = self._client
+
+        def cb(request_id, response, exception):
+            if exception is not None:
+                results[idx] = self._batch_exception_to_cumulus(
+                    exception, remote_path
+                )
+                return
+            client._path_cache.set(
+                remote_path, response["id"],
+                parent_id=parent_id,
+                name=self._decode_segment(raw_name),
+                is_folder=True,
+            )
+            results[idx] = FolderMetadata(
+                name=response.get("name", ""),
+                path_lower=fold_path(remote_path),
+                path_display=remote_path,
+                id=response["id"],
+                shared=False,
+            )
+        return cb
+
+    @staticmethod
+    def _batch_exception_to_cumulus(
+        exception: Exception, remote_path: str
+    ) -> CumulusApiError:
+        if isinstance(exception, HttpError):
+            return http_error_to_cumulus(
+                exception.resp.status,
+                extract_http_reason(exception),
+                exception,
+                remote_path=remote_path,
+            )
+        return CumulusApiError(
+            "Batch sub-request failed",
+            str(exception),
+            remote_path=remote_path,
+        )
 
     def restore(self, remote_path: str, rev: str) -> FileMetadata:
         raise NotImplementedError  # task 10
