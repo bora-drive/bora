@@ -186,3 +186,88 @@ def test_make_dir_counts_request(client, cache):
     client._writes.make_dir("/foo")
 
     client._count_request.assert_called_once()
+
+
+# ==== remove ==============================================================
+
+def test_remove_trashes_by_default(client, cache):
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "foo.txt",
+        "mimeType": "application/pdf", "trashed": True,
+    }
+    client._get_service = Mock(return_value=svc)
+
+    result = client._writes.remove("/foo.txt")
+
+    update = svc.files.return_value.update
+    update.assert_called_once()
+    assert update.call_args.kwargs["fileId"] == "F1"
+    assert update.call_args.kwargs["body"] == {"trashed": True}
+    # files.delete must NOT have been called.
+    svc.files.return_value.delete.assert_not_called()
+    # Cache write-through
+    assert cache.path_to_id("/foo.txt") is None
+    assert result.id == "F1"
+
+
+def test_remove_missing_path_raises_not_found(client):
+    client._get_service = Mock(return_value=fake_service())
+    with pytest.raises(NotFoundError):
+        client._writes.remove("/nope.txt")
+
+
+def test_remove_parent_rev_match_succeeds(client, cache):
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "headRevisionId": "REV-X", "mimeType": "application/pdf",
+    }
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "foo.txt",
+        "mimeType": "application/pdf", "trashed": True,
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.remove("/foo.txt", parent_rev="REV-X")
+
+    svc.files.return_value.update.assert_called_once()
+
+
+def test_remove_parent_rev_mismatch_raises_data_changed(client, cache):
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "headRevisionId": "REV-NEW", "mimeType": "application/pdf",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    with pytest.raises(DataChangedError):
+        client._writes.remove("/foo.txt", parent_rev="REV-OLD")
+
+    svc.files.return_value.update.assert_not_called()
+
+
+def test_remove_parent_rev_on_folder_raises_bad_input(client, cache):
+    cache.set("/foo", "D1", parent_id="ROOT", name="foo", is_folder=True)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "mimeType": "application/vnd.google-apps.folder",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    with pytest.raises(BadInputError):
+        client._writes.remove("/foo", parent_rev="anything")
+
+
+def test_hard_delete_primitive(client, cache):
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.delete.return_value.execute.return_value = None
+    client._get_service = Mock(return_value=svc)
+
+    client._writes._hard_delete("/foo.txt")
+
+    svc.files.return_value.delete.assert_called_once_with(fileId="F1")
+    assert cache.path_to_id("/foo.txt") is None
