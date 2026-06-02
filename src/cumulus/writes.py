@@ -19,7 +19,12 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from .core import FileMetadata, FolderMetadata, WriteMode
 from .errorhandling import convert_api_errors
-from .exceptions import BadInputError, CumulusApiError, NotFoundError
+from .exceptions import (
+    BadInputError,
+    CumulusApiError,
+    DataChangedError,
+    NotFoundError,
+)
 from .path_codec import decode_name, encode_name, fold_path
 
 if TYPE_CHECKING:  # avoid runtime cycle
@@ -124,7 +129,111 @@ class _WriteHelper:
     def remove(
         self, remote_path: str, parent_rev: str | None = None
     ) -> "FileMetadata | FolderMetadata":
-        raise NotImplementedError  # task 4
+        client = self._client
+        client._ensure_root_id()
+        file_id = client._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No item at {remote_path!r} is known to Cumulus.",
+                remote_path=remote_path,
+            )
+
+        if parent_rev is not None:
+            with convert_api_errors(remote_path=remote_path):
+                meta = client._retry_transient(
+                    lambda: client._get_service()
+                    .files()
+                    .get(fileId=file_id,
+                         fields="headRevisionId,mimeType")
+                    .execute()
+                )
+            client._count_request()
+            if meta.get("mimeType") == _FOLDER_MIME:
+                raise BadInputError(
+                    "Invalid operation",
+                    "parent_rev cannot be specified for a folder.",
+                    remote_path=remote_path,
+                )
+            if meta.get("headRevisionId") != parent_rev:
+                raise DataChangedError(
+                    "Item changed on Google Drive",
+                    f"{remote_path!r} changed on Drive since Cumulus last "
+                    "saw it.",
+                    remote_path=remote_path,
+                )
+
+        with convert_api_errors(remote_path=remote_path):
+            resp = client._retry_transient(
+                lambda: client._get_service()
+                .files()
+                .update(
+                    fileId=file_id,
+                    body={"trashed": True},
+                    fields="id,name,mimeType,trashed",
+                )
+                .execute()
+            )
+        client._count_request()
+        client._path_cache.remove(remote_path)
+        return self._wrap_metadata(resp, remote_path)
+
+    def _hard_delete(self, remote_path: str) -> None:
+        """Irreversibly delete via ``files.delete``. Internal primitive
+        for a future Stage 6 CLI flag — not exposed on the public surface
+        in Stage 4."""
+        client = self._client
+        client._ensure_root_id()
+        file_id = client._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No item at {remote_path!r} is known to Cumulus.",
+                remote_path=remote_path,
+            )
+        with convert_api_errors(remote_path=remote_path):
+            client._retry_transient(
+                lambda: client._get_service()
+                .files()
+                .delete(fileId=file_id)
+                .execute()
+            )
+        client._count_request()
+        client._path_cache.remove(remote_path)
+
+    def _wrap_metadata(
+        self, resp: dict[str, Any], remote_path: str
+    ) -> "FileMetadata | FolderMetadata":
+        """Wrap a Drive ``files.update`` / ``files.create`` response in
+        FileMetadata or FolderMetadata. Minimal projection used by remove
+        and (later) move; upload uses its own richer projection."""
+        if resp.get("mimeType") == _FOLDER_MIME:
+            return FolderMetadata(
+                name=resp.get("name", ""),
+                path_lower=fold_path(remote_path),
+                path_display=remote_path,
+                id=resp["id"],
+                shared=False,
+            )
+        # FileMetadata fields — non-Optional datetimes use epoch as sentinel
+        # for deletion responses where these fields are unavailable.
+        from datetime import datetime, timezone
+        epoch = datetime.fromtimestamp(0, timezone.utc)
+        return FileMetadata(
+            name=resp.get("name", ""),
+            path_lower=fold_path(remote_path),
+            path_display=remote_path,
+            id=resp["id"],
+            client_modified=epoch,
+            server_modified=epoch,
+            rev="",
+            size=0,
+            symlink_target=None,
+            shared=False,
+            modified_by=None,
+            is_downloadable=True,
+            content_hash="",
+        )
 
     def remove_batch(
         self,
