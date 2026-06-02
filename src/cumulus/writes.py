@@ -583,7 +583,7 @@ class _WriteHelper:
                 batch.add(
                     request,
                     callback=self._make_dir_batch_callback(
-                        results, idx, remote_path, raw_name, parent_id,
+                        results, idx, remote_path, drive_name, parent_id,
                     ),
                     request_id=str(idx),
                 )
@@ -601,7 +601,7 @@ class _WriteHelper:
 
     def _make_dir_batch_callback(
         self, results: list, idx: int, remote_path: str,
-        raw_name: str, parent_id: str,
+        drive_name: str, parent_id: str,
     ):
         """Build a per-sub-request callback for make_dir_batch."""
         client = self._client
@@ -615,7 +615,7 @@ class _WriteHelper:
             client._path_cache.set(
                 remote_path, response["id"],
                 parent_id=parent_id,
-                name=self._decode_segment(raw_name),
+                name=drive_name,
                 is_folder=True,
             )
             results[idx] = FolderMetadata(
