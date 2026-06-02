@@ -942,3 +942,118 @@ def test_make_dir_batch_counts_subrequests(client, cache):
 
     # 2 sub-requests in 1 batch -> _count_request(2).
     client._count_request.assert_called_once_with(2)
+
+
+# ==== remove_batch ========================================================
+
+def test_remove_batch_trashes_each_entry(client, cache):
+    cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
+    cache.set("/b.txt", "FB", parent_id="ROOT", name="b.txt", is_folder=False)
+    svc = fake_service()
+    responses = {
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
+              "trashed": True},
+        "1": {"id": "FB", "name": "b.txt", "mimeType": "text/plain",
+              "trashed": True},
+    }
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double(responses)
+    )
+    client._get_service = Mock(return_value=svc)
+
+    # Capture each update call's kwargs so we can assert body shape.
+    update_kwargs_seen = []
+    def capture(**kw):
+        update_kwargs_seen.append(kw)
+        return Mock()
+    svc.files.return_value.update.side_effect = capture
+
+    result = client._writes.remove_batch([("/a.txt", None), ("/b.txt", None)])
+
+    assert all(kw["body"] == {"trashed": True} for kw in update_kwargs_seen)
+    assert {kw["fileId"] for kw in update_kwargs_seen} == {"FA", "FB"}
+    assert cache.path_to_id("/a.txt") is None
+    assert cache.path_to_id("/b.txt") is None
+    assert len(result) == 2
+
+
+def test_remove_batch_missing_entry_returns_error(client, cache):
+    cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
+    svc = fake_service()
+    responses = {
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
+              "trashed": True},
+    }
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double(responses)
+    )
+    client._get_service = Mock(return_value=svc)
+
+    result = client._writes.remove_batch([("/a.txt", None), ("/nope.txt", None)])
+
+    assert result[0].id == "FA"
+    assert isinstance(result[1], NotFoundError)
+
+
+def test_remove_batch_with_rev_runs_precondition(client, cache):
+    cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "headRevisionId": "rev-good",
+        "mimeType": "text/plain",
+    }
+    responses = {
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
+              "trashed": True},
+    }
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double(responses)
+    )
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.remove_batch([("/a.txt", "rev-good")])
+
+    svc.files.return_value.get.assert_called_once()
+
+
+def test_remove_batch_rev_mismatch_returns_data_changed(client, cache):
+    cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "headRevisionId": "rev-new", "mimeType": "text/plain",
+    }
+    # No batch response needed — precheck fails before batch executes.
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double({})
+    )
+    client._get_service = Mock(return_value=svc)
+
+    result = client._writes.remove_batch([("/a.txt", "rev-old")])
+
+    assert isinstance(result[0], DataChangedError)
+    # Cache untouched.
+    assert cache.path_to_id("/a.txt") == "FA"
+
+
+def test_remove_batch_counts_subrequests(client, cache):
+    cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
+    cache.set("/b.txt", "FB", parent_id="ROOT", name="b.txt", is_folder=False)
+    svc = fake_service()
+    responses = {
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
+              "trashed": True},
+        "1": {"id": "FB", "name": "b.txt", "mimeType": "text/plain",
+              "trashed": True},
+    }
+    svc.new_batch_http_request = Mock(
+        return_value=_batch_request_double(responses)
+    )
+    client._get_service = Mock(return_value=svc)
+    client._count_request = Mock()
+
+    client._writes.remove_batch([("/a.txt", None), ("/b.txt", None)])
+
+    # 2 sub-requests in 1 batch -> _count_request(2).
+    # _count_request may also have been called during precondition gets,
+    # but for entries without parent_rev, there are no pre-batch GETs.
+    client._count_request.assert_called_once_with(2)

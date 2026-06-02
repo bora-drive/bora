@@ -454,8 +454,93 @@ class _WriteHelper:
         self,
         entries: Sequence[tuple[str, str | None]],
         batch_size: int = 100,
-    ) -> "list[FileMetadata | FolderMetadata | CumulusApiError]":
-        raise NotImplementedError  # task 9
+    ) -> list["FileMetadata | FolderMetadata | CumulusApiError"]:
+        client = self._client
+        client._ensure_root_id()
+        cache = client._path_cache
+        results: list[FileMetadata | FolderMetadata | CumulusApiError | None] = [
+            None
+        ] * len(entries)
+
+        # Resolve file IDs + precondition checks before chunking the batch.
+        # Failed prechecks land in the result slot and skip the batch.
+        resolved: list[tuple[int, str, str] | None] = [None] * len(entries)
+        for idx, (remote_path, parent_rev) in enumerate(entries):
+            file_id = cache.path_to_id(remote_path)
+            if file_id is None:
+                results[idx] = NotFoundError(
+                    "Not found",
+                    f"No item at {remote_path!r} is known to Cumulus.",
+                    remote_path=remote_path,
+                )
+                continue
+            if parent_rev is not None:
+                with convert_api_errors(remote_path=remote_path):
+                    meta = client._retry_transient(
+                        lambda fid=file_id: client._get_service()
+                        .files()
+                        .get(fileId=fid, fields="headRevisionId,mimeType")
+                        .execute()
+                    )
+                client._count_request()
+                if meta.get("mimeType") == _FOLDER_MIME:
+                    results[idx] = BadInputError(
+                        "Invalid operation",
+                        "parent_rev cannot be specified for a folder.",
+                        remote_path=remote_path,
+                    )
+                    continue
+                if meta.get("headRevisionId") != parent_rev:
+                    results[idx] = DataChangedError(
+                        "Item changed on Google Drive",
+                        f"{remote_path!r} changed on Drive since Cumulus last saw it.",
+                        remote_path=remote_path,
+                    )
+                    continue
+            resolved[idx] = (idx, remote_path, file_id)
+
+        live = [r for r in resolved if r is not None]
+        for chunk_start in range(0, len(live), batch_size):
+            chunk = live[chunk_start:chunk_start + batch_size]
+            batch = client._get_service().new_batch_http_request()
+            for idx, remote_path, file_id in chunk:
+                request = (
+                    client._get_service().files().update(
+                        fileId=file_id,
+                        body={"trashed": True},
+                        fields="id,name,mimeType,trashed",
+                    )
+                )
+                batch.add(
+                    request,
+                    callback=self._make_remove_batch_callback(
+                        results, idx, remote_path,
+                    ),
+                    request_id=str(idx),
+                )
+            with convert_api_errors():
+                client._retry_transient(batch.execute)
+            client._count_request(len(chunk))
+
+        return [r if r is not None else CumulusApiError(
+            "batch slot empty", "")
+                for r in results]
+
+    def _make_remove_batch_callback(
+        self, results: list, idx: int, remote_path: str,
+    ):
+        """Build a per-sub-request callback for remove_batch."""
+        client = self._client
+
+        def cb(request_id, response, exception):
+            if exception is not None:
+                results[idx] = self._batch_exception_to_cumulus(
+                    exception, remote_path
+                )
+                return
+            client._path_cache.remove(remote_path)
+            results[idx] = self._wrap_metadata(response, remote_path)
+        return cb
 
     def move(
         self, remote_path: str, new_path: str, *, autorename: bool = False
