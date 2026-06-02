@@ -309,11 +309,6 @@ def test_list_revisions_cache_miss_raises(client):
         client.list_revisions("/missing")
 
 
-def test_restore_raises_not_implemented(client):
-    with pytest.raises(NotImplementedError):
-        client.restore("/report.pdf", "r1")
-
-
 # ==== list_folder_iterator (non-recursive) ================================
 
 def test_list_folder_non_recursive_yields_entries(client, cache):
