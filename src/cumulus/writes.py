@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 from .core import FileMetadata, FolderMetadata, WriteMode
 from .errorhandling import convert_api_errors
 from .exceptions import BadInputError, CumulusApiError, NotFoundError
-from .path_codec import decode_name, fold_path
+from .path_codec import decode_name, encode_name, fold_path
 
 if TYPE_CHECKING:  # avoid runtime cycle
     from .client import GoogleDriveClient
@@ -81,26 +81,30 @@ class _WriteHelper:
             )
         return parent_id
 
-    def _autorename_unique(self, parent_path: str, name: str) -> str:
-        """Return a name not already in path_cache under parent_path.
+    def _autorename_unique(self, parent_path: str, encoded_name: str) -> str:
+        """Return an encoded path segment not already in path_cache under
+        parent_path.
 
-        Tries ``name``, ``name (1)``, ``name (2)``, … up to N=999. Used by
-        upload, move, and make_dir when ``autorename=True``.
+        Tries ``encoded_name``, ``encoded(name (1))``, ``encoded(name (2))``,
+        … up to N=999. Probes are done in encoded namespace so collisions
+        for names containing slashes or other special chars are detected
+        correctly. Used by upload, move, and make_dir when autorename=True.
         """
         cache = self._client._path_cache
-        joiner = "" if parent_path == "" else parent_path
-        if cache.path_to_id(joiner + "/" + name) is None:
-            return name
-        stem, ext = os.path.splitext(name)
+        if cache.path_to_id(parent_path + "/" + encoded_name) is None:
+            return encoded_name
+        decoded = decode_name(encoded_name)
+        stem, ext = os.path.splitext(decoded)
         for n in range(1, _AUTORENAME_LIMIT + 1):
-            candidate = f"{stem} ({n}){ext}"
-            if cache.path_to_id(joiner + "/" + candidate) is None:
-                return candidate
+            candidate_decoded = f"{stem} ({n}){ext}"
+            candidate_encoded = encode_name(candidate_decoded)
+            if cache.path_to_id(parent_path + "/" + candidate_encoded) is None:
+                return candidate_encoded
         raise BadInputError(
             "Autorename exhausted",
-            f"Could not find a non-colliding name for {name!r} under "
+            f"Could not find a non-colliding name for {encoded_name!r} under "
             f"{parent_path!r} within {_AUTORENAME_LIMIT} attempts.",
-            remote_path=joiner + "/" + name,
+            remote_path=parent_path + "/" + encoded_name,
         )
 
     # ---- public API (filled in by later tasks) --------------------------
@@ -140,13 +144,10 @@ class _WriteHelper:
         client = self._client
         client._ensure_root_id()
         parent_path, raw_name = self._split_parent_name(remote_path)
-        drive_name = self._decode_segment(raw_name)
         if autorename:
-            drive_name = self._autorename_unique(parent_path, drive_name)
-            # If autorename picked a suffixed name, the effective
-            # remote_path also shifts so the cache write-through stores
-            # under the actual stored path.
-            remote_path = parent_path + "/" + drive_name
+            raw_name = self._autorename_unique(parent_path, raw_name)
+            remote_path = parent_path + "/" + raw_name
+        drive_name = self._decode_segment(raw_name)
         parent_id = self._resolve_parent_id(parent_path, for_path=remote_path)
 
         body = {

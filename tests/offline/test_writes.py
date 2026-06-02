@@ -110,15 +110,18 @@ def test_make_dir_autorename_single_collision(client, cache):
     result = client._writes.make_dir("/foo", autorename=True)
 
     body = svc.files.return_value.create.call_args.kwargs["body"]
+    # Drive gets the decoded name.
     assert body["name"] == "foo (1)"
-    assert cache.path_to_id("/foo (1)") == "F-new"
+    # Cache and path_display use the encoded form.
+    assert cache.path_to_id("/foo %281%29") == "F-new"
+    assert result.path_display == "/foo %281%29"
     assert result.name == "foo (1)"
 
 
 def test_make_dir_autorename_multi_collision(client, cache):
     cache.set("/foo", "F1", parent_id="ROOT", name="foo", is_folder=True)
-    cache.set("/foo (1)", "F2", parent_id="ROOT", name="foo (1)", is_folder=True)
-    cache.set("/foo (2)", "F3", parent_id="ROOT", name="foo (2)", is_folder=True)
+    cache.set("/foo %281%29", "F2", parent_id="ROOT", name="foo (1)", is_folder=True)
+    cache.set("/foo %282%29", "F3", parent_id="ROOT", name="foo (2)", is_folder=True)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
         "id": "F-new", "name": "foo (3)",
@@ -126,10 +129,14 @@ def test_make_dir_autorename_multi_collision(client, cache):
     }
     client._get_service = Mock(return_value=svc)
 
-    client._writes.make_dir("/foo", autorename=True)
+    result = client._writes.make_dir("/foo", autorename=True)
 
     body = svc.files.return_value.create.call_args.kwargs["body"]
+    # Drive gets the decoded name.
     assert body["name"] == "foo (3)"
+    # Cache and path_display use the encoded form.
+    assert cache.path_to_id("/foo %283%29") == "F-new"
+    assert result.path_display == "/foo %283%29"
 
 
 def test_make_dir_collision_without_autorename_creates_duplicate_name(client, cache):
@@ -155,9 +162,12 @@ def test_make_dir_collision_without_autorename_creates_duplicate_name(client, ca
 
 def test_make_dir_autorename_bounded_at_999(client, cache):
     # Seed 1000 collisions to force overflow.
+    # Collision entries must be stored under encoded paths so the probe in
+    # _autorename_unique (which works in encoded namespace) finds them.
     cache.set("/foo", "F0", parent_id="ROOT", name="foo", is_folder=True)
     for n in range(1, 1000):
-        cache.set(f"/foo ({n})", f"F{n}", parent_id="ROOT", name=f"foo ({n})", is_folder=True)
+        encoded_path = f"/foo %28{n}%29"
+        cache.set(encoded_path, f"F{n}", parent_id="ROOT", name=f"foo ({n})", is_folder=True)
     client._get_service = Mock(return_value=fake_service())
 
     with pytest.raises(BadInputError):
