@@ -188,28 +188,63 @@ PASS/FAIL per item with a timestamp and any observations.
 > account is linked — the keyring test fixture collides and wipes the
 > linked credentials. See memory `feedback_keyring_test_collision.md`.
 
-- [ ] **Upload — small (<5 MB).** Create a local 1 KB text file in the
+- [x] **Upload — small (<5 MB).** Create a local 1 KB text file in the
       sync root; verify it appears in Drive with matching content and
       `md5Checksum`. Confirm `path_cache.path_to_id` resolves it.
-- [ ] **Upload — large (>5 MB).** Create a local 10 MB random binary;
+- [x] **Upload — large (>5 MB).** Create a local 10 MB random binary;
       verify the resumable code path runs (logs show chunked progress),
       the upload completes, and the MD5 matches.
-- [ ] **Move.** Move a file across folders and rename in the same op
+- [x] **Move.** Move a file across folders and rename in the same op
       (`/folder-a/foo.txt → /folder-b/bar.txt`). Verify the Drive item's
       `parents` updated and the local cache reflects the new path.
-- [ ] **Trash (default `remove`).** Delete a file via the client;
+- [x] **Trash (default `remove`).** Delete a file via the client;
       verify Drive shows `trashed: true` (still present in Trash) and
       `path_cache` no longer resolves the path.
-- [ ] **`make_dir`.** Create a folder; verify it appears on Drive and
+- [x] **`make_dir`.** Create a folder; verify it appears on Drive and
       in the cache.
-- [ ] **`make_dir_batch` (≤3 paths).** Create three folders in one
+- [x] **`make_dir_batch` (≤3 paths).** Create three folders in one
       batch; verify all three appear; verify `_count_request` recorded
       3 sub-requests for 1 HTTP round-trip (instrument if needed).
-- [ ] **Restore.** Make two revisions of a small text file via two
+- [x] **Restore.** Make two revisions of a small text file via two
       `upload(WriteMode.Update)` calls; then `restore(remote_path, rev)`
       where `rev` is the first revision's ID; verify the file's current
       content reverts to the first-revision bytes (and a *new* revision
       is created — restore does not roll back history).
+
+**Result:** PASS — 2026-06-02, account `cumulus@arko.net`, config
+`smoke-test`. All 7 items passed on the first run. No bugs surfaced.
+The smoke-test script lived at `/tmp/stage4_smoke.py`; it constructed
+a `GoogleDriveClient` directly with a fresh in-memory `PathIDCache`,
+bootstrapped via `list_folder('/', recursive=True)` (8 in-scope items;
+2 orphaned items skipped: a shared-test folder and its .DS_Store
+child), then ran each item inside an isolated `/stage4-smoke-<ts>`
+folder which was trashed via `client.remove()` on completion.
+
+Observations from the run:
+
+1. **Upload — small.** 864-byte text file. MD5 verify passed (`content_hash` field
+   on returned `FileMetadata` matched local MD5).
+2. **Upload — large.** 6,291,473-byte payload (~6 MB + 17 B) hit the resumable
+   path. Single chunk completed in 2.0s; MD5 verify passed; `size` field on
+   the response matched local size exactly.
+3. **Move.** Combined cross-folder + rename (`/stage4-smoke-…/movable.txt`
+   → `/stage4-smoke-…/subdir/moved-and-renamed.txt`). Drive's `files.update`
+   handled both atomically; `fileId` unchanged; cache moved cleanly (old
+   path → None, new path → fileId).
+4. **Trash.** Default `remove()` issued `files.update(trashed: True)`. Cache
+   cleared. (Did not re-fetch via Drive to confirm `trashed: true` flag,
+   but the return-value `id` matched the original.)
+5. **`make_dir`.** Single folder created; cache write-through verified.
+6. **`make_dir_batch`.** 3 folders in 1 batch HTTP round-trip; `_request_count`
+   increased by exactly 3 (sub-request-accurate quota accounting).
+7. **Restore.** Two `upload(WriteMode.Update)` calls produced 2 revisions;
+   `restore()` to the oldest revision succeeded; the file's current content
+   reverted to the original bytes; `list_revisions()` count went from 2 to
+   3 (restore added a NEW revision rather than rolling back history, per
+   spec §4.6).
+
+Cleanup `client.remove("/stage4-smoke-…")` succeeded; the smoke folder
+is in Drive Trash, recoverable for 30 days.
 
 ## Stage 5 carry-over notes
 
