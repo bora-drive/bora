@@ -381,3 +381,258 @@ def test_move_decodes_new_name_segment(client, cache):
 
     body = svc.files.return_value.update.call_args.kwargs
     assert body["body"]["name"] == "a/b"
+
+
+# ==== upload — simple (<=5MB) =============================================
+
+import hashlib
+import os as _os
+import tempfile
+
+
+def _write_tempfile(content: bytes) -> str:
+    fd, path = tempfile.mkstemp()
+    with _os.fdopen(fd, "wb") as f:
+        f.write(content)
+    return path
+
+
+def _md5_hex(data: bytes) -> str:
+    return hashlib.md5(data).hexdigest()
+
+
+def test_upload_add_creates_new_file(client, cache):
+    data = b"hello world"
+    local = _write_tempfile(data)
+    md5 = _md5_hex(data)
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-new", "name": "hello.txt",
+        "mimeType": "text/plain",
+        "md5Checksum": md5,
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    result = client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
+
+    create = svc.files.return_value.create
+    create.assert_called_once()
+    body = create.call_args.kwargs["body"]
+    assert body == {"name": "hello.txt", "parents": ["ROOT"]}
+    assert cache.path_to_id("/hello.txt") == "F-new"
+    assert result.id == "F-new"
+    _os.unlink(local)
+
+
+def test_upload_add_existing_without_autorename_raises_file_conflict(client, cache):
+    cache.set("/hello.txt", "F-existing",
+              parent_id="ROOT", name="hello.txt", is_folder=False)
+    local = _write_tempfile(b"x")
+    client._get_service = Mock(return_value=fake_service())
+    from cumulus.core import WriteMode
+    from cumulus.exceptions import FileConflictError
+
+    with pytest.raises(FileConflictError):
+        client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
+    _os.unlink(local)
+
+
+def test_upload_add_existing_with_autorename_picks_unique_name(client, cache):
+    cache.set("/hello.txt", "F-existing",
+              parent_id="ROOT", name="hello.txt", is_folder=False)
+    data = b"x"
+    local = _write_tempfile(data)
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-new", "name": "hello (1).txt",
+        "mimeType": "text/plain",
+        "md5Checksum": _md5_hex(data),
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add, autorename=True)
+
+    body = svc.files.return_value.create.call_args.kwargs["body"]
+    # Drive gets decoded name.
+    assert body["name"] == "hello (1).txt"
+    # Cache stores encoded form. encode_name("hello (1).txt") = "hello %281%29.txt"
+    assert cache.path_to_id("/hello %281%29.txt") == "F-new"
+    _os.unlink(local)
+
+
+def test_upload_update_existing(client, cache):
+    cache.set("/hello.txt", "F1",
+              parent_id="ROOT", name="hello.txt", is_folder=False)
+    data = b"new"
+    local = _write_tempfile(data)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "hello.txt",
+        "mimeType": "text/plain",
+        "md5Checksum": _md5_hex(data),
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev2",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Update)
+
+    svc.files.return_value.update.assert_called_once()
+    assert svc.files.return_value.update.call_args.kwargs["fileId"] == "F1"
+    # Path -> ID unchanged; cache should not be re-set (no-op for Update).
+    assert cache.path_to_id("/hello.txt") == "F1"
+    _os.unlink(local)
+
+
+def test_upload_update_missing_raises_not_found(client, cache):
+    local = _write_tempfile(b"x")
+    client._get_service = Mock(return_value=fake_service())
+    from cumulus.core import WriteMode
+
+    with pytest.raises(NotFoundError):
+        client._writes.upload(local, "/nope.txt", write_mode=WriteMode.Update)
+    _os.unlink(local)
+
+
+def test_upload_overwrite_creates_when_missing(client, cache):
+    data = b"x"
+    local = _write_tempfile(data)
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-new", "name": "hello.txt",
+        "mimeType": "text/plain",
+        "md5Checksum": _md5_hex(data),
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Overwrite)
+
+    svc.files.return_value.create.assert_called_once()
+    _os.unlink(local)
+
+
+def test_upload_overwrite_updates_when_existing(client, cache):
+    cache.set("/hello.txt", "F1",
+              parent_id="ROOT", name="hello.txt", is_folder=False)
+    data = b"x"
+    local = _write_tempfile(data)
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "hello.txt",
+        "mimeType": "text/plain",
+        "md5Checksum": _md5_hex(data),
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev2",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Overwrite)
+
+    svc.files.return_value.update.assert_called_once()
+    _os.unlink(local)
+
+
+def test_upload_md5_mismatch_raises_data_corruption(client, cache):
+    data = b"hello"
+    local = _write_tempfile(data)
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-new", "name": "hello.txt",
+        "mimeType": "text/plain",
+        "md5Checksum": "0" * 32,  # deliberate mismatch
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+    from cumulus.exceptions import DataCorruptionError
+
+    with pytest.raises(DataCorruptionError):
+        client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
+    _os.unlink(local)
+
+
+def test_upload_missing_md5_warns_and_succeeds(client, cache, caplog):
+    data = b"hello"
+    local = _write_tempfile(data)
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-new", "name": "hello.txt",
+        "mimeType": "text/plain",
+        # md5Checksum deliberately omitted
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING, logger="cumulus.writes"):
+        result = client._writes.upload(
+            local, "/hello.txt", write_mode=WriteMode.Add
+        )
+    assert result.id == "F-new"
+    assert any("md5" in r.message.lower() for r in caplog.records)
+    _os.unlink(local)
+
+
+def test_upload_update_rev_mismatch_raises_data_changed(client, cache):
+    cache.set("/hello.txt", "F1",
+              parent_id="ROOT", name="hello.txt", is_folder=False)
+    local = _write_tempfile(b"x")
+    svc = fake_service()
+    svc.files.return_value.get.return_value.execute.return_value = {
+        "headRevisionId": "rev-new",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    with pytest.raises(DataChangedError):
+        client._writes.upload(
+            local, "/hello.txt",
+            write_mode=WriteMode.Update, update_rev="rev-old",
+        )
+    # Upload was never attempted.
+    svc.files.return_value.update.assert_not_called()
+    _os.unlink(local)
+
+
+def test_upload_decodes_name_segment(client, cache):
+    data = b"x"
+    local = _write_tempfile(data)
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-new", "name": "a/b",
+        "mimeType": "text/plain",
+        "md5Checksum": _md5_hex(data),
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(len(data)),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    from cumulus.core import WriteMode
+
+    client._writes.upload(local, "/a%2Fb", write_mode=WriteMode.Add)
+
+    body = svc.files.return_value.create.call_args.kwargs["body"]
+    # Drive name is decoded.
+    assert body["name"] == "a/b"
+    _os.unlink(local)
