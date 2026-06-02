@@ -873,6 +873,31 @@ def test_make_dir_batch_chunks_at_100(client, cache):
     assert len(result) == 101
 
 
+def test_make_dir_batch_exactly_100_is_single_batch(client, cache):
+    from cumulus.writes import _FOLDER_MIME
+    svc = fake_service()
+    batches = []
+
+    def new_batch(*a, **kw):
+        responses = {str(i): {"id": f"D{i}", "name": str(i),
+                              "mimeType": _FOLDER_MIME}
+                     for i in range(100)}
+        b = _batch_request_double(responses)
+        batches.append(b)
+        return b
+
+    svc.new_batch_http_request = Mock(side_effect=new_batch)
+    client._get_service = Mock(return_value=svc)
+
+    paths = [f"/d{i}" for i in range(100)]
+    result = client._writes.make_dir_batch(paths)
+
+    # Exactly one batch round-trip with 100 sub-requests.
+    assert len(batches) == 1
+    assert len(batches[0]._calls) == 100
+    assert len(result) == 100
+
+
 def test_make_dir_batch_handles_mixed_success_and_error(
     client, cache, make_http_error,
 ):
