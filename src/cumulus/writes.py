@@ -586,7 +586,13 @@ class _WriteHelper:
                 .execute()
             )
         client._count_request()
-        cache.move(remote_path, new_path)
+        if not cache.move(remote_path, new_path):
+            logger.warning(
+                "path_cache.move(%r -> %r) rejected by case-conflict; "
+                "cache and Drive may be out of sync until the change feed "
+                "corrects this.",
+                remote_path, new_path,
+            )
         return self._wrap_metadata(resp, new_path)
 
     def make_dir(
