@@ -72,6 +72,22 @@ class _WriteHelper:
         """Decode a path segment via path_codec for the Drive ``name``."""
         return decode_name(name)
 
+    def _resolve_file_id(self, remote_path: str) -> str:
+        """Look up the Drive file ID for ``remote_path`` in the cache.
+
+        Raises ``NotFoundError`` when the path is not known. Used by
+        every write op that targets an existing item (remove, move,
+        upload-update, restore).
+        """
+        file_id = self._client._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No item at {remote_path!r} is known to Cumulus.",
+                remote_path=remote_path,
+            )
+        return file_id
+
     def _resolve_parent_id(self, parent_path: str, *, for_path: str) -> str:
         cache = self._client._path_cache
         if parent_path == "":
@@ -131,13 +147,7 @@ class _WriteHelper:
     ) -> "FileMetadata | FolderMetadata":
         client = self._client
         client._ensure_root_id()
-        file_id = client._path_cache.path_to_id(remote_path)
-        if file_id is None:
-            raise NotFoundError(
-                "Not found",
-                f"No item at {remote_path!r} is known to Cumulus.",
-                remote_path=remote_path,
-            )
+        file_id = self._resolve_file_id(remote_path)
 
         if parent_rev is not None:
             with convert_api_errors(remote_path=remote_path):
@@ -184,13 +194,7 @@ class _WriteHelper:
         in Stage 4."""
         client = self._client
         client._ensure_root_id()
-        file_id = client._path_cache.path_to_id(remote_path)
-        if file_id is None:
-            raise NotFoundError(
-                "Not found",
-                f"No item at {remote_path!r} is known to Cumulus.",
-                remote_path=remote_path,
-            )
+        file_id = self._resolve_file_id(remote_path)
         with convert_api_errors(remote_path=remote_path):
             client._retry_transient(
                 lambda: client._get_service()
@@ -206,7 +210,12 @@ class _WriteHelper:
     ) -> "FileMetadata | FolderMetadata":
         """Wrap a Drive ``files.update`` / ``files.create`` response in
         FileMetadata or FolderMetadata. Minimal projection used by remove
-        and (later) move; upload uses its own richer projection."""
+        and move; upload uses its own richer projection.
+
+        ``modifiedTime`` is read when present (e.g. move responses);
+        when absent (e.g. trash responses omit it), an epoch sentinel
+        is used.
+        """
         if resp.get("mimeType") == _FOLDER_MIME:
             return FolderMetadata(
                 name=resp.get("name", ""),
@@ -215,24 +224,22 @@ class _WriteHelper:
                 id=resp["id"],
                 shared=False,
             )
-        # FileMetadata fields — non-Optional datetimes use epoch as sentinel
-        # for deletion responses where these fields are unavailable.
-        from datetime import datetime, timezone
-        epoch = datetime.fromtimestamp(0, timezone.utc)
+        from .changes import parse_drive_time
+        modified = parse_drive_time(resp.get("modifiedTime"))
         return FileMetadata(
             name=resp.get("name", ""),
             path_lower=fold_path(remote_path),
             path_display=remote_path,
             id=resp["id"],
-            client_modified=epoch,
-            server_modified=epoch,
-            rev="",
-            size=0,
+            client_modified=modified,
+            server_modified=modified,
+            rev=resp.get("headRevisionId", ""),
+            size=int(resp.get("size", 0) or 0),
             symlink_target=None,
             shared=False,
             modified_by=None,
             is_downloadable=True,
-            content_hash="",
+            content_hash=resp.get("md5Checksum", ""),
         )
 
     def remove_batch(
