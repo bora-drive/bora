@@ -104,7 +104,7 @@ class SyncManager:
 
     :param sync: The SyncEngine.
     :param desktop_notifier: Used to send desktop notifications for management-level
-        events such as sync errors or fatal errors.
+        events such as sync errors or other fatal errors.
     """
 
     download_queue: PersistentQueue[str]
