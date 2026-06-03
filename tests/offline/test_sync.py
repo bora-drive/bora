@@ -461,3 +461,55 @@ def test_requires_upload_true_when_remote_hash_differs(
     )
 
     assert sync_engine._check_requires_upload(event) is True
+
+
+def test_echo_suppression_records_headrevisionid_and_skips_download(
+    sync_engine: SyncEngine,
+):
+    """The single most important Stage 5 assertion: after recording an upload's
+    returned metadata into the index, the change-feed echo of that same write
+    is skipped because its headRevisionId matches our index rev.
+
+    This proves rev-based echo suppression -- NOT content-hash identity. The
+    echo event deliberately carries a DIFFERENT content_hash from the local
+    file, so the skip can only come from the rev match.
+    """
+    remote_path = "/echo.txt"
+    data = b"freshly uploaded bytes"
+    # The local file exists (mirrors a just-written file) but its bytes have a
+    # different hash than the echo event carries, ruling out the Identical path.
+    _write_local_file(sync_engine, remote_path, data)
+
+    # Simulate the post-upload metadata the Drive write returns.
+    md = FileMetadata(
+        name="echo.txt",
+        path_lower=remote_path.lower(),
+        path_display=remote_path,
+        id="id:echo",
+        modified=datetime.today(),
+        rev="HEADREVX",
+        size=len(data),
+        symlink_target=None,
+        shared=False,
+        modified_by=None,
+        is_downloadable=True,
+        content_hash=_md5(data),
+    )
+
+    # _on_local_file_modified records exactly this into the index.
+    sync_engine.update_index_from_remote_metadata(md)
+    assert sync_engine.get_local_rev(remote_path.lower()) == "HEADREVX"
+
+    # The change feed re-delivers our own write: same headRevisionId, but a
+    # different content_hash (so a hash match cannot be what suppresses it).
+    echo = _download_event(
+        sync_engine,
+        remote_path,
+        rev="HEADREVX",
+        content_hash="A-DIFFERENT-REMOTE-HASH",
+    )
+
+    assert (
+        sync_engine._check_download_conflict(echo)
+        is Conflict.LocalNewerOrIdentical
+    )

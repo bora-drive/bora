@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Sequence
 
 from googleapiclient.errors import HttpError
@@ -229,6 +230,15 @@ class _WriteHelper:
         # Compute local MD5 while reading.
         local_md5 = self._md5_file(local_path)
 
+        # Drive wants modifiedTime as RFC-3339 UTC; canonicalise to the "...Z"
+        # form so a round-trip of our own write reports the same server time
+        # and does not spawn a change-feed echo with a surprising mtime.
+        modified_rfc3339 = (
+            datetime.fromtimestamp(os.path.getmtime(local_path), tz=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
         size = os.path.getsize(local_path)
         media = MediaFileUpload(
             local_path,
@@ -245,19 +255,26 @@ class _WriteHelper:
                 mode=mode, target_id=target_id, parent_id=parent_id,
                 drive_name=drive_name, media=media, fields=fields,
                 remote_path=remote_path, local_path=local_path,
+                modified_rfc3339=modified_rfc3339,
                 sync_event=sync_event,
             )
         else:
             # Simple path.
             with convert_api_errors(remote_path=remote_path, local_path=local_path):
                 if mode == "create":
-                    body = {"name": drive_name, "parents": [parent_id]}
+                    body = {
+                        "name": drive_name,
+                        "parents": [parent_id],
+                        "modifiedTime": modified_rfc3339,
+                    }
                     request = client._get_service().files().create(
                         body=body, media_body=media, fields=fields,
                     )
                 else:
                     request = client._get_service().files().update(
-                        fileId=target_id, media_body=media, fields=fields,
+                        fileId=target_id,
+                        body={"modifiedTime": modified_rfc3339},
+                        media_body=media, fields=fields,
                     )
                 resp = client._retry_transient(request.execute)
             client._count_request()
@@ -318,13 +335,18 @@ class _WriteHelper:
         self, *, mode: str, target_id: str | None, parent_id: str | None,
         drive_name: str, media: Any, fields: str,
         remote_path: str, local_path: str,
+        modified_rfc3339: str,
         sync_event: "SyncEvent | None",
     ) -> dict[str, Any]:
         client = self._client
 
         with convert_api_errors(remote_path=remote_path, local_path=local_path):
             if mode == "create":
-                body = {"name": drive_name, "parents": [parent_id]}
+                body = {
+                    "name": drive_name,
+                    "parents": [parent_id],
+                    "modifiedTime": modified_rfc3339,
+                }
                 request = (
                     client._get_service().files().create(
                         body=body, media_body=media, fields=fields,
@@ -333,7 +355,9 @@ class _WriteHelper:
             else:
                 request = (
                     client._get_service().files().update(
-                        fileId=target_id, media_body=media, fields=fields,
+                        fileId=target_id,
+                        body={"modifiedTime": modified_rfc3339},
+                        media_body=media, fields=fields,
                     )
                 )
 

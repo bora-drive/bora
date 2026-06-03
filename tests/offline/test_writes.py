@@ -425,7 +425,9 @@ def test_upload_add_creates_new_file(client, cache):
     create = svc.files.return_value.create
     create.assert_called_once()
     body = create.call_args.kwargs["body"]
-    assert body == {"name": "hello.txt", "parents": ["ROOT"]}
+    assert body["name"] == "hello.txt"
+    assert body["parents"] == ["ROOT"]
+    assert "modifiedTime" in body
     assert cache.path_to_id("/hello.txt") == "F-new"
     assert result.id == "F-new"
     _os.unlink(local)
@@ -1206,3 +1208,76 @@ def test_restore_cleans_up_tempfile_on_upload_exception(client, cache, monkeypat
     assert tmp_paths
     for p in tmp_paths:
         assert not _os.path.exists(p)
+
+
+# ==== modifiedTime on upload (Stage 5, echo suppression) ==================
+
+def test_upload_create_sets_modified_time_from_local_mtime(client, cache):
+    """Simple CREATE must send modifiedTime derived from the local file mtime."""
+    import datetime as _dt
+
+    data = b"hello world"
+    local = _write_tempfile(data)
+    # Pin a known local mtime so we can assert the exact RFC-3339 string.
+    mtime = 1_700_000_000.0
+    _os.utime(local, (mtime, mtime))
+    expected = (
+        _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-new", "name": "hello.txt",
+        "mimeType": "text/plain",
+        "md5Checksum": _md5_hex(data),
+        "modifiedTime": expected,
+        "size": str(len(data)),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
+
+    body = svc.files.return_value.create.call_args.kwargs["body"]
+    assert body["modifiedTime"] == expected
+    _os.unlink(local)
+
+
+def test_upload_update_sets_modified_time_from_local_mtime(client, cache):
+    """Simple UPDATE must pass a body with modifiedTime alongside media_body."""
+    import datetime as _dt
+
+    cache.set("/hello.txt", "F1",
+              parent_id="ROOT", name="hello.txt", is_folder=False)
+    data = b"new"
+    local = _write_tempfile(data)
+    mtime = 1_700_000_500.0
+    _os.utime(local, (mtime, mtime))
+    expected = (
+        _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F1", "name": "hello.txt",
+        "mimeType": "text/plain",
+        "md5Checksum": _md5_hex(data),
+        "modifiedTime": expected,
+        "size": str(len(data)),
+        "headRevisionId": "rev2",
+    }
+    client._get_service = Mock(return_value=svc)
+
+    client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Update)
+
+    kwargs = svc.files.return_value.update.call_args.kwargs
+    assert kwargs["fileId"] == "F1"
+    assert kwargs["body"] == {"modifiedTime": expected}
+    # media_body + fields must still be present.
+    assert "media_body" in kwargs
+    assert "fields" in kwargs
+    _os.unlink(local)
