@@ -50,7 +50,7 @@ __all__ = [
 # the change-feed field selector below.
 FILE_FIELDS = (
     "id, name, parents, mimeType, modifiedTime, size, md5Checksum, "
-    "shared, version, trashed, lastModifyingUser(permissionId)"
+    "shared, headRevisionId, trashed, lastModifyingUser(permissionId)"
 )
 
 # Page size for changes.list. 100 keeps each cache-write batch modest.
@@ -87,7 +87,7 @@ def to_file_metadata(file: dict[str, Any], path_display: str) -> FileMetadata:
         path_display=path_display,
         id=file["id"],
         modified=modified,
-        rev=str(file.get("version") or ""),
+        rev=file.get("headRevisionId", ""),
         size=int(file.get("size", 0) or 0),
         symlink_target=None,
         shared=bool(file.get("shared", False)),
