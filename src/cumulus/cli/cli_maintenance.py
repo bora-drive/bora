@@ -87,7 +87,7 @@ def revs(m: Maestral, sync_path: str, limit: int) -> None:
     table = rich_table("Revision", "Modified Time")
 
     for entry in m.list_revisions(sync_path, limit=limit):
-        table.add_row(Text(entry.rev), RichDateField(entry.client_modified))
+        table.add_row(Text(entry.rev), RichDateField(entry.modified))
 
     console = Console()
     console.print(table)
@@ -143,7 +143,7 @@ def diff(
         modified_dates: list[str] = []
 
         for entry in entries:
-            field = RichDateField(entry.client_modified)
+            field = RichDateField(entry.modified)
             modified_dates.append(field.format(40))
 
         remote_path = entries[0].path_display
@@ -250,7 +250,7 @@ def restore(m: Maestral, sync_path: str, rev: str, limit: int) -> None:
         entries = m.list_revisions(sync_path, limit=limit)
         dates = []
         for entry in entries:
-            field = RichDateField(entry.client_modified)
+            field = RichDateField(entry.modified)
             dates.append(field.format(40))
 
         index = select(

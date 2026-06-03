@@ -233,7 +233,7 @@ def ls(m: Maestral, long: bool, sync_path: str, include_deleted: bool) -> None:
             dt_field: ConsoleRenderable
 
             if isinstance(entry, FileMetadata):
-                dt_field = RichDateField(entry.client_modified)
+                dt_field = RichDateField(entry.modified)
                 if entry.symlink_target is None:
                     size = decimal(entry.size)
                     item_type = "file"

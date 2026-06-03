@@ -942,7 +942,7 @@ class Maestral:
         """
 
         def str_from_date(d: datetime) -> str:
-            """Convert 'client_modified' metadata to string in local timezone"""
+            """Convert 'modified' metadata to string in local timezone"""
             tz_date = d.replace(tzinfo=timezone.utc).astimezone()
             return tz_date.strftime("%d %b %Y at %H:%M")
 
@@ -990,7 +990,7 @@ class Maestral:
 
         if new_rev:
             content_new, md_new = download_rev(new_rev)
-            date_str_new = str_from_date(md_new.client_modified)
+            date_str_new = str_from_date(md_new.modified)
         else:
             # Use the local file if new_rev is None.
             new_rev = "local version"
@@ -1009,7 +1009,7 @@ class Maestral:
                 )
 
         content_old, md_old = download_rev(old_rev)
-        date_str_old = str_from_date(md_old.client_modified)
+        date_str_old = str_from_date(md_old.modified)
 
         return list(
             difflib.unified_diff(
