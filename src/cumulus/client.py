@@ -661,6 +661,8 @@ class GoogleDriveClient:
         remote_path: str,
         local_path: str,
         sync_event: SyncEvent | None = None,
+        *,
+        file_id: str | None = None,
     ) -> FileMetadata:
         """Downloads a file from Google Drive to *local_path*.
 
@@ -669,12 +671,18 @@ class GoogleDriveClient:
         place. *sync_event*, if given, has ``.completed`` updated after
         each chunk.
 
+        If *file_id* is given, the file is fetched by that Drive id
+        (current head) and *remote_path* is used only for logging and
+        error messages; otherwise *remote_path* is resolved through the
+        path cache.
+
         :raises NotFoundError: if *remote_path* is unknown to the cache.
         :raises UnsupportedFileError: if it resolves to a native doc.
         :raises DataCorruptionError: on an MD5 mismatch.
         """
         self._ensure_root_id()
-        file_id = self._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            file_id = self._path_cache.path_to_id(remote_path)
         if file_id is None:
             raise NotFoundError(
                 "Not found",

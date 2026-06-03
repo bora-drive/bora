@@ -3536,16 +3536,14 @@ class SyncEngine:
             # We download to a temporary file first (this may take some time).
             tmp_fname = self._new_tmp_file()
 
-            try:
-                with self._parallel_down_semaphore:
-                    md = self.client.download(
-                        f"rev:{event.rev}", tmp_fname, sync_event=event
-                    )
-                event = SyncEvent.from_metadata(md, self)
-            except SyncError as err:
-                # Replace rev number with path.
-                err.remote_path = event.remote_path
-                raise err
+            with self._parallel_down_semaphore:
+                md = self.client.download(
+                    event.remote_path,
+                    tmp_fname,
+                    sync_event=event,
+                    file_id=event.remote_id,
+                )
+            event = SyncEvent.from_metadata(md, self)
 
             # Re-check for conflict and move the conflict
             # out of the way if anything has changed.

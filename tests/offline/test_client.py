@@ -626,6 +626,58 @@ def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
     assert sync_event.completed == len(data)
 
 
+def test_download_by_file_id_skips_path_lookup(client, cache, tmp_path, monkeypatch):
+    """When file_id is given, path_to_id must not be called and the Drive id
+    used for both metadata get and get_media must be the supplied id."""
+    import hashlib as _hashlib2
+
+    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+
+    # Seed the cache with a DIFFERENT id so we can prove path_to_id was NOT used.
+    _seed(cache, "/whatever.txt", "WRONG_ID", "whatever.txt")
+
+    data = b"file content by id"
+    meta = {
+        "id": "GIVEN_ID", "name": "whatever.txt",
+        "mimeType": "application/octet-stream",
+        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
+        "md5Checksum": _hashlib2.md5(data).hexdigest(), "version": 7,
+    }
+    service = _download_service(meta, data)
+    client._get_service = Mock(return_value=service)
+
+    # Monkeypatch path_to_id to record if it was called (returns the wrong id).
+    path_to_id_calls = []
+    original_path_to_id = cache.path_to_id
+
+    def recording_path_to_id(path):
+        path_to_id_calls.append(path)
+        return original_path_to_id(path)
+
+    monkeypatch.setattr(cache, "path_to_id", recording_path_to_id)
+
+    dest = tmp_path / "whatever.txt"
+    result = client.download("/whatever.txt", str(dest), file_id="GIVEN_ID")
+
+    # path_to_id must NOT have been called.
+    assert path_to_id_calls == [], "path_to_id was called despite file_id being given"
+
+    # The Drive fileId used for both get and get_media must be "GIVEN_ID".
+    get_call_kwargs = service.files.return_value.get.call_args[1]
+    assert get_call_kwargs["fileId"] == "GIVEN_ID", (
+        f"get() was called with fileId={get_call_kwargs['fileId']!r}, expected 'GIVEN_ID'"
+    )
+
+    get_media_call_kwargs = service.files.return_value.get_media.call_args[1]
+    assert get_media_call_kwargs["fileId"] == "GIVEN_ID", (
+        f"get_media() was called with fileId={get_media_call_kwargs['fileId']!r}, expected 'GIVEN_ID'"
+    )
+
+    # The file was written correctly.
+    assert dest.read_bytes() == data
+    assert result.id == "GIVEN_ID"
+
+
 def test_throttle_down_sleeps_when_limit_set(client, monkeypatch):
     slept = []
     monkeypatch.setattr("cumulus.client.time.sleep", lambda s: slept.append(s))
