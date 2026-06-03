@@ -463,6 +463,54 @@ def test_requires_upload_true_when_remote_hash_differs(
     assert sync_engine._check_requires_upload(event) is True
 
 
+def test_requires_upload_true_when_remote_not_found(
+    sync_engine: SyncEngine, monkeypatch
+):
+    """A brand-new local file has no remote counterpart, so the Google Drive
+    client's ``get_metadata`` raises ``NotFoundError`` (the path is unknown to
+    its cache). ``_check_requires_upload`` must treat that as "remote absent ->
+    upload required" and return True, not let the error propagate.
+
+    Regression test for the Stage 5 smoke-test finding: the offline suite
+    previously only ever monkeypatched ``get_metadata`` to *return* a value, so
+    the NotFoundError-raising path (which broke every new-file upload against a
+    real Drive) was never exercised.
+    """
+    from cumulus.exceptions import NotFoundError
+
+    remote_path = "/brand_new.txt"
+    data = b"never uploaded before"
+    local_path = _write_local_file(sync_engine, remote_path, data)
+
+    def _raise_not_found(path):
+        raise NotFoundError(
+            "Not found",
+            f"No item at '{path}' is known to Cumulus.",
+            remote_path=path,
+        )
+
+    monkeypatch.setattr(sync_engine.client, "get_metadata", _raise_not_found)
+
+    event = SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=None,
+        local_path=local_path,
+        rev=None,
+        content_hash=_md5(data),
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=len(data),
+        completed=0,
+    )
+
+    assert sync_engine._check_requires_upload(event) is True
+
+
 def test_echo_suppression_records_headrevisionid_and_skips_download(
     sync_engine: SyncEngine,
 ):

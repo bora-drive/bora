@@ -2758,7 +2758,13 @@ class SyncEngine:
         if not (event.is_file and (event.is_changed or event.is_added)):
             raise ValueError("Can only be called with added or modified files")
 
-        md_old = self.client.get_metadata(event.remote_path)
+        try:
+            md_old = self.client.get_metadata(event.remote_path)
+        except NotFoundError:
+            # The Google Drive client raises NotFoundError when the path is
+            # unknown to its cache (i.e. there is no remote item to compare
+            # against). Treat that as "remote item absent" -> upload required.
+            return True
 
         if isinstance(md_old, FileMetadata):
             if (
