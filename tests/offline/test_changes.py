@@ -20,7 +20,7 @@ SAMPLE_FILE = {
     "size": "2048",
     "md5Checksum": "abc123",
     "shared": False,
-    "version": 7,
+    "headRevisionId": "rev-abc",
     "trashed": False,
     "lastModifyingUser": {"permissionId": "perm-9"},
 }
@@ -50,13 +50,13 @@ def test_to_file_metadata_maps_all_fields():
     assert meta.name == "report.pdf"
     assert meta.path_display == "/report.pdf"
     assert meta.id == "F1"
-    assert meta.rev == "7"
+    assert meta.rev == "rev-abc"
     assert meta.size == 2048
     assert meta.content_hash == "abc123"
     assert meta.symlink_target is None
     assert meta.is_downloadable is True
     assert meta.modified_by == "perm-9"
-    assert meta.modified is not None
+    assert meta.modified == datetime(2026, 4, 30, 4, 32, 17, 43000, tzinfo=timezone.utc)
 
 
 def test_to_file_metadata_tolerates_missing_optional_fields():
@@ -70,6 +70,24 @@ def test_to_file_metadata_tolerates_missing_optional_fields():
 def test_to_file_metadata_handles_null_version():
     meta = to_file_metadata({"id": "F3", "name": "f.bin", "version": None}, "/f.bin")
     assert meta.rev == ""
+
+
+def test_to_file_metadata_rev_is_head_revision_id():
+    from cumulus.changes import to_file_metadata
+
+    drive_file = {
+        "id": "FID",
+        "name": "f.txt",
+        "mimeType": "text/plain",
+        "modifiedTime": "2026-01-01T00:00:00.000Z",
+        "size": "3",
+        "md5Checksum": "abc123",
+        "headRevisionId": "HEADREV9",
+        "version": "42",
+        "shared": False,
+    }
+    md = to_file_metadata(drive_file, "/f.txt")
+    assert md.rev == "HEADREV9"
 
 
 def test_to_folder_metadata_maps_fields():
