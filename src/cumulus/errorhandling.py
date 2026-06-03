@@ -38,7 +38,6 @@ from .exceptions import (
     NotFoundError,
     OutOfMemoryError,
     PathError,
-    PathRootError,
     RestrictedContentError,
     SharedLinkError,
     SymlinkError,
