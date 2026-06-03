@@ -1563,6 +1563,12 @@ class Maestral:
                 self._state.set(sections["new"], key, value)
 
     def _update_from_pre_v1_6_0(self) -> None:
+        # DB-schema policy (Stage 6, D2): the index / history / hash_cache
+        # tables are a DERIVED CACHE of Drive state, not a system of record.
+        # There is deliberately no schema-version stamp and no migration
+        # framework -- on any schema change we DROP these tables and re-derive
+        # them from Drive by reindexing. Re-indexing is cheap and always
+        # available, so blind table-drop here is intentional, not data loss.
         self._logger.info("Scheduling reindex after update from pre v1.6.0")
 
         db_path = get_data_path("cumulus", f"{self.config_name}.db")
