@@ -250,7 +250,7 @@ class _WriteHelper:
                   "headRevisionId")
 
         if size > _SIMPLE_UPLOAD_THRESHOLD:
-            # Resumable path — Task 7 fills this in.
+            # Resumable path (large files).
             resp = self._upload_resumable(
                 mode=mode, target_id=target_id, parent_id=parent_id,
                 drive_name=drive_name, media=media, fields=fields,

@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 import requests
 
@@ -53,3 +55,22 @@ def test_not_linked_error(m: Maestral) -> None:
 def test_maestral_wires_path_cache_into_client(m: Maestral) -> None:
     """Stage 3: the client must receive a PathIDCache from Maestral."""
     assert isinstance(m.client._path_cache, PathIDCache)
+
+
+def test_shutdown_daemon_calls_client_close(m: Maestral) -> None:
+    """Stage 5: shutdown_daemon must call client.close() before stop_sync()
+    so that any in-flight change-feed poll is aborted before workers are joined."""
+    call_order: list[str] = []
+
+    with (
+        patch.object(m.client, "close", side_effect=lambda: call_order.append("close")),
+        patch.object(m, "stop_sync", side_effect=lambda: call_order.append("stop_sync")),
+        patch.object(m._client_db, "close", side_effect=lambda: call_order.append("db_close")),
+    ):
+        m.shutdown_daemon()
+
+    assert "close" in call_order, "client.close() was not called"
+    assert "stop_sync" in call_order, "stop_sync() was not called"
+    assert call_order.index("close") < call_order.index("stop_sync"), (
+        "client.close() must be called before stop_sync()"
+    )

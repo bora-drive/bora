@@ -61,7 +61,7 @@ from watchdog.events import (
 
 # local imports
 from . import notify
-from .client import GoogleDriveClient as DropboxClient  # TODO: rename all usages
+from .client import GoogleDriveClient
 from .config import CumulusConfig, CumulusState
 from .constants import (
     EXCLUDED_DIR_NAMES,
@@ -539,7 +539,7 @@ class SyncEngine:
 
     def __init__(
         self,
-        client: DropboxClient,
+        client: GoogleDriveClient,
         desktop_notifier: notify.CumulusDesktopNotifier | None = None,
     ) -> None:
         self.client = client

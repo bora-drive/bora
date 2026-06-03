@@ -32,7 +32,7 @@ except ImportError:
 
 # local imports
 from . import __version__
-from .client import GoogleDriveClient as DropboxClient  # TODO: rename all usages
+from .client import GoogleDriveClient
 from .config import CumulusConfig, CumulusState, validate_config_name
 from .constants import (
     CONNECTING,
@@ -206,7 +206,7 @@ class Maestral:
             sqlite3.connect(self._client_db_path, check_same_thread=False)
         )
         self._path_cache = PathIDCache(self._client_db)
-        self.client = DropboxClient(
+        self.client = GoogleDriveClient(
             self.config_name,
             self.cred_storage,
             self._path_cache,
@@ -825,7 +825,7 @@ class Maestral:
     ) -> list[Metadata]:
         """
         List all items inside the folder given by ``remote_path``. Keyword arguments are
-        passed on the Dropbox API call :meth:`client.DropboxClient.list_folder`.
+        passed on the Drive API call :meth:`client.GoogleDriveClient.list_folder`.
 
         :param remote_path: Path to folder on the remote.
         :param recursive: If true, the list folder operation will be applied recursively
@@ -867,7 +867,7 @@ class Maestral:
         """
         Returns an iterator over items inside the folder given by ``remote_path``. Keyword
         arguments are passed on the client call
-        :meth:`client.DropboxClient.list_folder_iterator`. Each iteration will yield a
+        :meth:`client.GoogleDriveClient.list_folder_iterator`. Each iteration will yield a
         list of approximately 500 entries, depending on the number of entries returned
         by an individual API call.
 
@@ -1484,6 +1484,12 @@ class Maestral:
         """
         Stop syncing and notify anyone monitoring ``shutdown_future`` that we are done.
         """
+        # Signal the client's change-feed poll to abort so any blocked download
+        # worker can wake and exit before stop_sync() tries to join it.
+        # Precise cancel-race handling between manager workers and the client poll
+        # is finalised in Stage 6 (manager rewrite); Stage 5 just ensures the
+        # poll is signalled here.
+        self.client.close()
         self.stop_sync()
         self._client_db.close()
 
