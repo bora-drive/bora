@@ -83,12 +83,32 @@ This table is the spine of the stage.
 
 | Concept | Dropbox (today) | Google Drive (Stage 5) | Primary bite points |
 |---|---|---|---|
-| Version id (`rev`) | opaque per-version string | `headRevisionId`; `"folder"` sentinel for folders | `IndexEntry.rev`, conflict check (~3229), index updates |
+| Version id (`rev`) | opaque per-version string | `headRevisionId` (files) — **canonical across read + write**; `"folder"` sentinel for folders | `IndexEntry.rev`, conflict check (~3229), index updates, `changes.py::to_file_metadata` |
 | Content integrity | proprietary block hash | MD5 (`md5Checksum`), matches `hashlib.md5` (spike Q2) | `ContentHasher`, all `content_hash ==` sites |
 | Modified time | `client_modified` + `server_modified` | single `modified` (`modifiedTime`) | `core.FileMetadata`, folder/file check (~2651), feedback prevention |
-| Download a version | `download(f"rev:{rev}", …)` | `download` by **fileId** (current head) via `event.change_remote_id`; post-download conflict re-check | callsite (~3542) + `download` signature |
+| Download a version | `download(f"rev:{rev}", …)` | `download` by **fileId** (current head) via `event.remote_id`; post-download conflict re-check | callsite (~3542) + `download` signature |
 | Echo suppression | emergent: index rev+hash match → conflict-skip | same mechanism; requires upload to record `headRevisionId` + md5 + set `modifiedTime` | upload handlers, `update_index_from_*` |
 | Folder rev | `"folder"` | `"folder"` (unchanged) | — |
+
+> **Correction (surfaced during planning):** Two spec assumptions were imprecise
+> and are fixed here:
+> 1. **Download-by-id uses `event.remote_id`, not `event.change_remote_id`.**
+>    `change_remote_id` holds the *account* that made the change
+>    (`modified_by`); the Drive fileId is in `remote_id` (`models.py:492`,
+>    populated from `md.id`).
+> 2. **`rev` must be `headRevisionId` on *both* sides.** Today the write side
+>    (`writes.py`) records `rev = headRevisionId` but the read side
+>    (`changes.py::to_file_metadata`, line 91) records `rev = str(version)`
+>    (Drive's monotonic counter). These never match, so `event.rev == local_rev`
+>    is always False on download and echo suppression silently degrades to the
+>    MD5 fallback only. The fix is contained: `FILE_FIELDS` (changes.py:51) is
+>    the single field selector shared by `files.get`, `files.list`, and the
+>    change feed — add `headRevisionId` there and switch `to_file_metadata` to
+>    it, and all read paths align with the write side. (`headRevisionId` is the
+>    right canonical choice: it changes only on content revisions, matches the
+>    `update_rev`/`parent_rev` optimistic-concurrency preconditions already in
+>    `writes.py`, and stays stable across metadata-only moves so a moved file
+>    still echo-suppresses.)
 
 ## 4. Component-by-component design (bottom-up layering)
 
@@ -99,7 +119,13 @@ This table is the spine of the stage.
 - `content_hash: str` now MD5 hex.
 - Audit and repoint every reader of `.client_modified` / `.server_modified`
   (incl. sync.py ~2651 `md.server_modified.timestamp()` → `md.modified.timestamp()`).
-- `changes.py::to_file_metadata` projects the single `modified`.
+  Readers exist in: `writes.py` (307-308, 444-445), `changes.py` (89-90),
+  `models.py::from_metadata` (333, `md.client_modified.timestamp()`), `main.py`,
+  `cli/cli_info.py`, `cli/cli_maintenance.py`.
+- `changes.py::to_file_metadata` projects the single `modified`; **and** switch
+  `rev` from `str(file.get("version"))` (line 91) to
+  `file.get("headRevisionId", "")`, adding `headRevisionId` to `FILE_FIELDS`
+  (changes.py:51). This is the echo-suppression-critical fix from §3.
 
 ### 4.2 `utils/hashing.py` — `ContentHasher` (MD5)
 - New `ContentHasher` wrapping `hashlib.md5(usedforsecurity=False)` exposing the
@@ -114,10 +140,10 @@ This table is the spine of the stage.
   skip the `path_to_id` lookup and download that id's head; when absent, behave
   as today (resolve path). Stage 3/4 callers unaffected.
 - sync.py ~3542 →
-  `self.client.download(event.remote_path, tmp_fname, file_id=event.change_remote_id, sync_event=event)`
+  `self.client.download(event.remote_path, tmp_fname, file_id=event.remote_id, sync_event=event)`
   (real path passed for logging/errors; fileId drives the fetch).
-- Confirm `SyncEvent.change_remote_id` is populated from the Drive fileId in
-  `from_metadata`.
+- `SyncEvent.remote_id` is already populated from the Drive fileId (`md.id`) in
+  `from_metadata` (`models.py:355`); no projection change needed there.
 - The vestigial `except SyncError: err.remote_path = event.remote_path` rewrite
   (was needed because the first arg was a rev-string) is cleaned up — the error
   already carries the right path.
@@ -171,14 +197,14 @@ local file written
 download_sync_cycle
   → list_remote_changes_iterator(cursor)          [changes.py fixpoint resolve,
                                                     path-cache write-through]
-  → SyncEvent.from_metadata    [change_remote_id=fileId, rev=headRevisionId, MD5]
+  → SyncEvent.from_metadata    [remote_id=fileId, rev=headRevisionId, MD5]
   → apply_remote_changes → _create_local_entry → _on_remote_file
       → _check_download_conflict (vs index):
             event.rev == local_rev → LocalNewerOrIdentical → skip   ◄ own-upload echo
             MD5 == local hash      → Identical → skip
             ctime ≤ last_sync      → RemoteNewer → download
             else                   → Conflict → conflict-copy + download
-      → client.download(path, tmp, file_id=change_remote_id)  [head by fileId]
+      → client.download(path, tmp, file_id=remote_id)  [head by fileId]
       → re-check conflict post-download (TOCTOU) → move into place
       → update_index_from_sync_event
   → save remote_cursor per page                    [crash-recovery checkpoint]
