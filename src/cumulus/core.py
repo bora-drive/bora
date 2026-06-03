@@ -139,10 +139,8 @@ class FileMetadata(Metadata):
 
     id: str
     """Unique ID on the server"""
-    client_modified: datetime
-    """Modified time in UTC as provided by clients"""
-    server_modified: datetime
-    """Server-side modified time in UTC"""
+    modified: datetime
+    """Last-modified time in UTC (Google Drive ``modifiedTime``)"""
     rev: str
     """Unique ID of this version of a file"""
     size: int

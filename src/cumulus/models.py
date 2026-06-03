@@ -200,9 +200,8 @@ class SyncEvent(Model):
     """
     Timestamp in Unix epoch seconds when the file was last modified.
 
-    Local ctime or remote ``client_modified`` time for files. ``None`` for folders or
-    for remote deletions. Note that ``client_modified`` may not be reliable as it is set
-    by other clients and not verified.
+    Local ctime or remote ``modified`` time for files. ``None`` for folders or
+    for remote deletions.
     """
 
     change_remote_id = Column(SqlString())
@@ -330,7 +329,7 @@ class SyncEvent(Model):
             symlink_target = md.symlink_target
             remote_id = md.id
             size = md.size
-            change_time = md.client_modified.timestamp()
+            change_time = md.modified.timestamp()
             if sync_engine.get_local_rev(md.path_lower):
                 change_type = ChangeType.Modified
             else:

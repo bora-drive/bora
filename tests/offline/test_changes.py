@@ -56,7 +56,7 @@ def test_to_file_metadata_maps_all_fields():
     assert meta.symlink_target is None
     assert meta.is_downloadable is True
     assert meta.modified_by == "perm-9"
-    assert meta.client_modified == meta.server_modified
+    assert meta.modified is not None
 
 
 def test_to_file_metadata_tolerates_missing_optional_fields():

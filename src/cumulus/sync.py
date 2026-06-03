@@ -2648,7 +2648,7 @@ class SyncEngine:
                 md.path_display,
             )
             # Don't delete a remote file if it was modified since last sync.
-            if md.server_modified.timestamp() >= self.get_last_sync(
+            if md.modified.timestamp() >= self.get_last_sync(
                 event.remote_path_lower
             ):
                 self._logger.debug(
