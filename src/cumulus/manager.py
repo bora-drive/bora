@@ -29,7 +29,6 @@ from .exceptions import (
     InotifyError,
     CumulusApiError,
     NoSyncDirError,
-    PathRootError,
     ServerError,
 )
 from .fsevents import Observer, ObserverType
@@ -367,57 +366,6 @@ class SyncManager:
         if was_running:
             self.start()
 
-    # ---- path root management --------------------------------------------------------
-
-    def check_and_update_path_root(self) -> bool:
-        """
-        Checks if the user's root namespace corresponds to the currently configured
-        path root. Updates the root namespace if required and migrates the local
-        folder structure. Syncing will be paused during the migration.
-
-        :returns: Whether the path root was updated.
-        """
-        if self._needs_path_root_update():
-            was_running = self.running.is_set()
-            self.stop()
-            self._update_path_root()
-
-            if was_running:
-                self._logger.info("Restarting sync")
-                self.start()
-
-            return True
-        else:
-            self._logger.debug("Path root is up to date")
-            return False
-
-    def _needs_path_root_update(self) -> bool:
-        """
-        Checks if the user's root namespace corresponds to the currently configured
-        path root.
-
-        :returns: Whether the configured root namespace needs to be updated.
-        """
-        self._logger.debug("Checking path root...")
-
-        # Drive has no team-namespace concept; nothing to migrate. Stage 6
-        # (master design §5.6) reviews whether to remove this method
-        # entirely or repurpose it for Drive-specific account-state changes.
-        return False
-
-    def _update_path_root(self) -> None:
-        """
-        Changes the layout of the local sync folder if the user joins or leaves a
-        team. New team folders will be downloaded, old team folders will be removed.
-        """
-        # Drive has no team-namespace concept; this method is unreachable
-        # because _needs_path_root_update always returns False. Stage 6
-        # (master design §5.6) will remove or repurpose both methods.
-        raise NotImplementedError(
-            "Drive has no team-namespace concept; "
-            "_update_path_root should not be called."
-        )
-
     # ---- thread methods --------------------------------------------------------------
 
     def connection_monitor(self) -> None:
@@ -459,11 +407,6 @@ class SyncManager:
         while running.is_set():
             with self._handle_sync_thread_errors(running, autostart):
                 has_changes = self.sync.wait_for_remote_changes(self.sync.remote_cursor)
-
-                # Check for root namespace updates. Don't apply any remote
-                # changes in case of a changed root path.
-                if self.check_and_update_path_root():
-                    return
 
                 if not running.is_set():
                     return
@@ -565,10 +508,6 @@ class SyncManager:
 
             self.sync.client.get_space_usage()
 
-            # Update path root and migrate local folders. This is required when a user
-            # joins or leaves a team and their root namespace changes.
-            self.check_and_update_path_root()
-
             if not running.is_set():
                 startup_completed.set()
                 return
@@ -624,9 +563,6 @@ class SyncManager:
             self.stop()
             self.autostart.set()
             self._logger.info(CONNECTING)
-        except PathRootError:
-            self._logger.debug("API call failed due to path root error", exc_info=True)
-            self.check_and_update_path_root()
         except Exception as err:
             title = getattr(err, "title", "Unexpected error")
             message = getattr(err, "message", "Please restart to continue syncing")

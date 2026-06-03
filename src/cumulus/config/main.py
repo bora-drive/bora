@@ -53,8 +53,6 @@ DEFAULTS_STATE: _DefaultsType = {
         "type": "",
         "usage": "",
         "usage_type": "",  # private vs business
-        "path_root_type": "user",  # the root folder type: team or user
-        "path_root_nsid": "",  # the namespace id of the root path
         "home_path": "",  # the path of the user folder if not the root path
     },
     "app": {  # app state
