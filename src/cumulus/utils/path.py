@@ -23,7 +23,7 @@ import xattr
 from ..constants import IS_LINUX
 
 # local imports
-from .hashing import DropboxContentHasher
+from .hashing import ContentHasher
 
 F_GETPATH = 50
 
@@ -468,7 +468,7 @@ def content_hash(
     :returns: Content hash to compare with the remote content hash and mtime just before
         the hash was computed.
     """
-    hasher = DropboxContentHasher()
+    hasher = ContentHasher()
 
     try:
         mtime = os.lstat(local_path).st_mtime

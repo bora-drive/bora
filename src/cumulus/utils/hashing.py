@@ -4,91 +4,54 @@ from __future__ import annotations
 
 # system imports
 import hashlib
-from typing import BinaryIO, Union
+from typing import BinaryIO, Protocol, Union
 
 _WritableBuffer = Union[bytes, bytearray]
 
 
-class DropboxContentHasher:
+class _Hasher(Protocol):
+    """Structural type for any hasher with an ``update`` method."""
+
+    def update(self, data: bytes | bytearray) -> None: ...
+
+
+class ContentHasher:
     """
-    Computes a hash using the same algorithm that the Dropbox API uses for the
-    "content_hash" metadata field.
+    Computes the MD5 hash Google Drive exposes as the ``md5Checksum`` field.
 
-    The :meth:`digest` method returns a raw binary representation of the hash.  The
-    :meth:`hexdigest` convenience method returns a hexadecimal-encoded version, which
-    is what the "content_hash" metadata field uses.
-
-    This class has the same interface as the hashers in the standard 'hashlib' package.
+    Exposes the same interface as the hashers in the standard ``hashlib``
+    package (``update`` / ``digest`` / ``hexdigest`` / ``copy``), so it is a
+    drop-in for any code that previously used a streaming hasher.
 
     :Example:
 
-        Read a file in chunks of 1024 bytes and compute its content hash:
-
-        >>> hasher = DropboxContentHasher()
+        >>> hasher = ContentHasher()
         >>> with open('some-file', 'rb') as f:
         ...     while True:
-        ...         chunk = f.read(1024)
-        ...         if len(chunk) == 0:
+        ...         chunk = f.read(1024 * 1024)
+        ...         if not chunk:
         ...             break
         ...         hasher.update(chunk)
         ... print(hasher.hexdigest())
-
     """
 
-    BLOCK_SIZE = 4 * 1024 * 1024
-
     def __init__(self) -> None:
-        self._overall_hasher = hashlib.sha256()
-        self._block_hasher = hashlib.sha256()
-        self._digested = False
-        self._block_pos = 0
-
-        self.digest_size = self._overall_hasher.digest_size
-
-    def _reuse_guard(self) -> None:
-        if self._digested:
-            raise RuntimeError(
-                "Can't use this object anymore; "
-                "you already called digest() or hexdigest()"
-            )
+        self._hasher = hashlib.md5(usedforsecurity=False)
+        self.digest_size = self._hasher.digest_size
 
     def update(self, new_data: bytes | bytearray) -> None:
-        self._reuse_guard()
-
-        new_data_pos = 0
-        while new_data_pos < len(new_data):
-            if self._block_pos == self.BLOCK_SIZE:
-                self._overall_hasher.update(self._block_hasher.digest())
-                self._block_hasher = hashlib.sha256()
-                self._block_pos = 0
-
-            space_in_block = self.BLOCK_SIZE - self._block_pos
-            part = new_data[new_data_pos : (new_data_pos + space_in_block)]
-            self._block_hasher.update(part)
-
-            self._block_pos += len(part)
-            new_data_pos += len(part)
-
-    def _finish(self) -> "hashlib._Hash":
-        self._reuse_guard()
-        self._digested = True
-
-        if self._block_pos > 0:
-            self._overall_hasher.update(self._block_hasher.digest())
-        return self._overall_hasher
+        self._hasher.update(new_data)
 
     def digest(self) -> bytes:
-        return self._finish().digest()
+        return self._hasher.digest()
 
     def hexdigest(self) -> str:
-        return self._finish().hexdigest()
+        return self._hasher.hexdigest()
 
-    def copy(self) -> DropboxContentHasher:
-        self._reuse_guard()
-        c = DropboxContentHasher.__new__(DropboxContentHasher)
-        c._overall_hasher = self._overall_hasher.copy()
-        c._block_hasher = self._block_hasher.copy()
-        c._block_pos = self._block_pos
+    def copy(self) -> "ContentHasher":
+        c = ContentHasher.__new__(ContentHasher)
+        c._hasher = self._hasher.copy()
+        c.digest_size = self.digest_size
         return c
 
 
@@ -96,11 +59,11 @@ class StreamHasher:
     """
     A wrapper around a file-like object (either for reading or writing)
     that hashes everything that passes through it.  Can be used with
-    DropboxContentHasher or any 'hashlib' hasher.
+    ContentHasher or any 'hashlib' hasher.
 
     :Example:
 
-        >>> hasher = DropboxContentHasher()
+        >>> hasher = ContentHasher()
         >>> with open('some-file', 'rb') as f:
         ...     wrapped_f = StreamHasher(f, hasher)
         ...     response = some_api_client.upload(wrapped_f)
@@ -111,7 +74,7 @@ class StreamHasher:
     :param hasher: Hasher to use. Must implement an ``update`` method.
     """
 
-    def __init__(self, f: BinaryIO, hasher: DropboxContentHasher) -> None:
+    def __init__(self, f: BinaryIO, hasher: _Hasher) -> None:
         self._f = f
         self._hasher = hasher
 
