@@ -1,8 +1,6 @@
 import dataclasses
 import json
 import logging
-import os
-import os.path as osp
 import sqlite3
 
 import httplib2
@@ -18,7 +16,6 @@ from cumulus.fsevents import Observer
 from cumulus.keyring import CredentialStorage
 from cumulus.main import Maestral
 from cumulus.sync import SyncEngine
-from cumulus.utils.appdirs import get_home_dir
 from cumulus.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive
 
@@ -38,9 +35,8 @@ def m():
 
 
 @pytest.fixture
-def sync():
-    local_dir = osp.join(get_home_dir(), "dummy_dir")
-    os.mkdir(local_dir)
+def sync(tmp_path_factory):
+    local_dir = str(tmp_path_factory.mktemp("sync_dir"))
 
     sync = SyncEngine(GoogleDriveClient("test-config", CredentialStorage("test-config"), _make_path_cache()))
     sync.fs_events.enable()
