@@ -9,6 +9,7 @@ from googleapiclient.errors import HttpError
 
 from cumulus.client import GoogleDriveClient
 from cumulus.config import list_configs, remove_configuration
+from cumulus.core import AccountType, FullAccount
 from cumulus.database.core import Database
 from cumulus.path_cache import PathIDCache
 from cumulus.daemon import Stop, stop_cumulus_daemon_process
@@ -34,11 +35,30 @@ def m():
     remove_configuration(m.config_name)
 
 
+_STUB_ACCOUNT = FullAccount(
+    account_id="fake-account-id",
+    display_name="Fake User",
+    email="fake@example.com",
+    profile_photo_url=None,
+    disabled=False,
+)
+
+
 @pytest.fixture
 def sync(tmp_path_factory):
     local_dir = str(tmp_path_factory.mktemp("sync_dir"))
 
-    sync = SyncEngine(GoogleDriveClient("test-config", CredentialStorage("test-config"), _make_path_cache()))
+    fake = FakeDrive()
+    cache = _make_path_cache()
+    cache.root_id = ROOT_ID
+    client = GoogleDriveClient("test-config", CredentialStorage("test-config"), cache)
+    # Wire the fake Drive service so no real Google API calls are made.
+    client._get_service = lambda: fake.service()
+    # Pre-populate cached account info to short-circuit _fetch_account_info_for_creds,
+    # which calls build() directly (bypassing _get_service) and would hit google.auth.default().
+    client._cached_account_info = _STUB_ACCOUNT
+
+    sync = SyncEngine(client)
     sync.fs_events.enable()
     sync.sync_path = local_dir
 
