@@ -1,12 +1,19 @@
 """Offline unit tests for cumulus.writes._WriteHelper.
 
-The Drive API is mocked at the client._get_service() boundary, same as
-test_client.py. Each test injects a chained MagicMock service.
+Two layers of coverage:
+  1. Mock-service tests (original): inject a chained MagicMock at
+     client._get_service(); assert Drive call shape and cache write-through.
+  2. FakeDrive integration tests (new, Task B4): use client_on_fake fixture
+     so writes round-trip through the in-memory fake; assert state via
+     fake.files[...] and via client.get_metadata.
 """
 
 from __future__ import annotations
 
+import hashlib
+import os as _os
 import sqlite3
+import tempfile
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -387,10 +394,6 @@ def test_move_decodes_new_name_segment(client, cache):
 
 
 # ==== upload — simple (<=5MB) =============================================
-
-import hashlib
-import os as _os
-import tempfile
 
 
 def _write_tempfile(content: bytes) -> str:
@@ -1281,3 +1284,332 @@ def test_upload_update_sets_modified_time_from_local_mtime(client, cache):
     assert "media_body" in kwargs
     assert "fields" in kwargs
     _os.unlink(local)
+
+
+# ===========================================================================
+# Task B4 — FakeDrive integration tests
+# These tests use client_on_fake (real GoogleDriveClient + in-memory FakeDrive)
+# and assert state via fake.files[...] and via client.get_metadata.
+# ===========================================================================
+
+from tests.fake_drive import ROOT_ID, make_http_error as _make_http_error
+
+
+# ---- upload via fake -------------------------------------------------------
+
+def test_fake_upload_simple_creates_file_in_fake(client_on_fake, tmp_path):
+    """Simple upload (<=5MB) round-trips through FakeDrive; fake.files shows
+    the new file with correct md5 and size."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    # Disable network-touching steps.
+    client._ensure_root_id = Mock()
+
+    data = b"hello from fake"
+    local = tmp_path / "hello.txt"
+    local.write_bytes(data)
+
+    result = client._writes.upload(str(local), "/hello.txt", write_mode=WriteMode.Add)
+
+    # The file was inserted into the fake's store.
+    fid = result.id
+    assert fid in fake.files
+    rec = fake.files[fid]
+    assert rec["name"] == "hello.txt"
+    assert rec["md5Checksum"] == hashlib.md5(data).hexdigest()
+    assert rec["size"] == len(data)
+    assert rec["content"] == data
+    assert rec["trashed"] is False
+
+    # get_metadata agrees.
+    # Seed the path cache so get_metadata can find the file.
+    client._path_cache.set(
+        "/hello.txt", fid, parent_id=ROOT_ID, name="hello.txt", is_folder=False
+    )
+    meta = client.get_metadata("/hello.txt")
+    assert meta is not None
+    assert meta.id == fid
+    assert meta.content_hash == hashlib.md5(data).hexdigest()
+
+
+def test_fake_upload_resumable_creates_file_in_fake(client_on_fake, tmp_path):
+    """Resumable upload (>5MB) round-trips through FakeDrive._ResumableRequest."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    # Write 5 MB + 1 byte to trigger the resumable path.
+    size = 5 * 1024 * 1024 + 1
+    data = b"x" * size
+    local = tmp_path / "big.bin"
+    local.write_bytes(data)
+
+    result = client._writes.upload(str(local), "/big.bin", write_mode=WriteMode.Add)
+
+    fid = result.id
+    assert fid in fake.files
+    rec = fake.files[fid]
+    assert rec["md5Checksum"] == hashlib.md5(data).hexdigest()
+    assert rec["size"] == size
+    assert rec["trashed"] is False
+
+
+# ---- move via fake --------------------------------------------------------
+
+def test_fake_move_renames_file(client_on_fake):
+    """move() renames a file: fake record gets new name, old path resolves to None."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/foo.txt", b"content")
+    client._path_cache.set(
+        "/foo.txt", fid, parent_id=ROOT_ID, name="foo.txt", is_folder=False
+    )
+
+    client._writes.move("/foo.txt", "/bar.txt")
+
+    assert fake.files[fid]["name"] == "bar.txt"
+    # Cache write-through.
+    assert client._path_cache.path_to_id("/foo.txt") is None
+    assert client._path_cache.path_to_id("/bar.txt") == fid
+
+
+def test_fake_move_reparents_file(client_on_fake):
+    """move() to a different parent updates the parents list in the fake record."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    src_id = fake.add_folder("/src")
+    dst_id = fake.add_folder("/dst")
+    fid = fake.add_file("/src/foo.txt", b"data")
+
+    client._path_cache.set("/src", src_id, parent_id=ROOT_ID, name="src", is_folder=True)
+    client._path_cache.set("/dst", dst_id, parent_id=ROOT_ID, name="dst", is_folder=True)
+    client._path_cache.set(
+        "/src/foo.txt", fid, parent_id=src_id, name="foo.txt", is_folder=False
+    )
+
+    client._writes.move("/src/foo.txt", "/dst/foo.txt")
+
+    rec = fake.files[fid]
+    assert dst_id in rec["parents"]
+    assert src_id not in rec["parents"]
+    assert client._path_cache.path_to_id("/src/foo.txt") is None
+    assert client._path_cache.path_to_id("/dst/foo.txt") == fid
+
+
+# ---- remove via fake ------------------------------------------------------
+
+def test_fake_remove_trashes_file(client_on_fake):
+    """remove() sets trashed=True in the fake record and evicts the path from cache."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/foo.txt", b"hello")
+    client._path_cache.set(
+        "/foo.txt", fid, parent_id=ROOT_ID, name="foo.txt", is_folder=False
+    )
+
+    client._writes.remove("/foo.txt")
+
+    assert fake.files[fid]["trashed"] is True
+    assert client._path_cache.path_to_id("/foo.txt") is None
+
+
+# ---- make_dir via fake ----------------------------------------------------
+
+def test_fake_make_dir_creates_folder(client_on_fake):
+    """make_dir() inserts a folder record in fake.files and updates the cache."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    result = client._writes.make_dir("/newdir")
+
+    fid = result.id
+    assert fid in fake.files
+    rec = fake.files[fid]
+    assert rec["name"] == "newdir"
+    from tests.fake_drive import FOLDER_MIME
+    assert rec["mimeType"] == FOLDER_MIME
+    assert rec["trashed"] is False
+    # Cache write-through.
+    assert client._path_cache.path_to_id("/newdir") == fid
+
+
+# ---- make_dir_batch via fake ----------------------------------------------
+
+def test_fake_make_dir_batch_creates_folders(client_on_fake):
+    """make_dir_batch() via FakeDrive._Batch: each folder ends up in fake.files."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    results = client._writes.make_dir_batch(["/alpha", "/beta", "/gamma"])
+
+    assert len(results) == 3
+    for r in results:
+        assert not isinstance(r, CumulusApiError), f"unexpected error: {r}"
+        assert r.id in fake.files
+        assert fake.files[r.id]["trashed"] is False
+    names = {fake.files[r.id]["name"] for r in results}
+    assert names == {"alpha", "beta", "gamma"}
+
+
+# ---- remove_batch via fake ------------------------------------------------
+
+def test_fake_remove_batch_trashes_files(client_on_fake):
+    """remove_batch() via FakeDrive._Batch: each file ends up with trashed=True."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid_a = fake.add_file("/a.txt", b"aaa")
+    fid_b = fake.add_file("/b.txt", b"bbb")
+    client._path_cache.set("/a.txt", fid_a, parent_id=ROOT_ID, name="a.txt", is_folder=False)
+    client._path_cache.set("/b.txt", fid_b, parent_id=ROOT_ID, name="b.txt", is_folder=False)
+
+    results = client._writes.remove_batch([("/a.txt", None), ("/b.txt", None)])
+
+    assert len(results) == 2
+    for r in results:
+        assert not isinstance(r, CumulusApiError), f"unexpected error: {r}"
+    assert fake.files[fid_a]["trashed"] is True
+    assert fake.files[fid_b]["trashed"] is True
+    assert client._path_cache.path_to_id("/a.txt") is None
+    assert client._path_cache.path_to_id("/b.txt") is None
+
+
+# ---- restore via fake -----------------------------------------------------
+
+def test_fake_restore_round_trips_content(client_on_fake, tmp_path):
+    """restore() downloads the revision content then re-uploads it.
+
+    The FakeDrive revisions.get_media returns the file's current content, so
+    after restore the fake record should still have the same bytes (the content
+    written by the initial upload), and the cache/metadata should be consistent.
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    # Seed a file with known content + a revision.
+    data = b"original content for restore"
+    fid = fake.add_file("/doc.txt", data)
+    rev_id = fake.files[fid]["headRevisionId"]
+    client._path_cache.set(
+        "/doc.txt", fid, parent_id=ROOT_ID, name="doc.txt", is_folder=False
+    )
+
+    result = client._writes.restore("/doc.txt", rev_id)
+
+    # After restore, the file should still be present and have the same content.
+    assert result.id == fid
+    rec = fake.files[fid]
+    assert rec["content"] == data
+    assert rec["trashed"] is False
+
+
+# ---- error paths: quota and 412 via fake ----------------------------------
+
+def test_fake_upload_quota_exceeded_raises_insufficient_space(client_on_fake, tmp_path):
+    """Injecting a 403/storageQuotaExceeded via fail_next on 'files.create'
+    causes upload() to raise InsufficientSpaceError (not the raw HttpError).
+
+    Confirmed exception class: cumulus.exceptions.InsufficientSpaceError
+    """
+    from cumulus.exceptions import InsufficientSpaceError
+
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    data = b"small file"
+    local = tmp_path / "small.txt"
+    local.write_bytes(data)
+
+    fake.fail_next("files.create", _make_http_error(403, "storageQuotaExceeded"))
+
+    with pytest.raises(InsufficientSpaceError):
+        client._writes.upload(str(local), "/small.txt", write_mode=WriteMode.Add)
+
+    # The cache must not have been updated (upload was aborted before commit).
+    assert client._path_cache.path_to_id("/small.txt") is None
+
+
+def test_fake_upload_resumable_quota_exceeded(client_on_fake, tmp_path):
+    """Injecting storageQuotaExceeded into the resumable path (files.create
+    key is used by _ResumableRequest) raises InsufficientSpaceError.
+
+    Confirmed exception class: cumulus.exceptions.InsufficientSpaceError
+    """
+    from cumulus.exceptions import InsufficientSpaceError
+
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    size = 5 * 1024 * 1024 + 1
+    local = tmp_path / "big.bin"
+    local.write_bytes(b"b" * size)
+
+    fake.fail_next("files.create", _make_http_error(403, "storageQuotaExceeded"))
+
+    with pytest.raises(InsufficientSpaceError):
+        client._writes.upload(str(local), "/big.bin", write_mode=WriteMode.Add)
+
+    assert client._path_cache.path_to_id("/big.bin") is None
+
+
+def test_fake_remove_412_condition_not_met_raises_data_changed(client_on_fake):
+    """Injecting a 412/conditionNotMet via fail_next on 'files.update'
+    causes remove() to raise DataChangedError.
+
+    Note: remove() without parent_rev does not check preconditions beforehand;
+    the 412 from the update call itself is converted by convert_api_errors.
+
+    Confirmed exception class: cumulus.exceptions.DataChangedError
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/doc.txt", b"content")
+    client._path_cache.set(
+        "/doc.txt", fid, parent_id=ROOT_ID, name="doc.txt", is_folder=False
+    )
+
+    fake.fail_next("files.update", _make_http_error(412, "conditionNotMet"))
+
+    with pytest.raises(DataChangedError):
+        client._writes.remove("/doc.txt")
+
+    # File should still be present (operation was aborted).
+    assert fake.files[fid]["trashed"] is False
+
+
+def test_fake_move_412_condition_not_met_raises_data_changed(client_on_fake):
+    """Injecting a 412/conditionNotMet on move's files.update raises
+    DataChangedError.
+
+    Confirmed exception class: cumulus.exceptions.DataChangedError
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/src.txt", b"data")
+    client._path_cache.set(
+        "/src.txt", fid, parent_id=ROOT_ID, name="src.txt", is_folder=False
+    )
+
+    fake.fail_next("files.update", _make_http_error(412, "conditionNotMet"))
+
+    with pytest.raises(DataChangedError):
+        client._writes.move("/src.txt", "/dst.txt")
+
+    # Cache unchanged — move was aborted.
+    assert client._path_cache.path_to_id("/src.txt") == fid
