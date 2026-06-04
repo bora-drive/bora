@@ -332,3 +332,29 @@ def test_get_media_downloads_via_real_downloader():
     while not done:
         _status, done = downloader.next_chunk()
     assert buf.getvalue() == content
+
+
+# ---------------------------------------------------------------------------
+# Task A9 — resumable upload via next_chunk loop
+# ---------------------------------------------------------------------------
+
+
+def test_resumable_create_drives_next_chunk():
+    fake = FakeDrive()
+    svc = fake.service()
+    media = MediaInMemoryUpload(b"y" * 100, mimetype="text/plain", resumable=True)
+    request = svc.files().create(
+        body={"name": "r.txt", "parents": [ROOT_ID]},
+        media_body=media,
+        fields="id,name,md5Checksum,size,headRevisionId",
+    )
+    response = None
+    progress_seen = []
+    while response is None:
+        status, response = request.next_chunk()
+        if status is not None:
+            progress_seen.append(status.resumable_progress)
+    assert response["name"] == "r.txt"
+    assert response["size"] == 100
+    assert progress_seen  # at least one progress callback fired
+    assert fake.files[response["id"]]["md5Checksum"] == hashlib.md5(b"y" * 100).hexdigest()

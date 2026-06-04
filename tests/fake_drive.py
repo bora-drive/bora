@@ -210,6 +210,40 @@ class _MediaRequest:
 # ---------------------------------------------------------------------------
 
 
+class _MediaUploadProgress:
+    def __init__(self, resumable_progress: int, total_size: int):
+        self.resumable_progress = resumable_progress
+        self.total_size = total_size
+
+    def progress(self) -> float:
+        return self.resumable_progress / self.total_size if self.total_size else 1.0
+
+
+class _ResumableRequest:
+    """Drives a fake chunked upload in two next_chunk() calls.
+
+    The content is fully available (the media wraps a local file/bytes),
+    so chunking is simulated purely to exercise writes.py's progress loop.
+    """
+
+    def __init__(self, fail_key, fail_check, content: bytes, finalize):
+        self._fail_key = fail_key
+        self._fail_check = fail_check
+        self._content = content
+        self._finalize = finalize
+        self._step = 0
+
+    def next_chunk(self, num_retries: int = 0):
+        self._fail_check(self._fail_key)
+        total = len(self._content)
+        if self._step == 0 and total > 0:
+            self._step = 1
+            half = max(1, total // 2)
+            return _MediaUploadProgress(half, total), None
+        response = self._finalize()
+        return _MediaUploadProgress(total, total), response
+
+
 class _Request:
     """Mimics a googleapiclient HttpRequest: only ``.execute()`` is used."""
 
@@ -321,26 +355,22 @@ class _FilesResource:
         return _Request("files.list", self._d._maybe_fail, run)
 
     def create(self, body=None, media_body=None, fields="", **_):
-        def run():
+        def finalize():
             body_ = body or {}
-            mime = body_.get("mimeType", FOLDER_MIME if media_body is None else "text/plain")
             content = _read_media(media_body) if media_body is not None else b""
+            mime = body_.get("mimeType", "text/plain" if media_body is not None else FOLDER_MIME)
             fid = self._d._new_id()
             is_folder = mime == FOLDER_MIME
             rec = {
-                "id": fid,
-                "name": body_["name"],
+                "id": fid, "name": body_["name"],
                 "parents": list(body_.get("parents", [ROOT_ID])),
                 "mimeType": mime,
                 "modifiedTime": body_.get("modifiedTime", _now_rfc3339()),
-                "createdTime": _now_rfc3339(),
-                "trashed": False,
-                "shared": False,
+                "createdTime": _now_rfc3339(), "trashed": False, "shared": False,
                 "md5Checksum": None if is_folder else hashlib.md5(content).hexdigest(),
                 "size": None if is_folder else len(content),
                 "headRevisionId": None if is_folder else self._d._new_rev(),
-                "content": content,
-                "revisions": [],
+                "content": content, "revisions": [],
                 "lastModifyingUser": {"permissionId": "perm-1"},
             }
             if not is_folder:
@@ -348,7 +378,13 @@ class _FilesResource:
             self._d.files[fid] = rec
             self._d._record_change(fid)
             return _project(rec, fields)
-        return _Request("files.create", self._d._maybe_fail, run)
+
+        _resumable = callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        if media_body is not None and _resumable:
+            return _ResumableRequest(
+                "files.create", self._d._maybe_fail, _read_media(media_body), finalize
+            )
+        return _Request("files.create", self._d._maybe_fail, finalize)
 
     def delete(self, fileId, **_):
         def run():
@@ -368,7 +404,7 @@ class _FilesResource:
 
     def update(self, fileId, body=None, media_body=None, addParents=None,
                removeParents=None, fields="", **_):
-        def run():
+        def finalize():
             rec = self._d.files[fileId]
             body_ = body or {}
             if "name" in body_:
@@ -390,7 +426,13 @@ class _FilesResource:
                 rec["revisions"].append(self._d._revision_dict(rec))
             self._d._record_change(fileId)
             return _project(rec, fields)
-        return _Request("files.update", self._d._maybe_fail, run)
+
+        _resumable = callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        if media_body is not None and _resumable:
+            return _ResumableRequest(
+                "files.update", self._d._maybe_fail, _read_media(media_body), finalize
+            )
+        return _Request("files.update", self._d._maybe_fail, finalize)
 
 
 class _ChangesResource:
