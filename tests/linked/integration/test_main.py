@@ -155,9 +155,11 @@ def test_file_status(m: Maestral) -> None:
     m.start_sync()
     wait_for_idle(m)
 
-    # test error status — path with backslash is invalid
-    invalid_local_folder = m.sync_path + "/test_folder\\"
-    os.mkdir(invalid_local_folder)
+    # test error status — a path with bytes outside the file system encoding is
+    # invalid on Drive (which requires utf-8). Backslash, the Dropbox-invalid
+    # character, is a valid name character on Drive/Linux and produces no error.
+    invalid_local_folder = m.to_local_path("/test_folder_\udce4")
+    os.mkdir(os.fsencode(invalid_local_folder))
     wait_for_idle(m)
 
     file_status = m.get_file_status(invalid_local_folder)
@@ -380,7 +382,7 @@ def test_get_file_diff(m: Maestral) -> None:
     new_rev = revisions[0].rev
     old_rev = revisions[1].rev
 
-    diff = m.get_file_diff(old_rev, new_rev)
+    diff = m.get_file_diff(remote_path, old_rev, new_rev)
 
     assert diff[2] == "@@ -1 +1 @@\n"
     assert diff[3] == "-old"
@@ -404,7 +406,7 @@ def test_get_file_diff_local(m: Maestral) -> None:
     with open(local_path, "w") as f:
         f.write("new")
 
-    diff = m.get_file_diff(old_rev, None)
+    diff = m.get_file_diff(remote_path, old_rev, None)
 
     assert diff[2] == "@@ -1 +1 @@\n"
     assert diff[3] == "-old"
@@ -421,7 +423,7 @@ def test_get_file_diff_not_found(m: Maestral) -> None:
     new_rev = revisions[0].rev
 
     with pytest.raises(NotFoundError):
-        m.get_file_diff("this-rev-does-not-exist-000000", new_rev)
+        m.get_file_diff(remote_path, "this-rev-does-not-exist-000000", new_rev)
 
 
 @requires_account
@@ -439,7 +441,7 @@ def test_get_file_diff_unsupported_ext(m: Maestral) -> None:
     old_rev = revisions[1].rev
 
     with pytest.raises(UnsupportedFileTypeForDiff):
-        m.get_file_diff(old_rev, new_rev)
+        m.get_file_diff(remote_path, old_rev, new_rev)
 
 
 @requires_account
@@ -458,7 +460,7 @@ def test_get_file_diff_unsupported_content(m: Maestral) -> None:
     old_rev = revisions[1].rev
 
     with pytest.raises(UnsupportedFileTypeForDiff):
-        m.get_file_diff(old_rev, new_rev)
+        m.get_file_diff(remote_path, old_rev, new_rev)
 
 
 @requires_account
@@ -478,7 +480,7 @@ def test_get_file_diff_unsupported_content_local(m: Maestral) -> None:
         f.write("möglich".encode("cp273"))
 
     with pytest.raises(UnsupportedFileTypeForDiff):
-        m.get_file_diff(old_rev, None)
+        m.get_file_diff(remote_path, old_rev, None)
 
 
 # ---------------------------------------------------------------------------
@@ -523,12 +525,17 @@ def test_restore(m: Maestral) -> None:
         if "in progress" not in exc.title:
             raise
 
-    wait_for_idle(m)
+    # Restore uploads the old revision as a new revision; the engine then
+    # downloads it back. That round-trips through the change feed, so poll the
+    # local file for the restored content rather than asserting once.
+    def _restored() -> bool:
+        try:
+            with open(local_path) as f:
+                return f.read() == "old content"
+        except OSError:
+            return False
 
-    with open(local_path) as f:
-        restored_content = f.read()
-
-    assert restored_content == "old content"
+    wait_until(_restored, timeout=90)
 
 
 @requires_account
