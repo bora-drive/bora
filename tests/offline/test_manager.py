@@ -1,48 +1,75 @@
 import os
-from unittest import mock
+import os.path as osp
 
 import pytest
 
-from cumulus.core import AccountType, FullAccount
+from cumulus import oauth
 from cumulus.exceptions import NoSyncDirError
 from cumulus.main import Maestral
 from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import delete, generate_cc_name
+from cumulus.utils.path import delete
 
 
-def fake_linked(m: Maestral, account_info: FullAccount) -> None:
-    m.client.get_account_info = mock.Mock(return_value=account_info)  # type: ignore
-    m.cred_storage.save_creds("account_id", "1234")
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _fake_linked(m: Maestral) -> None:
+    """Store a valid (offline) refresh-token blob so that m.client.linked is
+    True without hitting a real OAuth server."""
+    creds = oauth.credentials_from_refresh_token("rt-offline-test")
+    oauth.save_credentials(m.cred_storage, creds, "perm-test")
 
 
-def verify_folder_structure(root: str, structure: dict) -> None:
-    for name, children in structure.items():
-        path = os.path.join(root, name)
-        assert os.path.exists(path)
-
-        verify_folder_structure(path, children)
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
 
-def create_folder_structure(root: str, structure: dict) -> None:
-    for name, children in structure.items():
-        path = os.path.join(root, name)
-        os.makedirs(path)
+def test_pending_flags_on_fresh_instance(m: Maestral) -> None:
+    """A freshly constructed Maestral instance has no linked account and no
+    sync folder configured, so both pending_link and pending_sync_folder
+    must be True."""
+    assert m.pending_link is True
+    assert m.pending_sync_folder is True
 
-        create_folder_structure(path, children)
+
+def test_create_sync_directory_creates_dir_and_clears_pending_flag(
+    m: Maestral, tmp_path
+) -> None:
+    """create_sync_directory should create the local directory on disk and
+    update sync_path so that pending_sync_folder becomes False."""
+    _fake_linked(m)
+    assert m.pending_link is False, "linking precondition failed"
+
+    target = str(tmp_path / "MyDrive")
+    m.create_sync_directory(target)
+
+    assert osp.isdir(target), "directory was not created on disk"
+    assert m.sync.sync_path == osp.realpath(target)
+    assert m.pending_sync_folder is False
 
 
-account_info = FullAccount(
-    account_id="",
-    display_name="",
-    email="",
-    profile_photo_url=None,
-    disabled=False,
-)
+def test_ensure_sync_folder_present_raises_when_dir_missing(
+    m: Maestral,
+) -> None:
+    """ensure_sync_folder_present must raise NoSyncDirError when the
+    configured sync directory does not exist on disk."""
+    absent = osp.join(get_home_dir(), "does_not_exist_xyz_cumulus_test")
+    m.sync.sync_path = absent  # bypass _check_linked; set directly
 
-# NOTE: All four path-root / team-namespace migration tests that previously
-# lived here (test_migrate_path_root_user_to_team, _team_to_user,
-# _team_to_team, _error) have been deleted.  They exercised
-# check_and_update_path_root() / migrate_path_root(), which were removed in
-# Stage 6 when all Dropbox path-root / team-namespace code was dropped from
-# manager.py.  There is nothing left to test in this file for now; new Drive-
-# specific manager tests will be added in later stages.
+    with pytest.raises(NoSyncDirError):
+        m.sync.ensure_sync_folder_present()
+
+
+def test_ensure_sync_folder_present_passes_when_dir_exists(
+    m: Maestral, tmp_path
+) -> None:
+    """ensure_sync_folder_present must not raise when the sync folder is
+    present on disk."""
+    local_dir = str(tmp_path / "SyncRoot")
+    os.makedirs(local_dir)
+    m.sync.sync_path = local_dir  # bypass _check_linked; set directly
+
+    # Should complete without raising.
+    m.sync.ensure_sync_folder_present()
