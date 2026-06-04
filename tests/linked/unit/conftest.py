@@ -1,76 +1,59 @@
 import logging
 import os
-import time
+import sqlite3
 
 import pytest
 
-from cumulus.client import DropboxClient
+from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
+from cumulus.database.core import Database
 from cumulus.exceptions import AuthError, NotFoundError
 from cumulus.keyring import CredentialStorage
-from cumulus.main import Maestral
+from cumulus.path_cache import PathIDCache
+
+from tests.linked.conftest import TEST_CONFIG, _make_client
 
 fsevents_logger = logging.getLogger("fsevents")
 fsevents_logger.setLevel(logging.DEBUG)
 
 
-def clean_dropbox_dir(c: DropboxClient, lock_path: str):
-    for link in c.list_shared_links():
-        c.revoke_shared_link(link.url)
-
-    res = c.list_folder("/", recursive=False)
-    for entry in res.entries:
-        if entry.path_lower == lock_path:
+def clean_drive_dir(c: GoogleDriveClient, lock_name: str) -> None:
+    """Remove all items at the Drive root except the lock sentinel file."""
+    try:
+        result = c.list_folder("/", recursive=False)
+    except NotFoundError:
+        return
+    for entry in result.entries:
+        # Skip the lock sentinel so the session lock is preserved.
+        if getattr(entry, "name", None) == lock_name:
             continue
-
         try:
             c.remove(entry.path_lower)
         except NotFoundError:
             pass
 
 
-def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
-    """Blocks until Maestral instance is idle for at least ``cycles`` sync cycles."""
-
-    count = 0
-
-    while count < cycles:
-        if m.sync.busy():
-            # Wait until we can acquire the sync lock => we are idle.
-            m.sync.sync_lock.acquire()
-            m.sync.sync_lock.release()
-            count = 0
-        else:
-            time.sleep(1)
-            count += 1
-
-
 @pytest.fixture
 def client(test_lock):
-    """
-    Returns a Dropbox client instance linked to a test account.
-    """
-    test_lock.renew()
+    """Returns a GoogleDriveClient instance linked to the test account."""
+    config_name = "cumulus-test-config-unit"
 
-    config_name = "test-config"
+    c, cred_storage = _make_client(config_name)
 
-    cred_storage = CredentialStorage(config_name)
-    c = DropboxClient(config_name, cred_storage)
-
-    access_token = os.environ.get("DROPBOX_ACCESS_TOKEN")
-    refresh_token = os.environ.get("DROPBOX_REFRESH_TOKEN")
+    refresh_token = os.environ["CUMULUS_TEST_REFRESH_TOKEN"]
+    access_token = os.environ.get("CUMULUS_TEST_ACCESS_TOKEN")
     res = c.link(refresh_token=refresh_token, access_token=access_token)
 
     if res == 1:
         raise AuthError("Invalid token")
     elif res == 2:
-        raise ConnectionError("Could not connect to Dropbox")
+        raise ConnectionError("Could not connect to Google Drive")
     elif res > 0:
         raise RuntimeError(f"[error {res}] linking failed")
 
-    clean_dropbox_dir(c, test_lock.lock_path)
+    clean_drive_dir(c, test_lock._name)
     yield c
-    clean_dropbox_dir(c, test_lock.lock_path)
+    clean_drive_dir(c, test_lock._name)
 
     remove_configuration(config_name)
     cred_storage.delete_creds()

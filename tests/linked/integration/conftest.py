@@ -5,12 +5,13 @@ import time
 import pytest
 
 import cumulus.manager
-from cumulus.client import DropboxClient
 from cumulus.config import remove_configuration
 from cumulus.exceptions import AuthError, NotFoundError
 from cumulus.main import Maestral
 from cumulus.utils.appdirs import get_home_dir
 from cumulus.utils.path import delete, generate_cc_name
+
+from tests.linked.conftest import _make_client
 
 fsevents_logger = logging.getLogger("fsevents")
 fsevents_logger.setLevel(logging.DEBUG)
@@ -20,26 +21,25 @@ def pytest_addoption(parser):
     parser.addoption("--fs-observer", action="store", default="auto", dest="OBSERVER")
 
 
-def clean_dropbox_dir(c: DropboxClient, lock_path: str) -> None:
-    for link in c.list_shared_links():
-        c.revoke_shared_link(link.url)
-
-    res = c.list_folder("/", recursive=False)
-    for entry in res.entries:
-        if entry.path_lower == lock_path:
+def clean_drive_dir(m: Maestral, lock_name: str) -> None:
+    """Remove all items at the Drive root except the lock sentinel file."""
+    try:
+        result = m.client.list_folder("/", recursive=False)
+    except NotFoundError:
+        return
+    for entry in result.entries:
+        # Skip the lock sentinel so the session lock is preserved.
+        if getattr(entry, "name", None) == lock_name:
             continue
-
         try:
-            c.remove(entry.path_lower)
+            m.client.remove(entry.path_lower)
         except NotFoundError:
             pass
 
 
 def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
     """Blocks until Maestral instance is idle for at least ``cycles`` sync cycles."""
-
     count = 0
-
     while count < cycles:
         if m.sync.busy():
             # Wait until we can acquire the sync lock => we are idle.
@@ -54,12 +54,8 @@ def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
 @pytest.fixture
 def m(pytestconfig, test_lock):
     """
-    Returns a Maestral instance linked to a test account and syncing.
-
-    Acquires a lock on the account for the duration of the session.
+    Returns a Maestral instance linked to the test account and syncing.
     """
-    test_lock.renew()
-
     if pytestconfig.option.OBSERVER == "inotify":
         from watchdog.observers.inotify import InotifyObserver
 
@@ -77,37 +73,37 @@ def m(pytestconfig, test_lock):
 
         cumulus.manager.Observer = OrderedPollingObserver
 
-    config_name = "test-config"
+    config_name = "cumulus-test-config-integration"
 
     m = Maestral(config_name)
     m.log_level = logging.DEBUG
     m.sync.max_cpu_percent = 20 * 100
 
-    access_token = os.environ.get("DROPBOX_ACCESS_TOKEN")
-    refresh_token = os.environ.get("DROPBOX_REFRESH_TOKEN")
+    refresh_token = os.environ["CUMULUS_TEST_REFRESH_TOKEN"]
+    access_token = os.environ.get("CUMULUS_TEST_ACCESS_TOKEN")
     res = m.link(refresh_token=refresh_token, access_token=access_token)
 
     if res == 1:
         raise AuthError("Invalid token")
     elif res == 2:
-        raise ConnectionError("Could not connect to Dropbox")
+        raise ConnectionError("Could not connect to Google Drive")
     elif res > 0:
         raise RuntimeError(f"[error {res}] linking failed")
 
     home = get_home_dir()
-    local_dropbox_dir = generate_cc_name(home + "/Dropbox", suffix="test runner")
-    m.create_sync_directory(local_dropbox_dir)
+    local_drive_dir = generate_cc_name(home + "/GoogleDrive", suffix="test runner")
+    m.create_sync_directory(local_drive_dir)
 
-    clean_dropbox_dir(m.client, test_lock.lock_path)
+    clean_drive_dir(m, test_lock._name)
     m.start_sync()
     wait_for_idle(m)
 
     yield m
 
     m.stop_sync()
-    clean_dropbox_dir(m.client, test_lock.lock_path)
+    clean_drive_dir(m, test_lock._name)
     wait_for_idle(m)
-    delete(local_dropbox_dir)
+    delete(local_drive_dir)
 
     remove_configuration(m.config_name)
     m.cred_storage.delete_creds()
