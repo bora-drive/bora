@@ -40,9 +40,10 @@ def test_get_returns_file_fields():
     ).execute()
     assert resp["id"] == fid
     assert resp["name"] == "a.txt"
-    assert resp["md5Checksum"] == __import__("hashlib").md5(b"hello").hexdigest()
+    assert resp["md5Checksum"] == hashlib.md5(b"hello").hexdigest()
     assert resp["headRevisionId"]
     assert resp["parents"] == [ROOT_ID]
+    assert resp["trashed"] is False  # False booleans survive projection
 
 
 def test_list_children_filters_trashed_and_paginates():

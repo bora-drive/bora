@@ -253,7 +253,11 @@ class _FilesResource:
             matched.sort(key=lambda r: r["id"])
             start = int(pageToken) if pageToken else 0
             page = matched[start:start + pageSize]
-            inner = fields.split("files(", 1)[1].rstrip(")") if "files(" in fields else "*"
+            inner = (
+                fields[fields.index("files(") + len("files(") : fields.rindex(")")]
+                if "files(" in fields
+                else "*"
+            )
             resp = {"files": [_project(r, inner) for r in page]}
             if start + pageSize < len(matched):
                 resp["nextPageToken"] = str(start + pageSize)
