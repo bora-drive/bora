@@ -32,6 +32,7 @@ except ImportError:
 
 # local imports
 from . import __version__
+from .changes import parse_drive_time
 from .client import GoogleDriveClient
 from .config import CumulusConfig, CumulusState, validate_config_name
 from .constants import (
@@ -927,18 +928,27 @@ class Maestral:
         self._check_linked()
         return self.client.list_revisions(remote_path, limit=limit)
 
-    def get_file_diff(self, old_rev: str, new_rev: str | None = None) -> list[str]:
+    def get_file_diff(
+        self, remote_path: str, old_rev: str, new_rev: str | None = None
+    ) -> list[str]:
         """
-        Compare to revisions of a text file using Python's difflib. The versions will be
+        Compare two revisions of a text file using Python's difflib. The versions will be
         downloaded to temporary files. If new_rev is None, the old revision will be
         compared to the corresponding local file, if any.
 
+        Unlike Dropbox, Google Drive addresses a revision by ``(file_id,
+        revision_id)`` rather than a globally-unique rev string, so the file's
+        path is required to resolve the file id shared by all its revisions.
+
+        :param remote_path: Encoded virtual path of the file to diff.
         :param old_rev: Identifier of old revision.
-        :param new_rev: Identifier of new revision.
+        :param new_rev: Identifier of new revision, or ``None`` to compare the
+            old revision against the local file.
         :returns: Diff as a list of strings (lines).
-        :raises UnsupportedFileTypeForDiff: if file type is not supported.
+        :raises NotFoundError: if the path or a revision is unknown.
+        :raises UnsupportedFileTypeForDiff: if the file type is not supported.
         :raises UnsupportedFileTypeForDiff: if file content could not be decoded.
-        :raises CumulusApiError: if file could not be read for any other reason.
+        :raises CumulusApiError: if the file could not be read for any other reason.
         """
 
         def str_from_date(d: datetime) -> str:
@@ -946,56 +956,63 @@ class Maestral:
             tz_date = d.replace(tzinfo=timezone.utc).astimezone()
             return tz_date.strftime("%d %b %Y at %H:%M")
 
-        def download_rev(rev: str) -> tuple[list[str], FileMetadata]:
-            """
-            Download a rev to a tmp file, read it and return the content + metadata.
-            """
-            with tempfile.NamedTemporaryFile(mode="w+") as f:
-                md = self.client.download(f"rev:{rev}", f.name)
+        # All revisions of a file share its file id; resolve it once. Raises
+        # NotFoundError if the path is unknown to the cache.
+        file_id = self.client._writes._resolve_file_id(remote_path)
 
-                # Read from the file.
+        remote_path_cased = self.sync.correct_case(remote_path)
+        local_path = self.sync.to_local_path(remote_path)
+
+        def download_rev(rev: str) -> tuple[list[str], datetime]:
+            """
+            Download a revision to a tmp file, read it, and return its content
+            plus the revision's modification time.
+            """
+            tmp_path = self.client._writes._download_revision_to_tempfile(file_id, rev)
+            try:
                 try:
-                    with convert_api_errors(md.path_display, f.name):
-                        content = f.readlines()
+                    with convert_api_errors(remote_path_cased, tmp_path):
+                        with open(tmp_path) as f:
+                            content = f.readlines()
                 except UnicodeDecodeError:
                     raise UnsupportedFileTypeForDiff(
                         "Failed to decode the file",
                         "Only UTF-8 plain text files are currently supported.",
                     )
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
-            return content, md
+            with convert_api_errors(remote_path_cased):
+                meta = self.client._retry_transient(
+                    lambda: self.client._get_service()
+                    .revisions()
+                    .get(fileId=file_id, revisionId=rev, fields="modifiedTime")
+                    .execute()
+                )
+            return content, parse_drive_time(meta.get("modifiedTime"))
 
-        # Get the metadata for old_rev before attempting to download. This is used
-        # to guess the file type and fail early for unsupported files.
-
-        md_old = self.client.get_metadata(f"rev:{old_rev}", include_deleted=True)
-
-        if md_old is None:
-            raise NotFoundError(
-                f"Could not a file with revision {old_rev}",
-                "Use 'list_revisions' to list past revisions of a file.",
-            )
-
-        remote_path = self.sync.correct_case(md_old.path_display)
-        local_path = self.sync.to_local_path(md_old.path_display)
-
-        # Check if a diff is possible.
+        # Check if a diff is possible from the file type.
         # If mime is None, proceed because most files without
         # an extension are just text files.
-        mime, _ = mimetypes.guess_type(remote_path)
+        mime, _ = mimetypes.guess_type(remote_path_cased)
         if mime is not None and not mime.startswith("text/"):
             raise UnsupportedFileTypeForDiff(
                 f"Bad file type: '{mime}'", "Only files of type 'text/*' are supported."
             )
 
         if new_rev:
-            content_new, md_new = download_rev(new_rev)
-            date_str_new = str_from_date(md_new.modified)
+            content_new, modified_new = download_rev(new_rev)
+            date_str_new = str_from_date(modified_new)
         else:
             # Use the local file if new_rev is None.
             new_rev = "local version"
             try:
-                with convert_api_errors(remote_path=remote_path, local_path=local_path):
+                with convert_api_errors(
+                    remote_path=remote_path_cased, local_path=local_path
+                ):
                     mtime = time.localtime(osp.getmtime(local_path))
                     date_str_new = time.strftime("%d %b %Y at %H:%M", mtime)
 
@@ -1008,15 +1025,15 @@ class Maestral:
                     "Only UTF-8 plain text files are currently supported.",
                 )
 
-        content_old, md_old = download_rev(old_rev)
-        date_str_old = str_from_date(md_old.modified)
+        content_old, modified_old = download_rev(old_rev)
+        date_str_old = str_from_date(modified_old)
 
         return list(
             difflib.unified_diff(
                 content_old,
                 content_new,
-                fromfile=f"{remote_path} ({old_rev})",
-                tofile=f"{remote_path} ({new_rev})",
+                fromfile=f"{remote_path_cased} ({old_rev})",
+                tofile=f"{remote_path_cased} ({new_rev})",
                 fromfiledate=date_str_old,
                 tofiledate=date_str_new,
             )

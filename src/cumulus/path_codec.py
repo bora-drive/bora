@@ -17,6 +17,8 @@ import urllib.parse
 __all__ = [
     "encode_name",
     "decode_name",
+    "encode_path",
+    "decode_path",
     "fold_key",
     "compose_path",
     "fold_path",
@@ -46,6 +48,46 @@ def encode_name(name: str) -> str:
 def decode_name(encoded: str) -> str:
     """Inverse of :func:`encode_name`."""
     return urllib.parse.unquote(encoded)
+
+
+def _encode_segment_safe(segment: str) -> str:
+    """:func:`encode_name` a segment, but leave it untouched if it contains
+    bytes that cannot be utf-8 encoded (surrogate escapes from a path with an
+    unknown file-system encoding). Such paths are caught and rejected
+    downstream by ``sync.check_encoding`` with a ``PathError``; encoding them
+    here would instead raise an unhandled ``UnicodeEncodeError`` during
+    ``SyncEvent`` construction."""
+    if not segment:
+        return segment
+    try:
+        return encode_name(segment)
+    except UnicodeEncodeError:
+        return segment
+
+
+def encode_path(path: str) -> str:
+    """Encode every name component of a virtual path.
+
+    Maps a decoded (human-readable) path — as it appears on the local file
+    system — to the encoded virtual path used by the index and path cache.
+    Inverse of :func:`decode_path`. The leading empty segment from a leading
+    ``/`` is preserved; ``"/"`` and ``""`` pass through unchanged.
+    """
+    if path in ("", "/"):
+        return path
+    return "/".join(_encode_segment_safe(p) for p in path.split("/"))
+
+
+def decode_path(path: str) -> str:
+    """Decode every name component of an encoded virtual path.
+
+    Maps an encoded virtual path (index / path-cache / ``path_display`` form)
+    back to the decoded, human-readable form used for the local file system.
+    Inverse of :func:`encode_path`.
+    """
+    if path in ("", "/"):
+        return path
+    return "/".join(decode_name(p) if p else p for p in path.split("/"))
 
 
 def fold_key(name: str) -> str:
@@ -95,5 +137,16 @@ def fold_path(encoded_path: str) -> str:
         return "/"
     # Leading "/" produces an empty first segment; preserve it.
     parts = encoded_path.split("/")
-    folded_parts = [fold_key(decode_name(p)) if p else p for p in parts]
-    return "/".join(folded_parts)
+
+    def _fold_segment(p: str) -> str:
+        if not p:
+            return p
+        try:
+            return fold_key(decode_name(p))
+        except UnicodeEncodeError:
+            # Non-utf8 / surrogate-escaped name — leave it untouched so the
+            # caller (e.g. check_encoding) can reject it with a PathError
+            # rather than raising an unhandled UnicodeEncodeError here.
+            return p
+
+    return "/".join(_fold_segment(p) for p in parts)

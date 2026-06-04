@@ -190,7 +190,7 @@ def diff(
 
     echo("Loading ...\r", nl=False)
 
-    diff_output = m.get_file_diff(old_rev, new_rev)
+    diff_output = m.get_file_diff(sync_path, old_rev, new_rev)
 
     if len(diff_output) == 0:
         echo("There are no changes between the two revisions.")
