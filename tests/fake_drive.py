@@ -389,10 +389,26 @@ class _AboutResource:
     def __init__(self, drive: "FakeDrive"):
         self._d = drive
 
+    def get(self, fields="", **_):
+        def run():
+            return {"user": dict(self._d.user), "storageQuota": dict(self._d.storage_quota)}
+        return _Request("about.get", self._d._maybe_fail, run)
+
 
 class _RevisionsResource:
     def __init__(self, drive: "FakeDrive"):
         self._d = drive
+
+    def list(self, fileId, fields="", pageSize=100, pageToken=None, **_):
+        def run():
+            revs = self._d.files[fileId]["revisions"]
+            start = int(pageToken) if pageToken else 0
+            page = revs[start:start + pageSize]
+            resp = {"revisions": list(page)}
+            if start + pageSize < len(revs):
+                resp["nextPageToken"] = str(start + pageSize)
+            return resp
+        return _Request("revisions.list", self._d._maybe_fail, run)
 
 
 class _Batch:

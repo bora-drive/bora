@@ -276,3 +276,39 @@ def test_changes_move_rename_single_entry():
     assert [c["fileId"] for c in resp["changes"]] == [fid]
     assert resp["changes"][0]["file"]["name"] == "b.txt"
     assert resp["changes"][0]["file"]["parents"] == [dst]
+
+
+# ---------------------------------------------------------------------------
+# Task A7 — about().get + revisions().list
+# ---------------------------------------------------------------------------
+
+
+def test_about_get():
+    fake = FakeDrive()
+    svc = fake.service()
+    resp = svc.about().get(
+        fields="user(emailAddress,displayName,permissionId,photoLink),"
+        "storageQuota(usage,limit)"
+    ).execute()
+    assert resp["user"]["emailAddress"] == "cumulus-test@example.com"
+    assert resp["storageQuota"]["limit"] == "16106127360"
+
+
+def test_revisions_list():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"v1")
+    svc = fake.service()
+    svc.files().update(
+        fileId=fid,
+        media_body=MediaInMemoryUpload(b"v2", mimetype="text/plain"),
+        fields="id",
+    ).execute()
+    resp = svc.revisions().list(
+        fileId=fid,
+        fields="nextPageToken, revisions(id, modifiedTime, size, md5Checksum, "
+        "lastModifyingUser(permissionId))",
+        pageSize=100,
+        pageToken=None,
+    ).execute()
+    assert len(resp["revisions"]) == 2
+    assert resp["revisions"][-1]["md5Checksum"] == hashlib.md5(b"v2").hexdigest()
