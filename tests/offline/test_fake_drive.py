@@ -180,3 +180,26 @@ def test_update_precondition_412():
         assert False, "expected 412"
     except HttpError as e:
         assert e.resp.status == 412
+
+
+# ---------------------------------------------------------------------------
+# Task A5 — files().delete (hard-delete) + files().generateIds
+# ---------------------------------------------------------------------------
+
+
+def test_delete_hard_removes_record():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"x")
+    svc = fake.service()
+    svc.files().delete(fileId=fid).execute()
+    assert fid not in fake.files
+    # a change was recorded so A6's changes.list will surface removed=true
+    assert any(f == fid for _seq, f in fake._change_log[-1:])
+
+
+def test_generate_ids():
+    fake = FakeDrive()
+    svc = fake.service()
+    resp = svc.files().generateIds(count=3).execute()
+    assert len(resp["ids"]) == 3
+    assert len(set(resp["ids"])) == 3

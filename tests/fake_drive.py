@@ -299,6 +299,18 @@ class _FilesResource:
             return _project(rec, fields)
         return _Request("files.create", self._d._maybe_fail, run)
 
+    def delete(self, fileId, **_):
+        def run():
+            self._d.files.pop(fileId, None)
+            self._d._record_change(fileId)
+            return None
+        return _Request("files.delete", self._d._maybe_fail, run)
+
+    def generateIds(self, count=1, **_):
+        def run():
+            return {"ids": [self._d._new_id() for _ in range(count)]}
+        return _Request("files.generateIds", self._d._maybe_fail, run)
+
     def update(self, fileId, body=None, media_body=None, addParents=None,
                removeParents=None, fields="", **_):
         def run():
