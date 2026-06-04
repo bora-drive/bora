@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ import httplib2
 import pytest
 from googleapiclient.errors import HttpError
 
-from cumulus.client import DropboxClient
+from cumulus.client import GoogleDriveClient
 from cumulus.config import list_configs, remove_configuration
 from cumulus.database.core import Database
 from cumulus.path_cache import PathIDCache
@@ -19,6 +20,7 @@ from cumulus.main import Maestral
 from cumulus.sync import SyncEngine
 from cumulus.utils.appdirs import get_home_dir
 from cumulus.utils.path import delete
+from tests.fake_drive import ROOT_ID, FakeDrive
 
 
 def _make_path_cache() -> PathIDCache:
@@ -40,7 +42,7 @@ def sync():
     local_dir = osp.join(get_home_dir(), "dummy_dir")
     os.mkdir(local_dir)
 
-    sync = SyncEngine(DropboxClient("test-config", CredentialStorage("test-config"), _make_path_cache()))
+    sync = SyncEngine(GoogleDriveClient("test-config", CredentialStorage("test-config"), _make_path_cache()))
     sync.fs_events.enable()
     sync.sync_path = local_dir
 
@@ -59,7 +61,7 @@ def sync():
 
 @pytest.fixture
 def client():
-    yield DropboxClient(
+    yield GoogleDriveClient(
         "test-config", CredentialStorage("test-config"), _make_path_cache()
     )
     remove_configuration("test-config")
@@ -100,3 +102,26 @@ def make_http_error():
         return HttpError(resp, json.dumps(body).encode("utf-8"))
 
     return _make
+
+
+@pytest.fixture
+def fake_drive():
+    return FakeDrive()
+
+
+@dataclasses.dataclass
+class ClientOnFake:
+    client: GoogleDriveClient
+    fake: FakeDrive
+
+
+@pytest.fixture
+def client_on_fake(fake_drive):
+    cache = _make_path_cache()
+    cache.root_id = ROOT_ID
+    client = GoogleDriveClient(
+        "test-config", CredentialStorage("test-config"), cache
+    )
+    client._get_service = lambda: fake_drive.service()
+    yield ClientOnFake(client=client, fake=fake_drive)
+    remove_configuration("test-config")
