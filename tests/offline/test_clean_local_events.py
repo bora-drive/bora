@@ -11,7 +11,7 @@ from watchdog.events import (
     FileMovedEvent,
 )
 
-from cumulus.client import DropboxClient
+from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
 from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
@@ -24,7 +24,7 @@ def sync():
     _cache = PathIDCache(Database(sqlite3.connect(":memory:")))
     _cache.root_id = "ROOT"
     sync = SyncEngine(
-        DropboxClient(
+        GoogleDriveClient(
             "test-config",
             CredentialStorage("test-config"),
             _cache,
