@@ -1,11 +1,14 @@
 import hashlib
 import sqlite3
 
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaInMemoryUpload
+
 from cumulus.client import GoogleDriveClient
 from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
 from cumulus.path_cache import PathIDCache
-from tests.fake_drive import ROOT_ID, FakeDrive
+from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error
 
 
 def test_seed_root_and_file():
@@ -114,3 +117,66 @@ def test_client_get_metadata_round_trip():
     assert md.rev == fake.files[fid]["headRevisionId"]
     assert md.content_hash == fake.files[fid]["md5Checksum"]
     assert md.size == 5
+
+
+# ---------------------------------------------------------------------------
+# Task A4 — files().create / files().update
+# ---------------------------------------------------------------------------
+
+
+def test_create_simple_upload():
+    fake = FakeDrive()
+    svc = fake.service()
+    media = MediaInMemoryUpload(b"data", mimetype="text/plain", resumable=False)
+    resp = svc.files().create(
+        body={"name": "n.txt", "parents": [ROOT_ID], "modifiedTime": "2026-01-02T00:00:00Z"},
+        media_body=media,
+        fields="id,name,md5Checksum,size,headRevisionId",
+    ).execute()
+    assert resp["name"] == "n.txt"
+    assert resp["md5Checksum"] == hashlib.md5(b"data").hexdigest()
+    assert resp["size"] == 4
+    assert resp["headRevisionId"]
+    assert fake.files[resp["id"]]["parents"] == [ROOT_ID]
+
+
+def test_update_move_and_rename_single_entry():
+    fake = FakeDrive()
+    src = fake.add_folder("/src")
+    dst = fake.add_folder("/dst")
+    fid = fake.add_file("/src/a.txt", content=b"x")
+    svc = fake.service()
+    svc.files().update(
+        fileId=fid,
+        body={"name": "b.txt"},
+        addParents=dst,
+        removeParents=src,
+        fields="id,name,headRevisionId",
+    ).execute()
+    rec = fake.files[fid]
+    assert rec["name"] == "b.txt"
+    assert rec["parents"] == [dst]
+    # changes-feed assertion added in A6
+
+
+def test_update_trash_sets_flag():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"x")
+    svc = fake.service()
+    resp = svc.files().update(
+        fileId=fid, body={"trashed": True}, fields="id,trashed"
+    ).execute()
+    assert resp["trashed"] is True
+    assert fake.files[fid]["trashed"] is True
+
+
+def test_update_precondition_412():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"x")
+    svc = fake.service()
+    fake.fail_next("files.update", make_http_error(412, "conditionNotMet"))
+    try:
+        svc.files().update(fileId=fid, body={"name": "z"}, fields="id").execute()
+        assert False, "expected 412"
+    except HttpError as e:
+        assert e.resp.status == 412
