@@ -76,14 +76,17 @@ from cumulus.utils.path import (
     walk,
 )
 
-from tests.linked.conftest import requires_account, wait_until
+from tests.linked.conftest import LOCK_NAME, requires_account, wait_until
 
 # mypy cannot yet check recursive type definitions...
 DirTreeType = Mapping[str, Union[str, Mapping[str, Union[str, Mapping[str, str]]]]]
 T = TypeVar("T", dict, DirTreeType)
 
 HOME = get_home_dir()
-LOCK_PATH = "/test.lock"
+# The Drive-native session lock sentinel lives in the account root and therefore
+# syncs down into the local mirror; assertions must exclude it. Track the real
+# name from conftest (was hard-coded to the stale Dropbox "/test.lock").
+LOCK_PATH = "/" + LOCK_NAME
 
 
 def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
