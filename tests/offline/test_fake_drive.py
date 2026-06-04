@@ -1,8 +1,9 @@
 import hashlib
+import io
 import sqlite3
 
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaInMemoryUpload
+from googleapiclient.http import MediaInMemoryUpload, MediaIoBaseDownload
 
 from cumulus.client import GoogleDriveClient
 from cumulus.database.core import Database
@@ -312,3 +313,22 @@ def test_revisions_list():
     ).execute()
     assert len(resp["revisions"]) == 2
     assert resp["revisions"][-1]["md5Checksum"] == hashlib.md5(b"v2").hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Task A8 — files().get_media / revisions().get_media via real MediaIoBaseDownload
+# ---------------------------------------------------------------------------
+
+
+def test_get_media_downloads_via_real_downloader():
+    fake = FakeDrive()
+    content = b"x" * (5 * 1024 * 1024 + 17)  # multi-chunk
+    fid = fake.add_file("/big.bin", content=content)
+    svc = fake.service()
+    request = svc.files().get_media(fileId=fid)
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request, chunksize=1024 * 1024)
+    done = False
+    while not done:
+        _status, done = downloader.next_chunk()
+    assert buf.getvalue() == content
