@@ -1,5 +1,10 @@
 import hashlib
+import sqlite3
 
+from cumulus.client import GoogleDriveClient
+from cumulus.database.core import Database
+from cumulus.keyring import CredentialStorage
+from cumulus.path_cache import PathIDCache
 from tests.fake_drive import ROOT_ID, FakeDrive
 
 
@@ -70,3 +75,42 @@ def test_list_children_filters_trashed_and_paginates():
     assert "nextPageToken" not in resp2
     names = {resp["files"][0]["name"], resp2["files"][0]["name"]}
     assert names == {"a.txt", "b.txt"}
+
+
+# ---------------------------------------------------------------------------
+# Task A3 — real GoogleDriveClient runs on FakeDrive
+# ---------------------------------------------------------------------------
+
+
+def _client_on(fake: FakeDrive) -> GoogleDriveClient:
+    """Build a GoogleDriveClient wired to *fake* without any real credentials.
+
+    ``_get_service`` is monkey-patched to return ``fake.service()`` so the
+    ``linked`` check and the Google OAuth stack are bypassed entirely.
+    The path-cache root is pre-seeded so ``_ensure_root_id`` is a no-op.
+    """
+    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    cache.root_id = ROOT_ID
+    client = GoogleDriveClient(
+        "test-config", CredentialStorage("test-config"), cache
+    )
+    # Bypass the linked / OAuth check in _get_service by replacing it with
+    # a lambda that returns the fake service directly.
+    client._get_service = lambda: fake.service()  # type: ignore[method-assign]
+    return client
+
+
+def test_client_get_metadata_round_trip():
+    """get_metadata on the real client returns correct FileMetadata from FakeDrive."""
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"hello")
+    client = _client_on(fake)
+    # Teach the path cache about the file so path_to_id("/a.txt") resolves.
+    client._path_cache.set("/a.txt", fid, ROOT_ID, "a.txt", False)
+
+    md = client.get_metadata("/a.txt")
+
+    assert md is not None
+    assert md.rev == fake.files[fid]["headRevisionId"]
+    assert md.content_hash == fake.files[fid]["md5Checksum"]
+    assert md.size == 5
