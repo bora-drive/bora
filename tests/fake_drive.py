@@ -155,6 +155,57 @@ class FakeDrive:
 
 
 # ---------------------------------------------------------------------------
+# Media-download helpers (Task A8)
+# ---------------------------------------------------------------------------
+
+
+class _FakeHttp:
+    """Minimal httplib2-shaped transport for MediaIoBaseDownload.
+
+    MediaIoBaseDownload calls ``http.request(uri, method, headers=...)``
+    (via ``_retry_request``) and reads ``resp.status`` plus
+    ``content-range`` / ``content-length`` off the response.
+    """
+
+    def __init__(self, content: bytes):
+        self._content = content
+
+    def request(self, uri, method="GET", body=None, headers=None):
+        total = len(self._content)
+        rng = (headers or {}).get("range") or (headers or {}).get("Range")
+        if rng:
+            spec = rng.split("=", 1)[1]
+            begin_s, end_s = spec.split("-")
+            begin, end = int(begin_s), int(end_s)
+            chunk = self._content[begin : end + 1]
+            resp = httplib2.Response(
+                {
+                    "status": 206,
+                    "content-range": f"bytes {begin}-{begin + len(chunk) - 1}/{total}",
+                    "content-length": str(len(chunk)),
+                }
+            )
+        else:
+            chunk = self._content
+            resp = httplib2.Response({"status": 200, "content-length": str(total)})
+        return resp, chunk
+
+
+class _MediaRequest:
+    """Mimics the HttpRequest that MediaIoBaseDownload wraps.
+
+    ``MediaIoBaseDownload.__init__`` reads ``.uri``, ``.http``, and
+    ``.headers``; ``next_chunk`` passes the range header to ``http.request``.
+    """
+
+    def __init__(self, content: bytes):
+        self.uri = "https://fake.drive/get_media"
+        self.http = _FakeHttp(content)
+        self.headers: dict = {}
+        self.postproc = lambda resp, content: content
+
+
+# ---------------------------------------------------------------------------
 # Resource tree
 # ---------------------------------------------------------------------------
 
@@ -311,6 +362,10 @@ class _FilesResource:
             return {"ids": [self._d._new_id() for _ in range(count)]}
         return _Request("files.generateIds", self._d._maybe_fail, run)
 
+    def get_media(self, fileId, **_):
+        rec = self._d.files[fileId]
+        return _MediaRequest(rec["content"])
+
     def update(self, fileId, body=None, media_body=None, addParents=None,
                removeParents=None, fields="", **_):
         def run():
@@ -409,6 +464,10 @@ class _RevisionsResource:
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
         return _Request("revisions.list", self._d._maybe_fail, run)
+
+    def get_media(self, fileId, revisionId, **_):
+        rec = self._d.files[fileId]
+        return _MediaRequest(rec["content"])
 
 
 class _Batch:
