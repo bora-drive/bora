@@ -209,6 +209,11 @@ def _project(rec: dict, fields: str) -> dict:
     return out
 
 
+def _read_media(media) -> bytes:
+    """Read all bytes from a googleapiclient MediaUpload (in-memory or file)."""
+    return media.getbytes(0, media.size())
+
+
 def _match_query(rec: dict, query: str) -> bool:
     """Evaluate the tiny query grammar our code emits.
 
@@ -263,6 +268,62 @@ class _FilesResource:
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
         return _Request("files.list", self._d._maybe_fail, run)
+
+    def create(self, body=None, media_body=None, fields="", **_):
+        def run():
+            body_ = body or {}
+            mime = body_.get("mimeType", FOLDER_MIME if media_body is None else "text/plain")
+            content = _read_media(media_body) if media_body is not None else b""
+            fid = self._d._new_id()
+            is_folder = mime == FOLDER_MIME
+            rec = {
+                "id": fid,
+                "name": body_["name"],
+                "parents": list(body_.get("parents", [ROOT_ID])),
+                "mimeType": mime,
+                "modifiedTime": body_.get("modifiedTime", _now_rfc3339()),
+                "createdTime": _now_rfc3339(),
+                "trashed": False,
+                "shared": False,
+                "md5Checksum": None if is_folder else hashlib.md5(content).hexdigest(),
+                "size": None if is_folder else len(content),
+                "headRevisionId": None if is_folder else self._d._new_rev(),
+                "content": content,
+                "revisions": [],
+                "lastModifyingUser": {"permissionId": "perm-1"},
+            }
+            if not is_folder:
+                rec["revisions"].append(self._d._revision_dict(rec))
+            self._d.files[fid] = rec
+            self._d._record_change(fid)
+            return _project(rec, fields)
+        return _Request("files.create", self._d._maybe_fail, run)
+
+    def update(self, fileId, body=None, media_body=None, addParents=None,
+               removeParents=None, fields="", **_):
+        def run():
+            rec = self._d.files[fileId]
+            body_ = body or {}
+            if "name" in body_:
+                rec["name"] = body_["name"]
+            if "trashed" in body_:
+                rec["trashed"] = body_["trashed"]
+            if "modifiedTime" in body_:
+                rec["modifiedTime"] = body_["modifiedTime"]
+            if removeParents:
+                rec["parents"] = [p for p in rec["parents"] if p != removeParents]
+            if addParents:
+                rec["parents"] = rec["parents"] + [addParents]
+            if media_body is not None:
+                content = _read_media(media_body)
+                rec["content"] = content
+                rec["md5Checksum"] = hashlib.md5(content).hexdigest()
+                rec["size"] = len(content)
+                rec["headRevisionId"] = self._d._new_rev()
+                rec["revisions"].append(self._d._revision_dict(rec))
+            self._d._record_change(fileId)
+            return _project(rec, fields)
+        return _Request("files.update", self._d._maybe_fail, run)
 
 
 class _ChangesResource:
