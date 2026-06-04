@@ -227,24 +227,31 @@ class _WriteHelper:
         else:
             parent_id = None  # update has no parent change in upload
 
-        # Compute local MD5 while reading.
-        local_md5 = self._md5_file(local_path)
+        # These steps read the local file (MD5, mtime, size). Wrap them in
+        # convert_api_errors so a local OS error — e.g. a permission-denied
+        # file — surfaces as a Cumulus SyncError (InsufficientPermissionsError)
+        # that the per-item handler records, rather than escaping as a raw
+        # OSError to the sync-thread error handler.
+        with convert_api_errors(remote_path=remote_path, local_path=local_path):
+            # Compute local MD5 while reading.
+            local_md5 = self._md5_file(local_path)
 
-        # Drive wants modifiedTime as RFC-3339 UTC; canonicalise to the "...Z"
-        # form so a round-trip of our own write reports the same server time
-        # and does not spawn a change-feed echo with a surprising mtime.
-        modified_rfc3339 = (
-            datetime.fromtimestamp(os.path.getmtime(local_path), tz=timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
+            # Drive wants modifiedTime as RFC-3339 UTC; canonicalise to the
+            # "...Z" form so a round-trip of our own write reports the same
+            # server time and does not spawn a change-feed echo with a
+            # surprising mtime.
+            modified_rfc3339 = (
+                datetime.fromtimestamp(os.path.getmtime(local_path), tz=timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
 
-        size = os.path.getsize(local_path)
-        media = MediaFileUpload(
-            local_path,
-            resumable=(size > _SIMPLE_UPLOAD_THRESHOLD),
-            chunksize=_RESUMABLE_CHUNK_SIZE,
-        )
+            size = os.path.getsize(local_path)
+            media = MediaFileUpload(
+                local_path,
+                resumable=(size > _SIMPLE_UPLOAD_THRESHOLD),
+                chunksize=_RESUMABLE_CHUNK_SIZE,
+            )
 
         fields = ("id,name,mimeType,md5Checksum,modifiedTime,size,"
                   "headRevisionId")
