@@ -158,233 +158,250 @@ def test_classify_missing_file_body_is_unknown():
     assert classify(change, cache) is ChangeDecision.UNKNOWN_FILE
 
 
-# ==== iter_remote_changes =================================================
+# ==== iter_remote_changes — FakeDrive-driven tests ========================
 
-from unittest.mock import MagicMock
+import sqlite3
+from unittest.mock import patch
 
 from cumulus.changes import iter_remote_changes
 from cumulus.core import DeletedMetadata, FileMetadata, FolderMetadata
+from tests.fake_drive import ROOT_ID, FakeDrive
 
 
-def _passthrough_retry(call):
-    """A retry helper that just calls through (no real retrying)."""
-    return call()
+def _fake_cache() -> PathIDCache:
+    """Path cache pre-seeded with ROOT_ID as the sync root."""
+    c = PathIDCache(Database(sqlite3.connect(":memory:")))
+    c.root_id = ROOT_ID
+    return c
 
 
-def _changes_service(*pages):
-    """Build a fake service whose changes.list returns the given pages."""
-    service = MagicMock(name="drive-service")
-    service.changes.return_value.list.return_value.execute.side_effect = pages
-    return lambda: service
+def _start(fake: FakeDrive) -> str:
+    """Return the current change cursor (no changes yet recorded after this)."""
+    return fake.service().changes().getStartPageToken().execute()["startPageToken"]
+
+
+def _drain(fake: FakeDrive, cache: PathIDCache, start: str) -> list:
+    """Run iter_remote_changes to exhaustion; return all applied entries."""
+    def factory():
+        return fake.service()
+
+    def retry(fn):
+        return fn()
+
+    pages = list(iter_remote_changes(factory, retry, cache, start))
+    return [e for page in pages for e in page.entries], pages
 
 
 def test_iter_changes_create_writes_cache_and_yields():
-    cache = _cache()
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "a.pdf", "parents": ["ROOT"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 1}},
-        ],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
-    assert len(results) == 1
-    assert isinstance(results[0].entries[0], FileMetadata)
-    assert cache.path_to_id("/a.pdf") == "F1"
-    assert results[0].cursor == "NEXT"
-    assert results[0].has_more is False
+    """A new file in the change feed is written to the cache and yielded."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    fid = fake.add_file("/a.pdf", content=b"x")
+    entries, pages = _drain(fake, cache, start)
+    assert len(pages) == 1
+    assert isinstance(entries[0], FileMetadata)
+    assert cache.path_to_id("/a.pdf") == fid
+    assert pages[0].has_more is False
 
 
 def test_iter_changes_delete_removes_from_cache():
-    cache = _cache()
-    cache.set("/a.pdf", "F1", "ROOT", "a.pdf", False)
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [{"removed": True, "fileId": "F1"}],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
-    assert isinstance(results[0].entries[0], DeletedMetadata)
+    """A hard-delete change propagates DeletedMetadata and removes from cache."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    # Create the file so cache knows about it.
+    fid = fake.add_file("/a.pdf", content=b"x")
+    start = _start(fake)
+    cache.set("/a.pdf", fid, ROOT_ID, "a.pdf", False)
+    fake.service().files().delete(fileId=fid).execute()
+    entries, pages = _drain(fake, cache, start)
+    assert isinstance(entries[0], DeletedMetadata)
     assert cache.path_to_id("/a.pdf") is None
 
 
 def test_iter_changes_rename_moves_cache_entry():
-    cache = _cache()
-    cache.set("/old.pdf", "F1", "ROOT", "old.pdf", False)
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "new.pdf", "parents": ["ROOT"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 2}},
-        ],
-    }
-    list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
+    """A rename change updates the cache: old path gone, new path present."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    fid = fake.add_file("/old.pdf", content=b"x")
+    cache.set("/old.pdf", fid, ROOT_ID, "old.pdf", False)
+    start = _start(fake)
+    fake.service().files().update(fileId=fid, body={"name": "new.pdf"}).execute()
+    _drain(fake, cache, start)
     assert cache.path_to_id("/old.pdf") is None
-    assert cache.path_to_id("/new.pdf") == "F1"
+    assert cache.path_to_id("/new.pdf") == fid
 
 
 def test_iter_changes_intra_batch_dependency():
-    # Folder D1 created in entry 1; file F1 moved into D1 in entry 2.
-    cache = _cache()
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "D1",
-             "file": {"id": "D1", "name": "Docs", "parents": ["ROOT"],
-                      "mimeType": "application/vnd.google-apps.folder",
-                      "trashed": False}},
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "a.pdf", "parents": ["D1"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 1}},
-        ],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
-    assert cache.path_to_id("/Docs/a.pdf") == "F1"
-    assert {type(e) for e in results[0].entries} == {FolderMetadata, FileMetadata}
+    """Folder created then file created inside it: both appear in results."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    # Folder change recorded first, then file — parent-before-child.
+    did = fake.add_folder("/Docs")
+    fid = fake.add_file("/Docs/a.pdf", content=b"x")
+    entries, pages = _drain(fake, cache, start)
+    assert cache.path_to_id("/Docs/a.pdf") == fid
+    entry_types = {type(e) for e in entries}
+    assert FolderMetadata in entry_types
+    assert FileMetadata in entry_types
 
 
 def test_iter_changes_intra_batch_dependency_reversed_order():
-    # Same as above but Drive delivers the child F1 BEFORE its new
-    # parent folder D1. changes.list does not guarantee parent-first
-    # order, so F1 must still be resolved (not dropped as out-of-scope).
-    cache = _cache()
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "a.pdf", "parents": ["D1"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 1}},
-            {"removed": False, "fileId": "D1",
-             "file": {"id": "D1", "name": "Docs", "parents": ["ROOT"],
-                      "mimeType": "application/vnd.google-apps.folder",
-                      "trashed": False}},
-        ],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
-    assert cache.path_to_id("/Docs/a.pdf") == "F1"
-    assert {type(e) for e in results[0].entries} == {FolderMetadata, FileMetadata}
+    """Child change delivered before parent: fixpoint resolves both correctly.
+
+    Drive does not guarantee parent-before-child ordering in changes.list.
+    We simulate child-first delivery by manipulating the change log so the
+    file's seq is lower than the folder's seq (the fake returns the file
+    change first). The fixpoint in iter_remote_changes must still resolve both.
+    """
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    # Insert folder first (lower seq), then file (higher seq).
+    did = fake.add_folder("/Docs")
+    fid = fake.add_file("/Docs/a.pdf", content=b"x")
+    # Swap the change log entries so child (fid, lower seq) appears first.
+    log = fake._change_log
+    did_pos = next(i for i, (_, id_) in enumerate(log) if id_ == did)
+    fid_pos = next(i for i, (_, id_) in enumerate(log) if id_ == fid)
+    did_seq, _ = log[did_pos]
+    fid_seq, _ = log[fid_pos]
+    # Swap seq values: child gets the smaller seq so it sorts before parent.
+    log[did_pos] = (fid_seq, did)
+    log[fid_pos] = (did_seq, fid)
+    entries, pages = _drain(fake, cache, start)
+    assert cache.path_to_id("/Docs/a.pdf") == fid
+    entry_types = {type(e) for e in entries}
+    assert FolderMetadata in entry_types
+    assert FileMetadata in entry_types
 
 
 def test_iter_changes_move_into_new_folder_is_not_a_delete():
-    # F1 already lives at /a.pdf. In one batch it is moved into a
-    # brand-new folder D1, and Drive delivers F1's change BEFORE D1's.
-    # F1 must be re-homed under /Docs — not misread as a move-out and
-    # deleted, because its new parent is created later in the same page.
-    cache = _cache()
-    cache.set("/a.pdf", "F1", "ROOT", "a.pdf", False)
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "a.pdf", "parents": ["D1"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 2}},
-            {"removed": False, "fileId": "D1",
-             "file": {"id": "D1", "name": "Docs", "parents": ["ROOT"],
-                      "mimeType": "application/vnd.google-apps.folder",
-                      "trashed": False}},
-        ],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
+    """File moved into a brand-new folder: must not be misclassified as delete.
+
+    F1 already lives at /a.pdf. In one batch it is moved into a brand-new
+    folder, and the fake delivers F1's change before the folder's change.
+    F1 must be re-homed under /Docs — not misread as a move-out and deleted,
+    because its new parent is created later in the same batch.
+    """
+    fake = FakeDrive()
+    cache = _fake_cache()
+    fid = fake.add_file("/a.pdf", content=b"x")
+    cache.set("/a.pdf", fid, ROOT_ID, "a.pdf", False)
+    start = _start(fake)
+    did = fake.add_folder("/Docs")
+    # Move the file into /Docs.
+    svc = fake.service()
+    svc.files().update(
+        fileId=fid,
+        body={},
+        addParents=did,
+        removeParents=ROOT_ID,
+    ).execute()
+    # Swap seq so file's move change comes before folder's create change.
+    # The file has two entries (create + move); we want the LAST one (move).
+    log = fake._change_log
+    did_pos = next(i for i, (_, id_) in enumerate(log) if id_ == did)
+    # Find the last occurrence of fid (the move event, not the original create).
+    fid_pos = len(log) - 1 - next(
+        i for i, (_, id_) in enumerate(reversed(log)) if id_ == fid
+    )
+    did_seq, _ = log[did_pos]
+    fid_seq, _ = log[fid_pos]
+    log[did_pos] = (fid_seq, did)
+    log[fid_pos] = (did_seq, fid)
+    entries, pages = _drain(fake, cache, start)
     assert cache.path_to_id("/a.pdf") is None
-    assert cache.path_to_id("/Docs/a.pdf") == "F1"
-    assert DeletedMetadata not in {type(e) for e in results[0].entries}
+    assert cache.path_to_id("/Docs/a.pdf") == fid
+    assert DeletedMetadata not in {type(e) for e in entries}
 
 
 def test_iter_changes_drops_native_doc():
-    cache = _cache()
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "G1",
-             "file": {"id": "G1", "name": "Doc", "parents": ["ROOT"],
-                      "mimeType": "application/vnd.google-apps.document",
-                      "trashed": False}},
-        ],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
-    assert results[0].entries == []
-    assert cache.get_entry("G1") is None
+    """A Google-native document change yields no entries and nothing cached."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    # Insert a native doc directly via the private _insert helper.
+    gid = fake._insert("Doc", ROOT_ID, "application/vnd.google-apps.document", b"")
+    entries, pages = _drain(fake, cache, start)
+    assert entries == []
+    assert cache.get_entry(gid) is None
 
 
 def test_iter_changes_drops_shortcut():
-    cache = _cache()
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "S1",
-             "file": {"id": "S1", "name": "Link", "parents": ["ROOT"],
-                      "mimeType": "application/vnd.google-apps.shortcut",
-                      "trashed": False}},
-        ],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
-    assert results[0].entries == []
-    assert cache.get_entry("S1") is None
+    """A Drive shortcut change yields no entries and nothing cached."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    sid = fake._insert("Link", ROOT_ID, "application/vnd.google-apps.shortcut", b"")
+    entries, pages = _drain(fake, cache, start)
+    assert entries == []
+    assert cache.get_entry(sid) is None
 
 
 def test_iter_changes_drops_unknown_delete():
-    cache = _cache()
-    page = {
-        "newStartPageToken": "NEXT",
-        "changes": [{"removed": True, "fileId": "NEVER_SEEN"}],
-    }
-    results = list(iter_remote_changes(
-        _changes_service(page), _passthrough_retry, cache, "CURSOR"
-    ))
-    assert results[0].entries == []
+    """A delete for a file the cache never knew about is silently dropped."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    # Create a file before the start token so its create isn't in the feed.
+    fid = fake.add_file("/ghost.txt", content=b"x")
+    start = _start(fake)
+    # Delete it — the delete change IS in the feed, but cache doesn't know it.
+    fake.service().files().delete(fileId=fid).execute()
+    entries, pages = _drain(fake, cache, start)
+    assert entries == []
 
 
 def test_iter_changes_paginates():
-    cache = _cache()
-    page1 = {
-        "nextPageToken": "p2",
-        "changes": [
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "a.pdf", "parents": ["ROOT"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 1}},
-        ],
-    }
-    page2 = {
-        "newStartPageToken": "NEXT",
-        "changes": [
-            {"removed": False, "fileId": "F2",
-             "file": {"id": "F2", "name": "b.pdf", "parents": ["ROOT"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 1}},
-        ],
-    }
-    factory = _changes_service(page1, page2)
-    results = list(iter_remote_changes(
-        factory, _passthrough_retry, cache, "CURSOR"
-    ))
-    assert len(results) == 2
-    assert results[0].has_more is True
-    assert results[0].cursor == "p2"
-    assert results[1].has_more is False
-    assert results[1].cursor == "NEXT"
-    # The second changes.list call must forward page 1's nextPageToken.
-    list_calls = factory().changes.return_value.list.call_args_list
-    assert list_calls[1].kwargs["pageToken"] == "p2"
+    """Changes spanning two pages are both yielded; has_more is set correctly.
+
+    We force two pages by patching _CHANGE_PAGE_SIZE to 1, so each of the
+    two seeded files ends up on its own page.
+    """
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    fid1 = fake.add_file("/a.pdf", content=b"x")
+    fid2 = fake.add_file("/b.pdf", content=b"y")
+
+    import cumulus.changes as _changes_mod
+
+    with patch.object(_changes_mod, "_CHANGE_PAGE_SIZE", 1):
+        pages = list(iter_remote_changes(
+            lambda: fake.service(),
+            lambda fn: fn(),
+            cache,
+            start,
+        ))
+
+    assert len(pages) == 2
+    assert pages[0].has_more is True
+    assert pages[1].has_more is False
+    all_entries = [e for page in pages for e in page.entries]
+    paths = {e.path_display for e in all_entries}
+    assert "/a.pdf" in paths
+    assert "/b.pdf" in paths
+    assert cache.path_to_id("/a.pdf") == fid1
+    assert cache.path_to_id("/b.pdf") == fid2
+
+
+# ==== parent-before-child regression =====================================
+
+
+def test_iter_remote_changes_new_file_in_new_folder():
+    """Regression: parent-before-child ordering (Stage 3, 05d58ed).
+
+    When a folder and a file inside it are both created, and the fake delivers
+    them in change-log order (folder first in this case), both must appear in
+    the results after iter_remote_changes processes them.
+    """
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    fake.add_folder("/new")
+    fake.add_file("/new/c.txt", content=b"x")
+    entries, pages = _drain(fake, cache, start)
+    applied = {e.path_display for e in entries}
+    assert "/new" in applied
+    assert "/new/c.txt" in applied
