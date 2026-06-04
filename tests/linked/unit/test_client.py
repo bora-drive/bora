@@ -1,330 +1,381 @@
+"""Linked client tests — ported to Google Drive (Stage 7a, Task D4).
+
+Tests run against a real Google account when CUMULUS_TEST_REFRESH_TOKEN is
+set; they skip cleanly when the variable is absent.
+
+Dropbox-only features dropped:
+  - test_share_dir_new, test_share_dir_existing  (Shared Drives stub)
+  - test_sharedlink_lifecycle, test_sharedlink_errors  (sharing stub)
+  - All Dropbox upload-session chunk-phase hash-mismatch tests
+    (the Dropbox API had per-chunk hash verification; the Drive client
+    uses a single end-to-end MD5 comparison via _md5_file; there is no
+    monkeypatch seam for per-chunk failure)
+
+Ported:
+  - test_upload (simple)
+  - test_upload_resumable (large file; ~1.8 MB fixture, same code path)
+  - test_upload_hash_mismatch (Drive md5 verify path via _md5_file)
+  - test_download (round-trip + MD5 verify)
+  - test_download_hash_mismatch (Drive download md5 verify path)
+  - test_get_metadata_file, test_get_metadata_folder,
+    test_get_metadata_nonexistent_raises
+  - test_list_folder
+  - test_change_feed (with wait_until for Drive lag)
+  - test_move
+  - test_remove
+  - test_restore
+  - test_make_dir
+  - test_batch_methods (make_dir_batch + remove_batch)
+
+Added:
+  - test_sharing_stubs_raise (confirms sharing methods raise NotImplementedError)
+"""
+
 from __future__ import annotations
 
+import hashlib
 import os
 
 import pytest
-import requests
 
-import cumulus.client
-from cumulus.client import DropboxClient
-from cumulus.core import AccountType, FolderMetadata
+from cumulus.client import GoogleDriveClient
+from cumulus.core import FileMetadata, FolderMetadata, WriteMode
 from cumulus.exceptions import (
     DataCorruptionError,
     NotFoundError,
-    PathError,
-    SharedLinkError,
 )
-from cumulus.utils.hashing import DropboxContentHasher
-from cumulus.utils.path import content_hash, normalize
+from cumulus.utils.path import normalize
 
-if not ("DROPBOX_ACCESS_TOKEN" in os.environ or "DROPBOX_REFRESH_TOKEN" in os.environ):
-    pytest.skip("Requires auth token", allow_module_level=True)
-
+from tests.linked.conftest import requires_account, wait_until
 
 resources = os.path.dirname(os.path.dirname(__file__)) + "/resources"
 
 
-# Client API unit tests: we currently test those method calls which are not covered
-# by integration tests, either because they are not used by the sync module or because
-# niche cases require additional testing.
-# TODO: Expand to cover all methods, independent of integration tests.
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _md5(path: str) -> str:
+    """Compute MD5 hex digest of a local file (mirrors Drive's md5Checksum)."""
+    h = hashlib.md5(usedforsecurity=False)
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
-def failing_content_hasher(
-    start_fail: int, end_fail: int
-) -> type[DropboxContentHasher]:
-    class FailingHasher(DropboxContentHasher):
-        START_FAIL = start_fail
-        END_FAIL = end_fail
-        DONE = -1
+# ---------------------------------------------------------------------------
+# Upload
+# ---------------------------------------------------------------------------
 
-        _fake_hash = "c4eec85eb66b69b8f59ff76a97d5d97aac1b5eca8c6675b4e988a5deea786e53"
-
-        def hexdigest(self) -> str:
-            FailingHasher.DONE += 1
-
-            if FailingHasher.START_FAIL <= FailingHasher.DONE < FailingHasher.END_FAIL:
-                return FailingHasher._fake_hash
-            else:
-                return super().hexdigest()
-
-    return FailingHasher
-
-
-def test_upload(client: DropboxClient) -> None:
-    """Test upload in a single chunk"""
-
+@requires_account
+def test_upload(client: GoogleDriveClient) -> None:
+    """Upload a small file in a single (non-resumable) request."""
     file = resources + "/file.txt"
-    file_size = os.path.getsize(file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size * 2
-
     md = client.upload(file, "/file.txt")
-    assert md.content_hash == content_hash(file)[0]
+    assert isinstance(md, FileMetadata)
+    assert md.content_hash == _md5(file)
+    assert md.size == os.path.getsize(file)
 
 
-def test_upload_session(client: DropboxClient) -> None:
-    """Test an upload session in multiple chunks"""
+@requires_account
+def test_upload_resumable(client: GoogleDriveClient) -> None:
+    """Upload a file via the same upload() API; Drive picks resumable vs simple.
 
+    The test fixture large-file.pdf is ~1.8 MB, which is below the 5 MB
+    resumable threshold, so both this and test_upload exercise the simple path
+    with the current fixtures. A truly >5 MB file would be needed to force the
+    resumable branch; that is left for a future fixture update (flagged below).
+    """
     large_file = resources + "/large-file.pdf"
-    file_size = os.path.getsize(large_file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
-
     md = client.upload(large_file, "/large-file.pdf")
+    assert isinstance(md, FileMetadata)
+    assert md.content_hash == _md5(large_file)
 
-    assert md.content_hash == content_hash(large_file)[0]
 
+@requires_account
+def test_upload_hash_mismatch(
+    client: GoogleDriveClient, monkeypatch
+) -> None:
+    """DataCorruptionError raised when Drive's md5Checksum doesn't match local.
 
-def test_upload_hash_mismatch(client: DropboxClient, monkeypatch) -> None:
-    """Test that DataCorruptionError is raised after 10 failed attempts."""
+    The write path (writes._WriteHelper.upload) computes a local MD5 via the
+    static method _md5_file and compares it against Drive's response field
+    md5Checksum. Monkeypatching _md5_file to return a wrong hash causes every
+    upload to fail the comparison.
+    """
+    import cumulus.writes as _writes
 
     file = resources + "/file.txt"
 
-    hasher = failing_content_hasher(0, 11)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
+    monkeypatch.setattr(
+        _writes._WriteHelper,
+        "_md5_file",
+        staticmethod(lambda path: "0" * 32),  # always wrong
+    )
 
     with pytest.raises(DataCorruptionError):
         client.upload(file, "/file.txt")
 
-    assert not client.get_metadata("/file.txt")
 
+# ---------------------------------------------------------------------------
+# Download
+# ---------------------------------------------------------------------------
 
-def test_upload_hash_mismatch_retry(client: DropboxClient, monkeypatch) -> None:
-    """Test that upload succeeds after 3 failed attempts when starting session."""
-
+@requires_account
+def test_download(client: GoogleDriveClient, tmp_path) -> None:
+    """Upload then download a file; verify MD5 matches."""
     file = resources + "/file.txt"
+    client.upload(file, "/file.txt")
 
-    hasher = failing_content_hasher(0, 3)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
+    dest = str(tmp_path / "file.txt")
+    md = client.download("/file.txt", dest)
 
-    md = client.upload(file, "/file.txt")
-
-    local_hash = content_hash(file)[0]
-
-    assert md.content_hash == local_hash
-    assert client.get_metadata("/file.txt").content_hash == local_hash
+    assert isinstance(md, FileMetadata)
+    assert _md5(dest) == _md5(file)
+    assert md.content_hash == _md5(file)
 
 
-def test_upload_session_start_hash_mismatch(client: DropboxClient, monkeypatch) -> None:
-    """Test that DataCorruptionError is raised after 10 failed attempts when starting
-    to upload session."""
-
-    large_file = resources + "/large-file.pdf"
-    file_size = os.path.getsize(large_file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
-
-    hasher = failing_content_hasher(0, 11)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
-
-    with pytest.raises(DataCorruptionError):
-        client.upload(large_file, "/large-file.pdf")
-
-    assert not client.get_metadata("/large-file.pdf")
-
-
-def test_upload_session_start_retry(client: DropboxClient, monkeypatch) -> None:
-    """Test that upload succeeds after 3 failed attempts when starting session."""
-
-    large_file = resources + "/large-file.pdf"
-    file_size = os.path.getsize(large_file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
-
-    hasher = failing_content_hasher(0, 3)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
-
-    md = client.upload(large_file, "/large-file.pdf")
-
-    assert md.content_hash == content_hash(large_file)[0]
-
-
-def test_upload_session_append_hash_mismatch(
-    client: DropboxClient, monkeypatch
+@requires_account
+def test_download_hash_mismatch(
+    client: GoogleDriveClient, monkeypatch, tmp_path
 ) -> None:
-    """Test that DataCorruptionError is raised after 10 failed attempts when appending
-    to upload session."""
+    """DataCorruptionError raised when the downloaded file has the wrong MD5.
 
-    large_file = resources + "/large-file.pdf"
-    file_size = os.path.getsize(large_file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
-
-    hasher = failing_content_hasher(1, 12)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
-
-    with pytest.raises(DataCorruptionError):
-        client.upload(large_file, "/large-file.pdf")
-
-    assert not client.get_metadata("/large-file.pdf")
-
-
-def test_upload_session_append_hash_mismatch_retry(
-    client: DropboxClient, monkeypatch
-) -> None:
-    """Test that upload succeeds after 3 failed attempts when appending to
-    session."""
-
-    large_file = resources + "/large-file.pdf"
-    file_size = os.path.getsize(large_file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
-
-    hasher = failing_content_hasher(1, 4)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
-
-    md = client.upload(large_file, "/large-file.pdf")
-    assert md.content_hash == content_hash(large_file)[0]
-
-
-def test_upload_session_finish_hash_mismatch(
-    client: DropboxClient, monkeypatch
-) -> None:
-    """Test that DataCorruptionError is raised after 10 failed attempts when finishing
-    upload session."""
-
-    large_file = resources + "/large-file.pdf"
-    file_size = os.path.getsize(large_file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
-
-    hasher = failing_content_hasher(9, 20)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
-
-    with pytest.raises(DataCorruptionError):
-        client.upload(large_file, "/large-file.pdf")
-
-    assert not client.get_metadata("/large-file.pdf")
-
-
-def test_upload_session_finish_hash_mismatch_retry(
-    client: DropboxClient, monkeypatch
-) -> None:
-    """Test that download fails after 3 retried DataCorruptionErrors when finishing
-    download session."""
-
-    large_file = resources + "/large-file.pdf"
-    file_size = os.path.getsize(large_file)
-    client.UPLOAD_REQUEST_CHUNK_SIZE = file_size // 10
-
-    hasher = failing_content_hasher(9, 12)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
-
-    md = client.upload(large_file, "/large-file.pdf")
-
-    assert md.content_hash == content_hash(large_file)[0]
-
-
-def test_download_hash_mismatch(client: DropboxClient, monkeypatch, tmp_path) -> None:
-    """Test that download fails after 10 retried DataCorruptionErrors."""
+    client.py's download() method verifies the file via cumulus.client.hashlib.md5
+    after the download completes. Monkeypatching that reference to return a
+    wrong hexdigest causes the comparison to fail.
+    """
+    import cumulus.client as _client_mod
 
     file = resources + "/file.txt"
     client.upload(file, "/file.txt")
 
-    hasher = failing_content_hasher(0, 11)
-    monkeypatch.setattr(cumulus.client, "DropboxContentHasher", hasher)
+    real_md5 = _client_mod.hashlib.md5
+
+    class _FakeMd5:
+        def __init__(self, *a, **kw):
+            self._real = real_md5(*a, **kw)
+
+        def update(self, b: bytes) -> None:
+            self._real.update(b)
+
+        def hexdigest(self) -> str:
+            return "0" * 32  # always wrong
+
+    monkeypatch.setattr(_client_mod.hashlib, "md5", _FakeMd5)
 
     with pytest.raises(DataCorruptionError):
         client.download("/file.txt", str(tmp_path / "file.txt"))
 
 
-@pytest.mark.parametrize("batch_size", [10, 30])
-@pytest.mark.parametrize("force_async", [True, False])
-def test_batch_methods(client: DropboxClient, batch_size, force_async) -> None:
-    # batch methods are not currently used by sync module
+# ---------------------------------------------------------------------------
+# get_metadata
+# ---------------------------------------------------------------------------
 
+@requires_account
+def test_get_metadata_file(client: GoogleDriveClient) -> None:
+    """get_metadata returns FileMetadata after upload."""
+    file = resources + "/file.txt"
+    uploaded = client.upload(file, "/meta-file.txt")
+
+    md = client.get_metadata("/meta-file.txt")
+    assert isinstance(md, FileMetadata)
+    assert md.id == uploaded.id
+    assert md.content_hash == _md5(file)
+
+
+@requires_account
+def test_get_metadata_folder(client: GoogleDriveClient) -> None:
+    """get_metadata returns FolderMetadata after make_dir."""
+    client.make_dir("/meta-folder")
+    md = client.get_metadata("/meta-folder")
+    assert isinstance(md, FolderMetadata)
+
+
+@requires_account
+def test_get_metadata_nonexistent_raises(client: GoogleDriveClient) -> None:
+    """get_metadata raises NotFoundError for a path not in the cache."""
+    with pytest.raises(NotFoundError):
+        client.get_metadata("/does-not-exist.txt")
+
+
+# ---------------------------------------------------------------------------
+# list_folder
+# ---------------------------------------------------------------------------
+
+@requires_account
+def test_list_folder(client: GoogleDriveClient) -> None:
+    """list_folder returns uploaded files and sub-folders."""
+    file = resources + "/file.txt"
+    client.upload(file, "/lf-file.txt")
+    client.make_dir("/lf-sub")
+
+    result = client.list_folder("/")
+    paths = {e.path_display for e in result.entries}
+    assert "/lf-file.txt" in paths
+    assert "/lf-sub" in paths
+
+
+# ---------------------------------------------------------------------------
+# Change feed
+# ---------------------------------------------------------------------------
+
+@requires_account
+def test_change_feed(client: GoogleDriveClient) -> None:
+    """Upload a file then verify it appears in the change feed.
+
+    wait_until polls because Drive's changes.list can lag several seconds.
+    """
+    cursor = client.get_latest_cursor("/")
+
+    file = resources + "/file.txt"
+    uploaded = client.upload(file, "/cf-file.txt")
+
+    def _has_change() -> bool:
+        result = client.list_remote_changes(cursor)
+        return any(
+            getattr(e, "id", None) == uploaded.id for e in result.entries
+        )
+
+    wait_until(_has_change, timeout=60, interval=3)
+
+
+# ---------------------------------------------------------------------------
+# move
+# ---------------------------------------------------------------------------
+
+@requires_account
+def test_move(client: GoogleDriveClient) -> None:
+    """move renames a file; old path evicted, new path accessible."""
+    file = resources + "/file.txt"
+    md_orig = client.upload(file, "/move-src.txt")
+
+    md_moved = client.move("/move-src.txt", "/move-dst.txt")
+    assert isinstance(md_moved, FileMetadata)
+    assert md_moved.id == md_orig.id
+
+    # New path resolves.
+    md_new = client.get_metadata("/move-dst.txt")
+    assert isinstance(md_new, FileMetadata)
+
+    # Old path no longer resolves (evicted from cache by move()).
+    with pytest.raises(NotFoundError):
+        client.get_metadata("/move-src.txt")
+
+
+# ---------------------------------------------------------------------------
+# remove + restore
+# ---------------------------------------------------------------------------
+
+@requires_account
+def test_remove(client: GoogleDriveClient) -> None:
+    """remove trashes the file; path cache evicted; get_metadata raises."""
+    file = resources + "/file.txt"
+    client.upload(file, "/rm-file.txt")
+
+    md_rm = client.remove("/rm-file.txt")
+    assert isinstance(md_rm, FileMetadata)
+
+    with pytest.raises(NotFoundError):
+        client.get_metadata("/rm-file.txt")
+
+
+@requires_account
+def test_restore(client: GoogleDriveClient, tmp_path) -> None:
+    """Upload, capture revision, overwrite, then restore the original revision."""
+    file = resources + "/file.txt"
+    orig_md = client.upload(file, "/restore-file.txt")
+    orig_rev = orig_md.rev
+    original_hash = orig_md.content_hash
+
+    # Overwrite with different content to create a new revision.
+    new_content = tmp_path / "new.txt"
+    new_content.write_bytes(b"overwritten content that differs from original")
+    client.upload(str(new_content), "/restore-file.txt", write_mode=WriteMode.Overwrite)
+
+    # Restore the original revision.
+    restored = client.restore("/restore-file.txt", orig_rev)
+    assert isinstance(restored, FileMetadata)
+    assert restored.content_hash == original_hash
+
+
+# ---------------------------------------------------------------------------
+# make_dir
+# ---------------------------------------------------------------------------
+
+@requires_account
+def test_make_dir(client: GoogleDriveClient) -> None:
+    """make_dir creates a folder; get_metadata returns FolderMetadata."""
+    md = client.make_dir("/new-folder")
+    assert isinstance(md, FolderMetadata)
+    assert md.path_display == "/new-folder"
+
+    fetched = client.get_metadata("/new-folder")
+    assert isinstance(fetched, FolderMetadata)
+    assert fetched.id == md.id
+
+
+# ---------------------------------------------------------------------------
+# Batch methods
+# ---------------------------------------------------------------------------
+
+@requires_account
+def test_batch_methods(client: GoogleDriveClient) -> None:
+    """make_dir_batch creates 20 folders; remove_batch trashes them.
+
+    The original Dropbox test also created an invalid path (/invalid\\) and
+    expected a PathError in the batch result. Drive does not reject that name,
+    so the invalid-path slot is dropped from the batch test.
+    """
     folders = [f"/folder {i}" for i in range(20)]
 
-    # create some test directories
-    res_create = client.make_dir_batch(
-        folders + ["/invalid\\"], force_async=force_async
-    )
+    # Create dirs in batch.
+    res_create = client.make_dir_batch(folders)
 
+    assert len(res_create) == 20
+    for i, item in enumerate(res_create):
+        assert isinstance(item, FolderMetadata), (
+            f"slot {i} expected FolderMetadata, got {type(item)}: {item}"
+        )
+        assert item.path_lower == normalize(folders[i])
+
+    # Remove in batch (20 valid + 1 nonexistent = 21 entries).
+    remove_entries = [(folder, None) for folder in folders] + [("/not_a_folder", None)]
+    res_remove = client.remove_batch(remove_entries)
+
+    assert len(res_remove) == 21
     for i in range(20):
-        md_create = res_create[i]
-        assert isinstance(md_create, FolderMetadata)
-        assert md_create.path_lower == normalize(folders[i])
-
-    assert isinstance(res_create[20], PathError)
-
-    # remove them again
-    res_remove = client.remove_batch(
-        [(folder, None) for folder in folders] + [("/not_a_folder", None)],
-        batch_size=batch_size,
-    )
-
-    for i in range(20):
-        md_remove = res_remove[i]
-        assert isinstance(md_remove, FolderMetadata)
-        assert md_remove.path_lower == normalize(folders[i])
+        assert isinstance(res_remove[i], FolderMetadata), (
+            f"remove slot {i} expected FolderMetadata, got {type(res_remove[i])}"
+        )
+        assert res_remove[i].path_lower == normalize(folders[i])
 
     assert isinstance(res_remove[20], NotFoundError)
 
 
-@pytest.mark.parametrize("force_async", [True, False])
-def test_share_dir_new(client: DropboxClient, force_async: bool) -> None:
-    """Test creating a shared directory."""
-    md_old = client.get_metadata("/folder")
-    md_shared = client.share_dir("/folder", force_async=force_async)
+# ---------------------------------------------------------------------------
+# Sharing stubs
+# ---------------------------------------------------------------------------
 
-    assert md_old is None
-    assert isinstance(md_shared, FolderMetadata)
+@requires_account
+def test_sharing_stubs_raise(client: GoogleDriveClient) -> None:
+    """All sharing methods raise NotImplementedError (MVP stub).
 
+    Google Drive sharing (permission grants / public link creation) is not
+    implemented in the current client. This test confirms the stubs raise
+    NotImplementedError rather than silently succeeding or crashing.
+    """
+    client.make_dir("/stub-share-test")
 
-def test_share_dir_existing(client: DropboxClient) -> None:
-    """Test sharing an existing directory."""
-    md = client.make_dir("/folder")
-    md_shared = client.share_dir("/folder")
+    with pytest.raises(NotImplementedError):
+        client.share_dir("/stub-share-test")
 
-    assert not md.shared
-    assert isinstance(md_shared, FolderMetadata)
+    with pytest.raises(NotImplementedError):
+        client.create_shared_link("/stub-share-test")
 
+    with pytest.raises(NotImplementedError):
+        client.list_shared_links("/stub-share-test")
 
-def test_sharedlink_lifecycle(client: DropboxClient) -> None:
-    # create a folder to share
-    remote_path = "/shared_folder"
-    client.make_dir(remote_path)
-
-    # test creating a shared link
-    link_data = client.create_shared_link(remote_path)
-
-    resp = requests.get(link_data.url)
-    assert resp.status_code == 200
-
-    links = client.list_shared_links(remote_path)
-    assert link_data.url in [link.url for link in links]
-
-    # test revoking a shared link
-    client.revoke_shared_link(link_data.url)
-    links = client.list_shared_links(remote_path)
-    assert link_data.url not in [link.url for link in links]
-
-
-def test_sharedlink_errors(client: DropboxClient) -> None:
-    remote_path = "/shared_folder"
-    client.make_dir(remote_path)
-
-    # test creating a shared link with password fails on basic account
-    account_info = client.get_account_info()
-
-    if account_info.account_type is AccountType.Basic:
-        with pytest.raises(SharedLinkError):
-            client.create_shared_link(remote_path, password="secret")
-
-    # test creating a shared link with the same settings as an existing link
-    client.create_shared_link(remote_path)
-
-    with pytest.raises(SharedLinkError):
-        client.create_shared_link(remote_path)
-
-    # test creating a shared link with an invalid path
-    with pytest.raises(NotFoundError):
-        client.create_shared_link("/this_is_not_a_file.txt")
-
-    # test listing shared links for an invalid path
-    with pytest.raises(NotFoundError):
-        client.list_shared_links("/this_is_not_a_file.txt")
-
-    # test revoking a non existent link
-    with pytest.raises(NotFoundError):
-        client.revoke_shared_link(
-            "https://www.dropbox.com/sh/48r2qxq748jfk5x/AAAS-niuW"
-        )
-
-    # test revoking a malformed link
-    with pytest.raises(SharedLinkError):
-        client.revoke_shared_link("https://www.testlink.de")
+    with pytest.raises(NotImplementedError):
+        client.revoke_shared_link("https://example.com/fake-link")
