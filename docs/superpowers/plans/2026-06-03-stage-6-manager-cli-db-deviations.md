@@ -27,6 +27,12 @@ the `--ignore` set (its Dropbox-era `test_migrate_path_root_*` tests exercise
 the deleted method — Stage 7 owns the rewrite). Run with
 `pytest tests/offline --ignore=tests/offline/test_manager.py -q`.
 
+> **Update (Stage 7a, 2026-06-04):** the `--ignore` is gone. Stage 7a deleted
+> the dead `test_migrate_path_root_*` tests, added real Drive manager tests, and
+> fixed the `test_event_handler.py` fixture errors. The offline suite now runs
+> fully green with `pytest tests/offline -q` (no `--ignore`). See
+> `docs/superpowers/plans/2026-06-04-stage-7a-test-infrastructure-deviations.md`.
+
 ## D1 — Pyro5 RPC field-rename audit
 
 The daemon exposes `Maestral` via `expose(Maestral)` (`daemon.py:466`). Every
