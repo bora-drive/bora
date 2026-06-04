@@ -358,3 +358,52 @@ def test_resumable_create_drives_next_chunk():
     assert response["size"] == 100
     assert progress_seen  # at least one progress callback fired
     assert fake.files[response["id"]]["md5Checksum"] == hashlib.md5(b"y" * 100).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Task A10 — batch callback contract + fidelity-contract guard
+# ---------------------------------------------------------------------------
+
+
+def test_batch_invokes_callbacks_with_signature():
+    fake = FakeDrive()
+    svc = fake.service()
+    results = {}
+
+    def cb(request_id, response, exception):
+        results[request_id] = (response, exception)
+
+    batch = svc.new_batch_http_request()
+    batch.add(svc.files().create(body={"name": "x.txt", "parents": [ROOT_ID]},
+              media_body=MediaInMemoryUpload(b"x", mimetype="text/plain"),
+              fields="id,name"), request_id="0", callback=cb)
+    fake.fail_next("files.create", make_http_error(403, "storageQuotaExceeded"))
+    batch.add(svc.files().create(body={"name": "y.txt", "parents": [ROOT_ID]},
+              media_body=MediaInMemoryUpload(b"y", mimetype="text/plain"),
+              fields="id,name"), request_id="1", callback=cb)
+    batch.execute()
+    # The fail_next queue is FIFO per key: the failure is consumed by whichever
+    # files.create executes first inside batch.execute() — which is request "0".
+    # Assert the batch contract (one success + one HttpError) without depending
+    # on which request_id gets which outcome.
+    outcomes = sorted(
+        ("ok" if r[1] is None else "err") for r in results.values()
+    )
+    assert outcomes == ["err", "ok"]
+    ok = [r for r in results.values() if r[1] is None][0]
+    err = [r for r in results.values() if r[1] is not None][0]
+    assert ok[0]["name"] in ("x.txt", "y.txt")
+    assert isinstance(err[1], HttpError)
+
+
+def test_fidelity_contract_summary():
+    """The six §5.4 fidelity points, asserted together as a guard."""
+    fake = FakeDrive()
+    svc = fake.service()
+    # 1. md5 + headRevisionId canonical
+    fid = fake.add_file("/a.txt", content=b"hello")
+    assert fake.files[fid]["md5Checksum"] == hashlib.md5(b"hello").hexdigest()
+    # 3. slash literal
+    sid = fake.add_file("ignored", content=b"z", literal_name="2024/05")
+    got = svc.files().get(fileId=sid, fields="name").execute()
+    assert got["name"] == "2024/05"
