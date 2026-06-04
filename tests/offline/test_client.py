@@ -3,10 +3,15 @@
 Drive API calls are mocked at the `_get_service()` boundary: each test
 builds a MagicMock service and assigns `client._get_service` to a Mock
 returning it.
+
+Round-trip tests (marked with the ``fake_drive`` fixture) use the
+in-memory FakeDrive in place of the real API so the full client
+translation code is exercised with realistic stateful responses.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import sqlite3
 from unittest.mock import MagicMock, Mock
@@ -15,9 +20,11 @@ import pytest
 
 from cumulus.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
 from cumulus.config import remove_configuration
+from cumulus.core import FileMetadata, FolderMetadata, WriteMode
 from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
 from cumulus.path_cache import PathIDCache
+from tests.fake_drive import ROOT_ID
 
 _CONFIG = "test-config-client-offline"
 
@@ -903,3 +910,256 @@ def test_restore_delegates_to_helper(client, monkeypatch):
     )
     assert client.restore("/a.txt", "rev5") == "sentinel"
     assert captured == {"remote_path": "/a.txt", "rev": "rev5"}
+
+
+# ==== FakeDrive round-trip tests ==========================================
+# These tests wire the real GoogleDriveClient to the in-memory FakeDrive
+# via the `client_on_fake` conftest fixture. They exercise real translation
+# code (client.py / writes.py / changes.py) against stateful fake responses.
+
+
+# ---- Step 1: new-file NotFoundError regression ---------------------------
+
+def test_get_metadata_unknown_path_raises_notfound(client_on_fake):
+    """Regression (Stage 5, 2ed6e33): get_metadata for a path the cache does
+    not know raises NotFoundError — the upload-decision path keys off this to
+    mean 'needs upload' rather than crashing.
+
+    Verified against client.py lines 551-557: path_cache.path_to_id returns
+    None for an unknown path, which triggers an explicit NotFoundError raise.
+    """
+    from cumulus.exceptions import NotFoundError
+
+    cof = client_on_fake
+    with pytest.raises(NotFoundError):
+        cof.client.get_metadata("/does-not-exist.txt")
+
+
+def test_check_requires_upload_for_new_file_returns_true(client_on_fake, tmp_path):
+    """End-to-end regression for the Stage 5 fix: when a local file has no
+    corresponding remote entry (path cache miss → NotFoundError), the
+    upload-decision function _check_requires_upload returns True (upload
+    required), rather than propagating the NotFoundError.
+
+    This uses the real FakeDrive client (not a monkeypatch) so the
+    NotFoundError is produced by the real get_metadata path-cache miss
+    logic in client.py.
+    """
+    import os
+    from datetime import datetime
+    from cumulus.sync import SyncEngine
+    from cumulus.models import (
+        SyncEvent, SyncDirection, SyncStatus, ItemType, ChangeType
+    )
+    from cumulus.utils.appdirs import get_home_dir
+
+    cof = client_on_fake
+
+    # Build a minimal SyncEngine wired to the same client and a real local dir.
+    local_dir = str(tmp_path)
+    engine = SyncEngine(cof.client)
+    engine.sync_path = local_dir
+
+    # Write a local file so the event has realistic attributes.
+    local_file = tmp_path / "new_file.txt"
+    content = b"brand new content"
+    local_file.write_bytes(content)
+    local_md5 = hashlib.md5(content).hexdigest()
+
+    # Build a synthetic added-file SyncEvent whose remote_path is completely
+    # unknown to the path cache and the fake.
+    remote_path = "/new_file.txt"
+    event = SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=None,
+        local_path=str(local_file),
+        rev=None,
+        content_hash=local_md5,
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=len(content),
+        completed=0,
+    )
+
+    # get_metadata("/new_file.txt") will raise NotFoundError because the path
+    # cache has no entry for it.  _check_requires_upload must catch that and
+    # return True (upload required).
+    result = engine._check_requires_upload(event)
+    assert result is True
+
+
+# ---- Step 2: round-trip tests via the fake -------------------------------
+
+def test_upload_then_get_metadata_shows_correct_fields(client_on_fake, tmp_path):
+    """Upload a real local file, then get_metadata returns correct md5 / rev / size."""
+    cof = client_on_fake
+
+    content = b"round trip content"
+    local_file = tmp_path / "up.txt"
+    local_file.write_bytes(content)
+
+    meta = cof.client.upload(str(local_file), "/up.txt", write_mode=WriteMode.Add)
+    assert isinstance(meta, FileMetadata)
+    assert meta.size == len(content)
+    assert meta.content_hash == hashlib.md5(content).hexdigest()
+    assert meta.rev  # non-empty revision ID
+
+    # get_metadata should now resolve (upload writes through to cache).
+    got = cof.client.get_metadata("/up.txt")
+    assert isinstance(got, FileMetadata)
+    assert got.size == len(content)
+    assert got.content_hash == hashlib.md5(content).hexdigest()
+    assert got.id == meta.id
+
+
+def test_list_folder_reflects_seeded_tree(client_on_fake):
+    """list_folder / list_folder_iterator reflects a fake-seeded tree."""
+    cof = client_on_fake
+    fake = cof.fake
+    cache = cof.client._path_cache
+
+    # Seed the fake and populate the path cache so list_folder_iterator can
+    # resolve the parent folder ID.
+    folder_id = fake.add_folder("/docs")
+    cache.set("/docs", folder_id, ROOT_ID, "docs", True)
+
+    file_id_a = fake.add_file("/docs/a.txt", content=b"alpha")
+    cache.set("/docs/a.txt", file_id_a, folder_id, "a.txt", False)
+
+    folder_id_sub = fake.add_folder("/docs/sub")
+    cache.set("/docs/sub", folder_id_sub, folder_id, "sub", True)
+
+    result = cof.client.list_folder("/docs")
+    ids = {e.id for e in result.entries}
+    assert file_id_a in ids
+    assert folder_id_sub in ids
+
+    # Iterator form: one page, has_more=False.
+    pages = list(cof.client.list_folder_iterator("/docs"))
+    assert len(pages) == 1
+    assert pages[0].has_more is False
+    assert {e.id for e in pages[0].entries} == ids
+
+
+def test_move_then_get_metadata_at_new_path(client_on_fake, tmp_path):
+    """move updates the path cache and get_metadata resolves at the new path."""
+    cof = client_on_fake
+    fake = cof.fake
+    cache = cof.client._path_cache
+
+    # Upload a file first (creates it in fake + seeds cache).
+    content = b"movable"
+    local_file = tmp_path / "orig.txt"
+    local_file.write_bytes(content)
+    meta = cof.client.upload(str(local_file), "/orig.txt", write_mode=WriteMode.Add)
+
+    # Seed destination parent (root is already known as ROOT_ID).
+    dest_folder_id = fake.add_folder("/dest")
+    cache.set("/dest", dest_folder_id, ROOT_ID, "dest", True)
+
+    # Move the file.
+    moved = cof.client.move("/orig.txt", "/dest/orig.txt")
+    assert isinstance(moved, (FileMetadata, FolderMetadata))
+    assert moved.id == meta.id
+
+    # get_metadata at new path must work.
+    got = cof.client.get_metadata("/dest/orig.txt")
+    assert isinstance(got, FileMetadata)
+    assert got.id == meta.id
+
+    # Old path must no longer resolve.
+    from cumulus.exceptions import NotFoundError
+    with pytest.raises(NotFoundError):
+        cof.client.get_metadata("/orig.txt")
+
+
+def test_remove_then_metadata_reflects_deletion(client_on_fake, tmp_path):
+    """remove trashes the item; subsequent get_metadata raises NotFoundError
+    (path evicted from cache), and the underlying Drive record is trashed.
+    Also confirms that a separate fresh client seeing the trashed record
+    via the change feed emits a DeletedMetadata entry."""
+    from cumulus.core import DeletedMetadata
+    from cumulus.exceptions import NotFoundError
+
+    cof = client_on_fake
+    fake = cof.fake
+    cache = cof.client._path_cache
+
+    # Upload a file.
+    content = b"disposable"
+    local_file = tmp_path / "del.txt"
+    local_file.write_bytes(content)
+    meta = cof.client.upload(str(local_file), "/del.txt", write_mode=WriteMode.Add)
+    file_id = meta.id
+
+    # Capture the cursor BEFORE the remove so we can replay the change.
+    cursor_before_remove = str(fake._seq)
+
+    # Re-seed the cache with the file so a second change-feed consumer can
+    # find the path (simulating a second client that has the path in its cache
+    # but hasn't processed the trash event yet).
+    cache.set("/del.txt", file_id, ROOT_ID, "del.txt", False)
+
+    # Remove it (trashes the item and evicts from cache).
+    cof.client.remove("/del.txt")
+
+    # 1. The Drive record is now trashed=True; the cache no longer has the path.
+    #    get_metadata should raise NotFoundError (cache miss after eviction).
+    with pytest.raises(NotFoundError):
+        cof.client.get_metadata("/del.txt")
+
+    # 2. The underlying fake record has trashed=True.
+    assert fake.files[file_id]["trashed"] is True
+
+    # 3. A fresh client (same fake, re-seeded cache) processes the change feed
+    #    and produces a DeletedMetadata for the trashed item.
+    import sqlite3 as _sqlite3
+    fresh_cache = PathIDCache(
+        __import__("cumulus.database.core", fromlist=["Database"]).Database(
+            _sqlite3.connect(":memory:")
+        )
+    )
+    fresh_cache.root_id = ROOT_ID
+    fresh_cache.set("/del.txt", file_id, ROOT_ID, "del.txt", False)
+
+    fresh_client = GoogleDriveClient(
+        "test-config-fresh", CredentialStorage("test-config-fresh"), fresh_cache
+    )
+    fresh_client._get_service = lambda: fake.service()
+
+    changes_result = fresh_client.list_remote_changes(cursor_before_remove)
+    deleted_paths = {
+        e.path_display for e in changes_result.entries
+        if isinstance(e, DeletedMetadata)
+    }
+    assert "/del.txt" in deleted_paths, (
+        f"Expected DeletedMetadata for /del.txt; got entries: {changes_result.entries}"
+    )
+
+    # Cleanup the fresh client config.
+    from cumulus.config import remove_configuration as _rm
+    _rm("test-config-fresh")
+
+
+def test_download_via_fake_writes_correct_bytes(client_on_fake, tmp_path):
+    """Download via real MediaIoBaseDownload writes correct bytes and md5."""
+    cof = client_on_fake
+    fake = cof.fake
+    cache = cof.client._path_cache
+
+    content = b"download me please"
+    file_id = fake.add_file("/dl.txt", content=content)
+    cache.set("/dl.txt", file_id, ROOT_ID, "dl.txt", False)
+
+    dest = tmp_path / "dl.txt"
+    result = cof.client.download("/dl.txt", str(dest))
+
+    assert dest.read_bytes() == content
+    assert isinstance(result, FileMetadata)
+    assert result.id == file_id
+    assert result.content_hash == hashlib.md5(content).hexdigest()
