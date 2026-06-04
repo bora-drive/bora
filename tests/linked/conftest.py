@@ -1,51 +1,64 @@
-import logging
 import os
+import sqlite3
+import time
 
 import pytest
 
-from cumulus.client import DropboxClient
+from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
+from cumulus.database.core import Database
 from cumulus.exceptions import AuthError
 from cumulus.keyring import CredentialStorage
+from cumulus.path_cache import PathIDCache
 
-from .lock import DropboxTestLock
+from .lock import DriveTestLock
 
-fsevents_logger = logging.getLogger("fsevents")
-fsevents_logger.setLevel(logging.DEBUG)
+TEST_CONFIG = "cumulus-test-config"
+LOCK_NAME = ".cumulus-test.lock"
+
+_HAS_CREDS = bool(os.environ.get("CUMULUS_TEST_REFRESH_TOKEN"))
+requires_account = pytest.mark.skipif(
+    not _HAS_CREDS, reason="set CUMULUS_TEST_REFRESH_TOKEN to run linked tests"
+)
 
 
-LOCK_PATH = "/test.lock"
+def wait_until(predicate, timeout=60, interval=2):
+    """Poll *predicate* until truthy or *timeout* seconds elapse.
+
+    Drive's changes.list lags a few seconds behind a mutation, so linked
+    assertions must poll rather than assert once."""
+    deadline = timeout
+    while deadline > 0:
+        result = predicate()
+        if result:
+            return result
+        time.sleep(interval)
+        deadline -= interval
+    raise AssertionError(f"condition not met within {timeout}s")
+
+
+def _make_client(config_name: str) -> tuple[GoogleDriveClient, CredentialStorage]:
+    """Build a GoogleDriveClient with an in-memory path cache for linked tests."""
+    cred_storage = CredentialStorage(config_name)
+    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    client = GoogleDriveClient(config_name, cred_storage, cache)
+    return client, cred_storage
 
 
 @pytest.fixture(scope="session", autouse=True)
 def test_lock():
-    """
-    Returns a Dropbox client instance linked to a test account.
-
-    Acquires a lock on the account for the duration of the test session.
-    """
-    config_name = "test-lock-config"
-
-    cred_storage = CredentialStorage(config_name)
-    c = DropboxClient(config_name, cred_storage)
-
-    access_token = os.environ.get("DROPBOX_ACCESS_TOKEN")
-    refresh_token = os.environ.get("DROPBOX_REFRESH_TOKEN")
+    if not _HAS_CREDS:
+        pytest.skip("no CUMULUS_TEST_REFRESH_TOKEN")
+    c, cred_storage = _make_client(TEST_CONFIG)
+    refresh_token = os.environ["CUMULUS_TEST_REFRESH_TOKEN"]
+    access_token = os.environ.get("CUMULUS_TEST_ACCESS_TOKEN")
     res = c.link(refresh_token=refresh_token, access_token=access_token)
-
-    if res == 1:
-        raise AuthError("Invalid token")
-    elif res == 2:
-        raise ConnectionError("Could not connect to Dropbox")
-    elif res > 0:
-        raise RuntimeError(f"[error {res}] linking failed")
-
-    lock = DropboxTestLock(c, LOCK_PATH)
+    if res > 0:
+        raise AuthError(f"linking test account failed (code {res})")
+    lock = DriveTestLock(c, LOCK_NAME)
     if not lock.acquire():
-        raise TimeoutError("Could not acquire test lock")
-
+        raise TimeoutError("Could not acquire Drive test lock")
     yield lock
-
-    remove_configuration(config_name)
     lock.release()
+    remove_configuration(TEST_CONFIG)
     cred_storage.delete_creds()

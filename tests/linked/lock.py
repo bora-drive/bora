@@ -1,132 +1,88 @@
+"""Drive-native cross-session test lock.
+
+Drive has no atomic create-exclusive, so acquisition is: list for the
+lock file; if a non-stale lock exists, back off and retry; else create
+one, re-list, and confirm we own the earliest-created instance.
+"""
+
 import time
-import uuid
 from datetime import datetime, timezone
 
-from dropbox import files
+from cumulus.changes import parse_drive_time
+from cumulus.client import GoogleDriveClient
 
-from cumulus.client import DropboxClient
-from cumulus.core import FileMetadata
-from cumulus.errorhandling import convert_api_errors
-from cumulus.exceptions import FileConflictError, NotFoundError
+_STALE_SECONDS = 600
+_RETRY_SECONDS = 5
+_MAX_WAIT_SECONDS = 300
 
 
-class DropboxTestLock:
-    """
-    A lock on a Dropbox account to synchronize running tests.
+class DriveTestLock:
+    def __init__(self, client: GoogleDriveClient, lock_name: str):
+        self._client = client
+        self._name = lock_name
+        self._lock_id: str | None = None
 
-    The lock is acquired by creating a file at ``lock_path`` and released by deleting
-    the file on the remote Dropbox.
-
-    :param client: Linked client instance.
-    :param lock_path: Path for the lock folder.
-    :param expires_after: The lock will be considered as expired after the given time in
-        seconds since the acquire call. Defaults to 10 min.
-    """
-
-    def __init__(
-        self,
-        client: DropboxClient,
-        lock_path,
-        expires_after: float = 10 * 60,
-    ) -> None:
-        self.client = client
-        self.lock_path = lock_path
-        self.expires_after = expires_after
-        self._rev = None
-
-    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
-        """
-        Acquires the lock. When invoked with the blocking argument set to True (the
-        default), this blocks until the lock is unlocked, then sets it to locked and
-        returns True. When invoked with the blocking argument set to False, this call
-        does not block. If the lock cannot be acquired, returns False immediately;
-        otherwise, sets the lock to locked and returns True.
-
-        :param blocking: Whether to block until the lock can be acquired.
-        :param timeout: Timeout in seconds. If negative, no timeout will be applied.
-            If positive, blocking must be set to True.
-        :returns: Whether the lock could be acquired (within timeout).
-        """
-        if not blocking and timeout > 0:
-            raise ValueError("can't specify a timeout for a non-blocking call")
-
-        t0 = time.time()
-
-        # we store the expiry time in the client_modified time stamp
-        expiry_time = datetime.fromtimestamp(
-            time.time() + self.expires_after, tz=timezone.utc
-        )
-
-        while True:
-            try:
-                with convert_api_errors(dbx_path=self.lock_path):
-                    md = self.client.dbx.files_upload(
-                        uuid.uuid4().bytes,
-                        self.lock_path,
-                        mode=files.WriteMode.add,
-                        client_modified=expiry_time,
-                    )
-                    self._rev = md.rev
-            except FileConflictError:
-                # Check if lockfile has expired. If yes, delete it retry to acquire.
-                if not self.locked():
-                    continue
-            else:
-                return True
-
-            if not blocking:
-                return False
-            elif time.time() - t0 > timeout > 0:
-                return False
-            else:
-                time.sleep(5)
-
-    def renew(self, expires_after: float = 10 * 60) -> None:
-        expiry_time = datetime.utcfromtimestamp(time.time() + expires_after)
-        md = self.client.dbx.files_upload(
-            uuid.uuid4().bytes,
-            self.lock_path,
-            mode=files.WriteMode.update(self._rev),
-            client_modified=expiry_time,
-        )
-        self._rev = md.rev
-
-    def locked(self):
-        """
-        Check if locked. Clean up any expired lock files.
-
-        :returns: True if locked, False otherwise.
-        """
-        md = self.client.get_metadata(self.lock_path)
-
-        if not md or not isinstance(md, FileMetadata):
-            return False
-
-        if md.client_modified < datetime.now(timezone.utc):
-            # lock has expired, remove
-            try:
-                self.client.remove(self.lock_path, parent_rev=md.rev)
-            except NotFoundError:
-                # protect against race
-                pass
-
-            return False
-
-        return True
+    def acquire(self) -> bool:
+        deadline = _MAX_WAIT_SECONDS
+        while deadline > 0:
+            existing = self._find_locks()
+            self._purge_stale(existing)
+            fresh = [r for r in existing if not self._is_stale(r)]
+            if not fresh:
+                created_id = self._create_lock()
+                contenders = sorted(
+                    (r for r in self._find_locks() if not self._is_stale(r)),
+                    key=lambda r: (r["createdTime"], r["id"]),
+                )
+                if contenders and contenders[0]["id"] == created_id:
+                    self._lock_id = created_id
+                    return True
+                self._delete(created_id)
+            time.sleep(_RETRY_SECONDS)
+            deadline -= _RETRY_SECONDS
+        return False
 
     def release(self) -> None:
-        """
-        Releases the lock.
+        if self._lock_id:
+            self._delete(self._lock_id)
+            self._lock_id = None
 
-        :raises: RuntimeError we did not acquire the lock.
-        """
+    def _find_locks(self) -> list[dict]:
+        svc = self._client._get_service()
+        resp = (
+            svc.files()
+            .list(
+                q=f"name = '{self._name}' and trashed = false",
+                fields="files(id, name, createdTime)",
+                pageSize=100,
+            )
+            .execute()
+        )
+        return resp.get("files", [])
 
-        if not self._rev:
-            raise RuntimeError("release unlocked lock")
+    def _create_lock(self) -> str:
+        svc = self._client._get_service()
+        resp = (
+            svc.files()
+            .create(body={"name": self._name}, fields="id")
+            .execute()
+        )
+        return resp["id"]
 
-        try:
-            self.client.remove(self.lock_path, parent_rev=self._rev)
-        except NotFoundError:
-            pass
+    def _delete(self, file_id: str) -> None:
+        svc = self._client._get_service()
+        svc.files().delete(fileId=file_id).execute()
 
-        self._rev = None
+    def _is_stale(self, rec: dict) -> bool:
+        age = (
+            datetime.now(timezone.utc) - parse_drive_time(rec["createdTime"])
+        ).total_seconds()
+        return age > _STALE_SECONDS
+
+    def _purge_stale(self, recs: list[dict]) -> None:
+        for r in recs:
+            if self._is_stale(r):
+                try:
+                    self._delete(r["id"])
+                except Exception:
+                    pass
