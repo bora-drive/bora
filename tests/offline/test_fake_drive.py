@@ -407,3 +407,15 @@ def test_fidelity_contract_summary():
     sid = fake.add_file("ignored", content=b"z", literal_name="2024/05")
     got = svc.files().get(fileId=sid, fields="name").execute()
     assert got["name"] == "2024/05"
+
+
+# ---------------------------------------------------------------------------
+# Task B1 — conftest client_on_fake fixture wiring verification
+# ---------------------------------------------------------------------------
+
+
+def test_client_fixture_is_wired_to_fake(client_on_fake):
+    fid = client_on_fake.fake.add_file("/a.txt", content=b"hi")
+    client_on_fake.client._path_cache.set("/a.txt", fid, ROOT_ID, "a.txt", False)
+    md = client_on_fake.client.get_metadata("/a.txt")
+    assert md.size == 2
