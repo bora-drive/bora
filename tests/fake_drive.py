@@ -91,6 +91,9 @@ class FakeDrive:
         if queue:
             raise queue.pop(0)
 
+    def service(self) -> "_Service":
+        return _Service(self)
+
     # ---- seeding helpers ----
     def _resolve_path_to_parent_and_name(self, path: str) -> tuple[str, str]:
         parts = [p for p in path.strip("/").split("/") if p]
@@ -149,3 +152,162 @@ class FakeDrive:
             "md5Checksum": rec["md5Checksum"],
             "lastModifyingUser": {"permissionId": "perm-1"},
         }
+
+
+# ---------------------------------------------------------------------------
+# Resource tree
+# ---------------------------------------------------------------------------
+
+
+class _Request:
+    """Mimics a googleapiclient HttpRequest: only ``.execute()`` is used."""
+
+    def __init__(self, fail_key: str, fail_check: Callable[[str], None], fn: Callable[[], Any]):
+        self._fail_key = fail_key
+        self._fail_check = fail_check
+        self._fn = fn
+
+    def execute(self, num_retries: int = 0, http: Any = None) -> Any:
+        self._fail_check(self._fail_key)
+        return self._fn()
+
+
+def _parse_field_keys(fields: str) -> list[str]:
+    keys = []
+    depth = 0
+    token = ""
+    for ch in fields:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            keys.append(token.strip())
+            token = ""
+            continue
+        if depth == 0 and ch not in "(),":
+            token += ch
+    if token.strip():
+        keys.append(token.strip())
+    return [k for k in keys if k]
+
+
+def _project(rec: dict, fields: str) -> dict:
+    """Return only the requested top-level field keys from a record.
+
+    Field strings are Drive selectors like ``"id, name, parents"`` or
+    ``"lastModifyingUser(permissionId)"``; nested parens are returned whole.
+    The fake stores every readable field, so projection is a key filter.
+    """
+    keys = _parse_field_keys(fields)
+    out: dict = {}
+    for key in keys:
+        if key in rec:
+            value = rec[key]
+            if value is not None:
+                out[key] = value
+    return out
+
+
+def _match_query(rec: dict, query: str) -> bool:
+    """Evaluate the tiny query grammar our code emits.
+
+    Supported fragments joined by ' and ':
+      "'<parent_id>' in parents"   -> parent membership
+      "trashed=false"              -> not trashed
+    """
+    if not query:
+        return True
+    for frag in query.split(" and "):
+        frag = frag.strip()
+        if frag in ("trashed=false", "trashed = false"):
+            if rec["trashed"]:
+                return False
+        elif " in parents" in frag:
+            pid = frag.split(" in parents")[0].strip().strip("'")
+            if pid not in rec["parents"]:
+                return False
+        else:
+            raise AssertionError(f"FakeDrive: unsupported query fragment {frag!r}")
+    return True
+
+
+class _FilesResource:
+    def __init__(self, drive: "FakeDrive"):
+        self._d = drive
+
+    def get(self, fileId, fields="", **_):
+        def run():
+            rec = self._d.files.get(fileId)
+            if rec is None:
+                raise make_http_error(404, "notFound", "File not found")
+            return _project(rec, fields)
+        return _Request("files.get", self._d._maybe_fail, run)
+
+    def list(self, q="", fields="", pageSize=100, pageToken=None, **_):
+        def run():
+            matched = [
+                r for r in self._d.files.values()
+                if r["id"] != ROOT_ID and _match_query(r, q)
+            ]
+            matched.sort(key=lambda r: r["id"])
+            start = int(pageToken) if pageToken else 0
+            page = matched[start:start + pageSize]
+            inner = fields.split("files(", 1)[1].rstrip(")") if "files(" in fields else "*"
+            resp = {"files": [_project(r, inner) for r in page]}
+            if start + pageSize < len(matched):
+                resp["nextPageToken"] = str(start + pageSize)
+            return resp
+        return _Request("files.list", self._d._maybe_fail, run)
+
+
+class _ChangesResource:
+    def __init__(self, drive: "FakeDrive"):
+        self._d = drive
+
+
+class _AboutResource:
+    def __init__(self, drive: "FakeDrive"):
+        self._d = drive
+
+
+class _RevisionsResource:
+    def __init__(self, drive: "FakeDrive"):
+        self._d = drive
+
+
+class _Batch:
+    def __init__(self):
+        self._reqs: list = []
+
+    def add(self, request, request_id=None, callback=None):
+        self._reqs.append((request_id, request, callback))
+
+    def execute(self, http=None):
+        for request_id, request, callback in self._reqs:
+            try:
+                resp, exc = request.execute(), None
+            except Exception as e:  # noqa: BLE001 - faithfully mirror batch
+                resp, exc = None, e
+            if callback:
+                callback(request_id, resp, exc)
+
+
+class _Service:
+    def __init__(self, drive: "FakeDrive"):
+        self._d = drive
+
+    def files(self):
+        return _FilesResource(self._d)
+
+    def changes(self):
+        return _ChangesResource(self._d)
+
+    def about(self):
+        return _AboutResource(self._d)
+
+    def revisions(self):
+        return _RevisionsResource(self._d)
+
+    def new_batch_http_request(self):
+        return _Batch()
