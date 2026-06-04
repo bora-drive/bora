@@ -30,7 +30,7 @@ from .core import DeletedMetadata, FileMetadata, FolderMetadata, Metadata
 from .database.orm import Column, Model, NonNullColumn
 from .database.types import SqlEnum, SqlFloat, SqlInt, SqlLargeInt, SqlPath, SqlString
 from .exceptions import NotLinkedError, SyncError
-from .utils.path import normalize
+from .path_codec import fold_path
 
 if TYPE_CHECKING:
     from .sync import SyncEngine
@@ -429,10 +429,10 @@ class SyncEvent(Model):
                 symlink_target = None
 
         remote_path = sync_engine.to_remote_path(to_path)
-        remote_path_lower = normalize(remote_path)
+        remote_path_lower = fold_path(remote_path)
 
         remote_path_from = sync_engine.to_remote_path(from_path) if from_path else None
-        remote_path_from_lower = normalize(remote_path_from) if remote_path_from else None
+        remote_path_from_lower = fold_path(remote_path_from) if remote_path_from else None
 
         # For file changes, update the change type based on our index. Local file system
         # events of created vs modified can be misleading for some safe save mechanisms.

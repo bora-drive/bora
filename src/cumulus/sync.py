@@ -95,6 +95,7 @@ from .exceptions import (
     NotAFolderError,
     NotFoundError,
     PathError,
+    SymlinkError,
     SyncError,
 )
 from .logging import scoped_logger
@@ -112,6 +113,7 @@ from .utils import exc_info_tuple, removeprefix, sanitize_string
 from .utils.appdirs import get_data_path
 from .utils.caches import LRUCache
 from .utils.integration import CPU_CORE_COUNT, cpu_usage_percent
+from .path_codec import decode_path, encode_path, fold_path
 from .utils.path import (
     content_hash,
     delete,
@@ -1312,7 +1314,7 @@ class SyncEngine:
             :attr:`Metadata.name`.
         :returns: Correctly cased remote path.
         """
-        remote_path_lower = normalize(remote_path_basename_cased)
+        remote_path_lower = fold_path(remote_path_basename_cased)
 
         dirname, basename = osp.split(remote_path_basename_cased)
         dirname_lower = osp.dirname(remote_path_lower)
@@ -1348,8 +1350,14 @@ class SyncEngine:
         if entry:
             remote_path_cased = entry.remote_path_cased
         else:
-            # Fall back to querying from server.
-            md = self.client.get_metadata(remote_path)
+            # Fall back to querying from server. ``get_metadata`` raises
+            # ``NotFoundError`` for a path the cache does not know — for case
+            # correction that simply means "no better casing available", so
+            # treat it like a ``None`` result and fall back to the input path.
+            try:
+                md = self.client.get_metadata(remote_path)
+            except NotFoundError:
+                md = None
             if md:
                 # Recurse over parent directories.
                 remote_path_cased = self.correct_case(md.path_display)
@@ -1375,9 +1383,14 @@ class SyncEngine:
 
         if not is_equal_or_child(path, self.sync_path, self.is_fs_case_sensitive):
             raise ValueError(f'"{path}" is not in "{self.sync_path}"')
-        return "/" + removeprefix(
+        # Local file names are human-readable (decoded); the virtual/index
+        # layer is percent-encoded for filesystem safety. Encode each
+        # component crossing the local -> virtual boundary. ASCII names are
+        # unaffected (encode is a no-op for the unreserved set).
+        relative = "/" + removeprefix(
             path, self.sync_path, self.is_fs_case_sensitive
         ).lstrip("/")
+        return encode_path(relative)
 
     def to_remote_path_lower(self, local_path: str | bytes) -> str:
         """
@@ -1389,7 +1402,7 @@ class SyncEngine:
         :returns: Relative path with respect to sync folder.
         :raises ValueError: When the path lies outside the local sync folder.
         """
-        return normalize(self.to_remote_path(local_path))
+        return fold_path(self.to_remote_path(local_path))
 
     def to_local_path_from_cased(self, remote_path_cased: str) -> str:
         """
@@ -1399,7 +1412,10 @@ class SyncEngine:
         :param remote_path_cased: Path relative to sync folder, correctly cased.
         :returns: Corresponding local path on drive.
         """
-        return f"{self.sync_path}{remote_path_cased}"
+        # The virtual path is percent-encoded; the local file system uses
+        # human-readable (decoded) names. Decode each component crossing the
+        # virtual -> local boundary. ASCII names are unaffected.
+        return f"{self.sync_path}{decode_path(remote_path_cased)}"
 
     def to_local_path(self, remote_path: str) -> str:
         """
@@ -2223,10 +2239,15 @@ class SyncEngine:
             # We have different file names that would map to the same normalized path!
             conflict_path = next(p for p in equivalent_paths if p != event.local_path)
 
-            # Check if we have a case conflict or a unicode conflict.
+            # Check if we have a case conflict or a unicode conflict. (Case is
+            # checked first, so reaching the unicode test means the names are
+            # not case-equal.) A unicode conflict is two names that are equal
+            # only after unicode normalization — compare ``normalize_unicode``
+            # on both sides (the original compared it against ``normalize_case``
+            # of the other path, which never matched a genuine NFC/NFD pair).
             if normalize_case(event.local_path) == normalize_case(conflict_path):
                 suffix = "case conflict"
-            elif normalize_unicode(event.local_path) == normalize_case(conflict_path):
+            elif normalize_unicode(event.local_path) == normalize_unicode(conflict_path):
                 suffix = "unicode conflict"
             else:
                 suffix = "normalization conflict"
@@ -2456,6 +2477,18 @@ class SyncEngine:
         check_change_type(event, {ChangeType.Added, ChangeType.Modified})
         check_encoding(event.local_path)
 
+        # Google Drive has no native symlink representation and the write client
+        # does not store a symlink target, so a local symlink cannot be synced.
+        # Surface it as a SymlinkError rather than silently skipping (a broken
+        # symlink would otherwise just fail to read and be ignored).
+        if event.symlink_target is not None:
+            error = SymlinkError(
+                "Could not upload item",
+                "Syncing symlinks is not supported.",
+            )
+            error.local_path = event.local_path
+            raise error
+
         if self._handle_selective_sync_conflict(event):
             return SyncStatus.Conflict
         if self._handle_normalization_conflict(event):
@@ -2632,7 +2665,14 @@ class SyncEngine:
 
         local_rev = self.get_local_rev(event.remote_path_lower)
 
-        md = self.client.get_metadata(event.remote_path, include_deleted=True)
+        # ``get_metadata`` raises ``NotFoundError`` for a path the cache does
+        # not know — for a deletion that just means the remote item is already
+        # gone (e.g. deleted in parallel from another device), so treat it like
+        # a ``None`` result and skip rather than surfacing a spurious error.
+        try:
+            md = self.client.get_metadata(event.remote_path, include_deleted=True)
+        except NotFoundError:
+            md = None
 
         if not md:
             self._logger.debug(
@@ -2804,9 +2844,16 @@ class SyncEngine:
         self._logger.info(f"Syncing ↓ {remote_path}")
 
         with self.sync_lock:
-            md = self.client.get_metadata(remote_path, include_deleted=True)
+            # ``get_metadata`` raises ``NotFoundError`` for a path the cache
+            # does not know (e.g. a stale/bogus entry in the pending-download
+            # queue); treat that like a ``None`` result so we fall through to
+            # the deleted-event path and clear it instead of erroring.
+            try:
+                md = self.client.get_metadata(remote_path, include_deleted=True)
+            except NotFoundError:
+                md = None
 
-            remote_path_lower = normalize(remote_path)
+            remote_path_lower = fold_path(remote_path)
 
             if md is None:
                 # Create a fake deleted event.
@@ -3489,7 +3536,10 @@ class SyncEngine:
                     f"Syncing it now before syncing any children."
                 )
 
-                parent_md = self.client.get_metadata(remote_path_lower_dirname)
+                try:
+                    parent_md = self.client.get_metadata(remote_path_lower_dirname)
+                except NotFoundError:
+                    parent_md = None
 
                 if parent_md:  # If the parent no longer exists, we don't do anything.
                     parent_event = SyncEvent.from_metadata(parent_md, self)
