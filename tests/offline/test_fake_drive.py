@@ -203,3 +203,76 @@ def test_generate_ids():
     resp = svc.files().generateIds(count=3).execute()
     assert len(resp["ids"]) == 3
     assert len(set(resp["ids"])) == 3
+
+
+# ---------------------------------------------------------------------------
+# Task A6 — changes().getStartPageToken / changes().list
+# ---------------------------------------------------------------------------
+
+
+def test_changes_removed_reason_semantics():
+    fake = FakeDrive()
+    trashed = fake.add_file("/t.txt", content=b"a")
+    hard = fake.add_file("/h.txt", content=b"b")
+    base = fake._seq
+    svc = fake.service()
+    svc.files().update(fileId=trashed, body={"trashed": True}, fields="id").execute()
+    svc.files().delete(fileId=hard).execute()
+    fields = "nextPageToken, newStartPageToken, changes(removed, fileId, file(id, name, trashed))"
+    resp = svc.changes().list(
+        pageToken=str(base), pageSize=100, fields=fields, includeRemoved=True
+    ).execute()
+    by_id = {c["fileId"]: c for c in resp["changes"]}
+    assert by_id[trashed]["removed"] is False
+    assert by_id[trashed]["file"]["trashed"] is True
+    assert by_id[hard]["removed"] is True
+    assert "file" not in by_id[hard]
+    assert "nextPageToken" not in resp
+    assert resp["newStartPageToken"] == str(fake._seq)
+
+
+def test_changes_pagination():
+    fake = FakeDrive()
+    fake.add_file("/a.txt", content=b"a")
+    fake.add_file("/b.txt", content=b"b")
+    svc = fake.service()
+    resp = svc.changes().list(
+        pageToken="100", pageSize=1, fields="nextPageToken, changes(fileId)",
+        includeRemoved=True,
+    ).execute()
+    assert len(resp["changes"]) == 1
+    assert "nextPageToken" in resp
+    resp2 = svc.changes().list(
+        pageToken=resp["nextPageToken"], pageSize=1,
+        fields="nextPageToken, newStartPageToken, changes(fileId)", includeRemoved=True,
+    ).execute()
+    assert len(resp2["changes"]) == 1
+    assert "newStartPageToken" in resp2
+
+
+def test_get_start_page_token():
+    fake = FakeDrive()
+    svc = fake.service()
+    resp = svc.changes().getStartPageToken().execute()
+    assert resp["startPageToken"] == str(fake._seq)
+
+
+def test_changes_move_rename_single_entry():
+    """Fidelity point 4: a combined move+rename is ONE change entry."""
+    fake = FakeDrive()
+    src = fake.add_folder("/src")
+    dst = fake.add_folder("/dst")
+    fid = fake.add_file("/src/a.txt", content=b"x")
+    base = fake._seq
+    svc = fake.service()
+    svc.files().update(
+        fileId=fid, body={"name": "b.txt"}, addParents=dst, removeParents=src,
+        fields="id",
+    ).execute()
+    resp = svc.changes().list(
+        pageToken=str(base), pageSize=100,
+        fields="changes(removed, fileId, file(id, name, parents))", includeRemoved=True,
+    ).execute()
+    assert [c["fileId"] for c in resp["changes"]] == [fid]
+    assert resp["changes"][0]["file"]["name"] == "b.txt"
+    assert resp["changes"][0]["file"]["parents"] == [dst]

@@ -342,6 +342,48 @@ class _ChangesResource:
     def __init__(self, drive: "FakeDrive"):
         self._d = drive
 
+    def getStartPageToken(self, **_):
+        def run():
+            return {"startPageToken": str(self._d._seq)}
+        return _Request("changes.getStartPageToken", self._d._maybe_fail, run)
+
+    def list(self, pageToken, pageSize=100, fields="", includeRemoved=True, **_):
+        def run():
+            start = int(pageToken)
+            latest: dict[str, int] = {}
+            for seq, fid in self._d._change_log:
+                if seq >= start:
+                    latest[fid] = seq
+            ordered = sorted(latest.items(), key=lambda kv: kv[1])  # (fid, seq)
+            page = ordered[:pageSize]
+            rest = ordered[pageSize:]
+            inner = (
+                fields.split("changes(", 1)[1].rsplit(")", 1)[0]
+                if "changes(" in fields else "*"
+            )
+            file_inner = (
+                inner.split("file(", 1)[1].rsplit(")", 1)[0]
+                if "file(" in inner else "*"
+            )
+            changes = []
+            for fid, _seq in page:
+                rec = self._d.files.get(fid)
+                if rec is None:
+                    changes.append({"removed": True, "fileId": fid})
+                else:
+                    changes.append({
+                        "removed": False,
+                        "fileId": fid,
+                        "file": _project(rec, file_inner),
+                    })
+            resp: dict = {"changes": changes}
+            if rest:
+                resp["nextPageToken"] = str(rest[0][1])
+            else:
+                resp["newStartPageToken"] = str(self._d._seq)
+            return resp
+        return _Request("changes.list", self._d._maybe_fail, run)
+
 
 class _AboutResource:
     def __init__(self, drive: "FakeDrive"):
