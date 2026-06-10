@@ -566,7 +566,7 @@ def test_echo_suppression_records_headrevisionid_and_skips_download(
     )
 
 
-# ==== Upload-side conflict signal (cluster A regression) =============================
+# ==== Cluster A conflict chain (upload signal + download check) ======================
 #
 # A modify-upload whose remote headRevisionId moved under us raises
 # DataChangedError in writes.upload — the definitive "remote changed" conflict
@@ -664,10 +664,9 @@ def test_download_conflict_when_upload_error_present(sync_engine: SyncEngine):
     """With an unresolved Up error for the path, the remote change is a Conflict
     (which triggers conflicted-copy creation) — not a RemoteNewer overwrite.
 
-    We seed ``last_sync`` in the future so that, absent the recorded upload
-    error, the ctime heuristic would classify the event as RemoteNewer (see
-    test_conflict_remote_newer_when_no_local_changes). The recorded Up error
-    must take precedence and force Conflict.
+    We seed ``last_sync`` in the future so that the ctime heuristic classifies
+    the event as RemoteNewer (asserted as the baseline below); recording an Up
+    error for the path must take precedence and force Conflict.
     """
     remote_path = "/conflict_down.txt"
     local_data = b"local edit"
@@ -681,6 +680,17 @@ def test_download_conflict_when_upload_error_present(sync_engine: SyncEngine):
         last_sync=future,
     )
 
+    event = _download_event(
+        sync_engine,
+        remote_path,
+        rev="REV-REMOTE-NEW",
+        content_hash=_md5(b"remote content 2"),
+    )
+
+    # Baseline: with no recorded upload error, the heuristic says RemoteNewer
+    # (the data-loss outcome this chain prevents).
+    assert sync_engine._check_download_conflict(event) is Conflict.RemoteNewer
+
     # Simulate the upload having recorded an Up conflict error for this path.
     err = DataChangedError(
         "Item changed on Google Drive",
@@ -690,11 +700,5 @@ def test_download_conflict_when_upload_error_present(sync_engine: SyncEngine):
     )
     sync_engine._handle_sync_error(err, direction=SyncDirection.Up)
 
-    event = _download_event(
-        sync_engine,
-        remote_path,
-        rev="REV-REMOTE-NEW",
-        content_hash=_md5(b"remote content 2"),
-    )
-
+    # With the Up error recorded, the same event is a Conflict (conflicted copy).
     assert sync_engine._check_download_conflict(event) is Conflict.Conflict
