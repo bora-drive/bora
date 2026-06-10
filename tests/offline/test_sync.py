@@ -10,7 +10,7 @@ import pytest
 
 from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
-from cumulus.core import FileMetadata
+from cumulus.core import FileMetadata, FullAccount
 from cumulus.database.core import Database
 from cumulus.exceptions import DataChangedError
 from cumulus.keyring import CredentialStorage
@@ -885,3 +885,71 @@ def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEng
     # _on_remote_folder reports Skipped — which the engine treats as success
     # alongside Done.
     assert event.status == SyncStatus.Skipped
+
+
+# ==== Cluster C: out-of-order remote change application ==============================
+#
+# Drive's change feed does NOT guarantee parent-before-child ordering (see
+# docs/superpowers/references/dropbox-vs-drive-differences.md §14). When remote
+# changes are applied children-before-parent via _create_local_entry,
+# _ensure_parent must sync the missing parent on demand so that every item ends
+# up both on disk and in the index, with no event failing.
+
+
+def test_out_of_order_children_before_parent_all_created(sync_engine: SyncEngine):
+    """Applying remote events children-first must still create the whole tree."""
+    fake = FakeDrive()
+    parent_id = fake.add_folder("/parent")
+    child1_id = fake.add_folder("/parent/child_1")
+    child2_id = fake.add_file("/parent/child_2", b"content")
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    # from_metadata reads account_info for non-shared files; keep it offline.
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Path cache as iter_remote_changes leaves it once the feed has delivered
+    # all three items (its fixpoint resolves children against their parent).
+    sync_engine.client._path_cache.set(
+        "/parent", parent_id, parent_id=ROOT_ID, name="parent", is_folder=True
+    )
+    sync_engine.client._path_cache.set(
+        "/parent/child_1", child1_id, parent_id=parent_id, name="child_1", is_folder=True
+    )
+    sync_engine.client._path_cache.set(
+        "/parent/child_2",
+        child2_id,
+        parent_id=parent_id,
+        name="child_2",
+        is_folder=False,
+    )
+
+    # Apply the children BEFORE their parent — the reversed order the linked
+    # test produces and the order Drive's feed is allowed to deliver.
+    for remote_path in ["/parent/child_2", "/parent/child_1", "/parent"]:
+        md = sync_engine.client.get_metadata(remote_path)
+        assert md is not None
+        event = SyncEvent.from_metadata(md, sync_engine)
+        sync_engine._create_local_entry(event)
+        assert event.status in (
+            SyncStatus.Done,
+            SyncStatus.Skipped,
+        ), f"applying {remote_path} ended as {event.status}"
+
+    # All three items exist locally and are indexed.
+    for remote_path in ["/parent", "/parent/child_1", "/parent/child_2"]:
+        local_path = sync_engine.to_local_path_from_cased(remote_path)
+        assert osp.exists(local_path), f"{remote_path} not created locally"
+        assert (
+            sync_engine.get_index_entry(remote_path.lower()) is not None
+        ), f"{remote_path} missing from index"
+
+    # The downloaded file carries the remote content.
+    with open(sync_engine.to_local_path_from_cased("/parent/child_2"), "rb") as f:
+        assert f.read() == b"content"
+
+    assert sync_engine.sync_errors == []

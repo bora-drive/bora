@@ -1449,12 +1449,24 @@ def test_out_of_order_indexing(m: Maestral) -> None:
 
     create_remote_tree(m, tree)
 
-    # Fetch remote index manually and scramble order.
+    # Fetch remote index manually and scramble order. Drive's changes.list lags
+    # a few seconds behind a mutation (see wait_until / assert_synced), and the
+    # engine's own polling loop is stopped here, so poll the feed until it has
+    # delivered all three created items before scrambling. Without this, a
+    # single fetch typically sees only "/parent" and the children are never
+    # applied at all (pinned 2026-06-10, cluster C).
 
     all_changes = []
+    cursor = m.sync.remote_cursor
 
-    for changes, cursor in m.sync.list_remote_changes_iterator(m.sync.remote_cursor):
-        all_changes += changes
+    def feed_has_all_items() -> bool:
+        nonlocal cursor
+        for changes, cursor in m.sync.list_remote_changes_iterator(cursor):
+            all_changes.extend(changes)
+        seen = {ev.remote_path_lower for ev in all_changes}
+        return {"/parent", "/parent/child_1", "/parent/child_2"} <= seen
+
+    wait_until(feed_has_all_items)
 
     # Reverse order of changes with children coming first.
     for sync_event in reversed(all_changes):
