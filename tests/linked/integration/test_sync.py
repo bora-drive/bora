@@ -301,7 +301,6 @@ def test_local_indexing(m: Maestral) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Stage-5 follow-up: a directory case-only rename (/folder -> /FOLDER) is delivered by watchdog as a FileMovedEvent and missed by the dir-move handling, so the renamed item is not resolvable via get_metadata afterward (raises NotFoundError for the folded path). Needs sync-engine case-rename work.", strict=False)
 def test_case_change_local(m: Maestral) -> None:
     """
     Tests the upload sync of local rename which only changes the casing of the name.
@@ -373,7 +372,6 @@ def test_case_change_local_while_stopped(m: Maestral) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Stage-5 follow-up: remote case-only rename (/folder -> /FOLDER) is not reflected so get_metadata('/folder') raises NotFoundError. Needs sync-engine case-change handling.", strict=False)
 def test_case_change_remote(m: Maestral) -> None:
     """
     Tests the download sync of a remote rename which only changes the casing of the file
@@ -1429,7 +1427,6 @@ def test_invalid_pending_download(m: Maestral) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Stage-5 follow-up: applying remote changes in reverse (children before parents) via _create_local_entry leaves a child (/parent/child_2) uncreated — _ensure_parent/_create_local_entry ordering for out-of-order application needs sync-engine work.", strict=False)
 def test_out_of_order_indexing(m: Maestral) -> None:
     """Tests applying remote events when children are synced before their parents.
 
