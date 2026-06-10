@@ -115,7 +115,12 @@ class _WriteHelper:
             )
         return parent_id
 
-    def _autorename_unique(self, parent_path: str, encoded_name: str) -> str:
+    def _autorename_unique(
+        self,
+        parent_path: str,
+        encoded_name: str,
+        exclude_id: str | None = None,
+    ) -> str:
         """Return an encoded path segment not already in path_cache under
         parent_path.
 
@@ -123,16 +128,25 @@ class _WriteHelper:
         … up to N=999. Probes are done in encoded namespace so collisions
         for names containing slashes or other special chars are detected
         correctly. Used by upload, move, and make_dir when autorename=True.
+
+        :param exclude_id: File ID that does not count as a collision. Pass
+            the ID of the item being moved so a case-only rename (the folded
+            destination equals the folded source) is not falsely detected as
+            a collision with the item itself.
         """
         cache = self._client._path_cache
-        if cache.path_to_id(parent_path + "/" + encoded_name) is None:
+        if cache.has_case_conflict(
+            parent_path + "/" + encoded_name, exclude_id
+        ) is None:
             return encoded_name
         decoded = decode_name(encoded_name)
         stem, ext = os.path.splitext(decoded)
         for n in range(1, _AUTORENAME_LIMIT + 1):
             candidate_decoded = f"{stem} ({n}){ext}"
             candidate_encoded = encode_name(candidate_decoded)
-            if cache.path_to_id(parent_path + "/" + candidate_encoded) is None:
+            if cache.has_case_conflict(
+                parent_path + "/" + candidate_encoded, exclude_id
+            ) is None:
                 return candidate_encoded
         raise BadInputError(
             "Autorename exhausted",
@@ -586,7 +600,12 @@ class _WriteHelper:
         new_parent_path, raw_new_name = self._split_parent_name(new_path)
 
         if autorename:
-            raw_new_name = self._autorename_unique(new_parent_path, raw_new_name)
+            # Exclude the item being moved itself from the collision probe:
+            # for a case-only rename the folded destination equals the folded
+            # source, which is not a collision (cluster-B bug B1).
+            raw_new_name = self._autorename_unique(
+                new_parent_path, raw_new_name, exclude_id=file_id
+            )
             new_path = new_parent_path + "/" + raw_new_name
 
         new_name = self._decode_segment(raw_new_name)

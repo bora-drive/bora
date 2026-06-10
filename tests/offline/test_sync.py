@@ -702,3 +702,76 @@ def test_download_conflict_when_upload_error_present(sync_engine: SyncEngine):
 
     # With the Up error recorded, the same event is a Conflict (conflicted copy).
     assert sync_engine._check_download_conflict(event) is Conflict.Conflict
+
+
+# ==== Cluster B (B1): case-only local rename must not autorename remotely ===========
+#
+# A local case-only rename /folder -> /FOLDER goes up as client.move(...,
+# autorename=True). The autorename collision probe is case-folded, so the
+# folded destination equals the folded source and the probe used to find the
+# item BEING MOVED itself — a false collision that renamed the folder to
+# "FOLDER (1)" remotely and then mirrored the bogus conflict locally.
+
+
+def test_local_case_only_folder_rename_does_not_autorename(sync_engine: SyncEngine):
+    """A local case-only folder rename must arrive remotely as a plain rename."""
+    fake = FakeDrive()
+    folder_id = fake.add_folder("/folder")
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._path_cache.set(
+        "/folder", folder_id, parent_id=ROOT_ID, name="folder", is_folder=True
+    )
+
+    # Index tracks the folder under its old casing.
+    entry = IndexEntry(
+        remote_path_cased="/folder",
+        remote_path_lower="/folder",
+        remote_id=folder_id,
+        item_type=ItemType.Folder,
+        last_sync=0.0,
+        rev="folder",
+        content_hash="folder",
+        symlink_target=None,
+    )
+    with sync_engine._database_access():
+        sync_engine._index_table.update(entry)
+
+    # On disk the rename has already happened: only FOLDER exists.
+    local_path_to = sync_engine.to_local_path_from_cased("/FOLDER")
+    local_path_from = sync_engine.to_local_path_from_cased("/folder")
+    os.mkdir(local_path_to)
+
+    event = SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.Folder,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/FOLDER",
+        remote_path_lower="/folder",
+        remote_path_from="/folder",
+        remote_path_from_lower="/folder",
+        remote_id=folder_id,
+        local_path=local_path_to,
+        local_path_from=local_path_from,
+        rev=None,
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Moved,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+    sync_engine._create_remote_entry(event)
+
+    # The remote folder kept its identity and took the new casing — and no
+    # spurious "FOLDER (1)" sibling was created.
+    assert fake.files[folder_id]["name"] == "FOLDER"
+    assert "FOLDER (1)" not in [r["name"] for r in fake.files.values()]
+
+    meta = sync_engine.client.get_metadata("/FOLDER")
+    assert meta is not None
+    assert meta.name == "FOLDER"
+
+    # No bogus conflict was mirrored locally: the dir is still named FOLDER.
+    assert osp.isdir(local_path_to)
+    assert event.status == SyncStatus.Done

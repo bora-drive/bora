@@ -1400,6 +1400,73 @@ def test_fake_move_reparents_file(client_on_fake):
     assert client._path_cache.path_to_id("/dst/foo.txt") == fid
 
 
+def test_fake_move_case_only_folder_rename_keeps_name(client_on_fake):
+    """Case-only folder rename with autorename=True must NOT autorename.
+
+    Regression test for cluster-B bug B1: the autorename collision probe is
+    case-folded, so for /folder -> /FOLDER it found the item being moved
+    itself, falsely detected a collision and renamed to "FOLDER (1)".
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_folder("/folder")
+    client._path_cache.set(
+        "/folder", fid, parent_id=ROOT_ID, name="folder", is_folder=True
+    )
+
+    result = client._writes.move("/folder", "/FOLDER", autorename=True)
+
+    assert result.name == "FOLDER"
+    assert fake.files[fid]["name"] == "FOLDER"
+    assert client._path_cache.path_to_id("/FOLDER") == fid
+    assert "FOLDER (1)" not in [r["name"] for r in fake.files.values()]
+
+
+def test_fake_move_case_only_file_rename_keeps_name(client_on_fake):
+    """Same as the folder variant: a case-only FILE rename must not
+    autorename to "FILE (1).TXT" (same code path through move)."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/file.txt", b"data")
+    client._path_cache.set(
+        "/file.txt", fid, parent_id=ROOT_ID, name="file.txt", is_folder=False
+    )
+
+    result = client._writes.move("/file.txt", "/FILE.TXT", autorename=True)
+
+    assert result.name == "FILE.TXT"
+    assert fake.files[fid]["name"] == "FILE.TXT"
+    assert client._path_cache.path_to_id("/FILE.TXT") == fid
+    assert all("(1)" not in r["name"] for r in fake.files.values())
+
+
+def test_fake_move_autorename_still_fires_on_cross_case_collision(client_on_fake):
+    """Guard: a GENUINE case-insensitive collision with a *different* item
+    must still autorename (the B1 fix only excludes the moved item itself)."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/foo.txt", b"data")
+    other_id = fake.add_file("/BAR.TXT", b"other")
+    client._path_cache.set(
+        "/foo.txt", fid, parent_id=ROOT_ID, name="foo.txt", is_folder=False
+    )
+    client._path_cache.set(
+        "/BAR.TXT", other_id, parent_id=ROOT_ID, name="BAR.TXT", is_folder=False
+    )
+
+    result = client._writes.move("/foo.txt", "/bar.txt", autorename=True)
+
+    assert result.name == "bar (1).txt"
+    assert fake.files[fid]["name"] == "bar (1).txt"
+    assert fake.files[other_id]["name"] == "BAR.TXT"
+
+
 # ---- remove via fake ------------------------------------------------------
 
 def test_fake_remove_trashes_file(client_on_fake):
