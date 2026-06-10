@@ -775,3 +775,81 @@ def test_local_case_only_folder_rename_does_not_autorename(sync_engine: SyncEngi
     # No bogus conflict was mirrored locally: the dir is still named FOLDER.
     assert osp.isdir(local_path_to)
     assert event.status == SyncStatus.Done
+
+
+# ==== Cluster B (B2): remote case-only folder rename must re-case child index =======
+#
+# Drive's change feed delivers a SINGLE change for a renamed folder — unlike
+# Dropbox, which emits delta entries for the folder AND all children. So when
+# /folder is re-cased to /FOLDER remotely, _apply_case_change renames the local
+# directory (taking the whole subtree with it on disk) and updates the folder's
+# own index entry, but the children's index entries kept the stale cased path
+# ("/folder/Subfolder"), diverging from the on-disk "/FOLDER/Subfolder".
+
+
+def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEngine):
+    """A remote case-only folder rename must update child index casing too."""
+    fake = FakeDrive()
+    # The remote rename has already happened: Drive holds /FOLDER/Subfolder.
+    folder_id = fake.add_folder("/FOLDER")
+    sub_id = fake.add_folder("/FOLDER/Subfolder")
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    # Path cache as the change feed leaves it (PathIDCache.move re-cases children).
+    sync_engine.client._path_cache.set(
+        "/FOLDER", folder_id, parent_id=ROOT_ID, name="FOLDER", is_folder=True
+    )
+    sync_engine.client._path_cache.set(
+        "/FOLDER/Subfolder", sub_id, parent_id=folder_id, name="Subfolder", is_folder=True
+    )
+
+    # Index + disk reflect the OLD casing (fully synced before the remote rename).
+    for cased, rid in [("/folder", folder_id), ("/folder/Subfolder", sub_id)]:
+        entry = IndexEntry(
+            remote_path_cased=cased,
+            remote_path_lower=cased.lower(),
+            remote_id=rid,
+            item_type=ItemType.Folder,
+            last_sync=0.0,
+            rev="folder",
+            content_hash="folder",
+            symlink_target=None,
+        )
+        with sync_engine._database_access():
+            sync_engine._index_table.update(entry)
+    os.makedirs(sync_engine.to_local_path_from_cased("/folder/Subfolder"))
+
+    # The change feed delivers ONE folder event, for the renamed folder itself.
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.Folder,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/FOLDER",
+        remote_path_lower="/folder",
+        remote_id=folder_id,
+        local_path=sync_engine.to_local_path_from_cased("/FOLDER"),
+        rev="folder",
+        content_hash="folder",
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+    sync_engine._create_local_entry(event)
+
+    # On-disk directory renamed with the exact new casing (listdir, not stat,
+    # so a case-insensitive file system cannot mask a stale name).
+    assert "FOLDER" in os.listdir(sync_engine.sync_path)
+    assert "folder" not in os.listdir(sync_engine.sync_path)
+    assert "Subfolder" in os.listdir(osp.join(sync_engine.sync_path, "FOLDER"))
+
+    # Index: the folder's own entry was re-cased ...
+    parent_entry = sync_engine.get_index_entry("/folder")
+    assert parent_entry is not None
+    assert parent_entry.remote_path_cased == "/FOLDER"
+
+    # ... and so was the child's (the B2 regression: it stayed "/folder/Subfolder").
+    child_entry = sync_engine.get_index_entry("/folder/subfolder")
+    assert child_entry is not None
+    assert child_entry.remote_path_cased == "/FOLDER/Subfolder"
