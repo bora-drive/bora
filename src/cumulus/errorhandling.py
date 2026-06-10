@@ -284,7 +284,7 @@ def os_to_cumulus_error(
         title = "Could not create local file"
 
         try:
-            max_name, max_path = fs_max_lengths_for_path(local_path or "/")
+            max_path, max_name = fs_max_lengths_for_path(local_path or "/")
         except RuntimeError:
             text = "The file name or path is too long."
         else:

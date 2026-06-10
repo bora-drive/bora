@@ -109,6 +109,25 @@ def test_os_error_enospc_maps_to_insufficient_space():
     assert isinstance(result, InsufficientSpaceError)
 
 
+def test_os_error_enametoolong_reports_limits_in_correct_order():
+    from cumulus.exceptions import PathError
+    from cumulus.utils.path import fs_max_lengths_for_path
+
+    # fs_max_lengths_for_path returns (max_path, max_name) in that order.
+    max_path, max_name = fs_max_lengths_for_path("/")
+    assert max_path != max_name, "limits must differ for this test to be meaningful"
+
+    exc = OSError(errno.ENAMETOOLONG, "name too long")
+    result = os_to_cumulus_error(exc, local_path="/")
+    assert isinstance(result, PathError)
+
+    # The name limit must appear in the file-name clause and the path limit in
+    # the path clause, i.e. "shorter than {max_name} and {max_path} characters".
+    assert (
+        f"shorter than {max_name} and {max_path} characters" in result.message
+    ), result.message
+
+
 def test_http_error_412_condition_not_met_maps_to_data_changed(make_http_error):
     from cumulus.errorhandling import http_error_to_cumulus
     from cumulus.exceptions import DataChangedError

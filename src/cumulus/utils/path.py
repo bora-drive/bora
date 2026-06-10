@@ -508,7 +508,8 @@ def fs_max_lengths_for_path(path: str = "/") -> Tuple[int, int]:
     :param path: Path to check. This can be specified because different paths may be
         residing on different file systems. If the given path does not exist, the first
         existing parent directory in the tree be taken.
-    :returns: Tuple giving the maximum file name and total path lengths.
+    :returns: Tuple giving the maximum total path and file name lengths, in that
+        order.
     """
     path = osp.abspath(path)
     dirname = osp.dirname(path)
