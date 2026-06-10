@@ -103,7 +103,7 @@ def test_to_folder_metadata_maps_fields():
 
 import sqlite3
 
-from cumulus.changes import ChangeDecision, classify
+from cumulus.changes import ChangeDecision, _emit_apply, classify
 from cumulus.database.core import Database
 from cumulus.path_cache import PathIDCache
 
@@ -405,3 +405,51 @@ def test_iter_remote_changes_new_file_in_new_folder():
     applied = {e.path_display for e in entries}
     assert "/new" in applied
     assert "/new/c.txt" in applied
+
+
+# ==== _emit_apply cache-rejection guard (review F2) =======================
+
+
+def test_fold_conflicting_change_is_not_emitted():
+    """A change whose path the cache rejects (duplicate / case-fold-equal
+    sibling) must NOT be emitted — emitting it points the engine's
+    download at a path mapped to a DIFFERENT file's id (review F2)."""
+    cache = _cache()
+    cache.set("/Report.pdf", "id-A", "ROOT", "Report.pdf", False)
+
+    out: list = []
+    change = {
+        "fileId": "id-B",
+        "file": {
+            "id": "id-B", "name": "report.pdf", "parents": ["ROOT"],
+            "mimeType": "text/plain", "trashed": False,
+        },
+    }
+    _emit_apply(change, cache, out)
+
+    assert out == [], "rejected change leaked into the feed output"
+    assert cache.path_to_id("/report.pdf") == "id-A"  # cache untouched
+
+
+def test_move_to_conflicting_path_is_not_emitted():
+    """File id-B is already cached at /other.txt; a change moves it to the
+    case-fold-equal /report.pdf (which id-A already owns).  cache.move
+    returns False → nothing emitted, cache still maps /other.txt to id-B
+    (review F2 — move variant)."""
+    cache = _cache()
+    cache.set("/Report.pdf", "id-A", "ROOT", "Report.pdf", False)
+    cache.set("/other.txt", "id-B", "ROOT", "other.txt", False)
+
+    out: list = []
+    change = {
+        "fileId": "id-B",
+        "file": {
+            "id": "id-B", "name": "report.pdf", "parents": ["ROOT"],
+            "mimeType": "text/plain", "trashed": False,
+        },
+    }
+    _emit_apply(change, cache, out)
+
+    assert out == [], "rejected move leaked into the feed output"
+    assert cache.path_to_id("/other.txt") == "id-B"   # original path kept
+    assert cache.path_to_id("/report.pdf") == "id-A"  # original owner untouched
