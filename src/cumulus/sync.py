@@ -3791,8 +3791,33 @@ class SyncEngine:
                 move(local_path_old, event.local_path)
 
             with self._database_access():
+                old_path_cased = entry.remote_path_cased
                 entry.remote_path_cased = event.remote_path
                 self._index_table.update(entry)
+
+                # Drive's change feed emits a single change for a renamed
+                # folder — unlike Dropbox, which delivers delta entries for
+                # all children as well. The on-disk move above already took
+                # the whole subtree with it, so re-case the children's index
+                # entries here. Their folded keys are unchanged (the rename
+                # is case-only); only the cased prefix moves.
+                if entry.item_type is ItemType.Folder:
+                    query = PathTreeQuery(
+                        IndexEntry.remote_path_lower, event.remote_path_lower
+                    )
+                    old_prefix = old_path_cased + "/"
+                    for child in self._index_table.select(query):
+                        if child.remote_path_lower == event.remote_path_lower:
+                            continue
+                        if child.remote_path_cased.startswith(old_prefix):
+                            child.remote_path_cased = (
+                                event.remote_path
+                                + child.remote_path_cased[len(old_path_cased):]
+                            )
+                            self._index_table.update(child)
+                            self._case_conversion_cache.put(
+                                child.remote_path_lower, child.remote_path_cased
+                            )
 
             self._logger.debug('Renamed "%s" to "%s"', local_path_old, event.local_path)
 
