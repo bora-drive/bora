@@ -651,3 +651,9 @@ def test_upload_rev_mismatch_records_conflict_not_silent_skip(
     assert (
         len(up_errors) > 0
     ), "rev-mismatch upload silently skipped — local edit would be lost"
+
+    # The event must also be marked Failed (set by the `except SyncError`
+    # branch in _create_remote_entry) — guards against a regression where an
+    # error is recorded but the event is still Done/Skipped and errors get
+    # cleared.
+    assert event.status == SyncStatus.Failed

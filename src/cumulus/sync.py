@@ -86,7 +86,6 @@ from .exceptions import (
     CacheDirError,
     CancelledError,
     DatabaseError,
-    DataChangedError,
     FileConflictError,
     FolderConflictError,
     InvalidDbidError,
@@ -2534,12 +2533,13 @@ class SyncEngine:
                 'Could not upload "%s": the file does not exist', event.local_path
             )
             return SyncStatus.Skipped
-        except DataChangedError:
-            self._logger.debug(
-                'Could not upload "%s": the file was modified during upload',
-                event.local_path,
-            )
-            return SyncStatus.Skipped
+        # DataChangedError (rev precondition mismatch) is intentionally NOT caught
+        # here: it means the remote moved under us — a genuine conflict. Letting it
+        # propagate as a SyncError records an Up error for the path, so
+        # _check_download_conflict's "unresolved upload error -> Conflict" branch
+        # fires and the download path creates the conflicted copy. Swallowing it as
+        # Skipped drops the conflict signal and the local edit is overwritten
+        # (cluster-A data-loss bug). See dropbox-vs-drive-differences.md §18.
 
         if self._handle_upload_conflict(md_new, event):
             status = SyncStatus.Conflict
