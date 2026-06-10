@@ -3790,10 +3790,18 @@ class SyncEngine:
             with self.fs_events.ignore(event_cls(local_path_old, event.local_path)):
                 move(local_path_old, event.local_path)
 
-            with self._database_access():
+            with self._database_access(), self._db.transaction():
+                # The parent-row update and the child re-casing below must
+                # commit together: if the parent committed alone and a child
+                # update failed, retries would no-op (the entry condition
+                # above is already false) and the stale children would
+                # persist.
                 old_path_cased = entry.remote_path_cased
                 entry.remote_path_cased = event.remote_path
                 self._index_table.update(entry)
+                self._case_conversion_cache.put(
+                    event.remote_path_lower, event.remote_path
+                )
 
                 # Drive's change feed emits a single change for a renamed
                 # folder — unlike Dropbox, which delivers delta entries for
@@ -3817,6 +3825,13 @@ class SyncEngine:
                             self._index_table.update(child)
                             self._case_conversion_cache.put(
                                 child.remote_path_lower, child.remote_path_cased
+                            )
+                        else:
+                            self._logger.warning(
+                                'Index inconsistency: cased path "%s" does not '
+                                'start with parent prefix "%s", skipping re-case',
+                                child.remote_path_cased,
+                                old_prefix,
                             )
 
             self._logger.debug('Renamed "%s" to "%s"', local_path_old, event.local_path)
