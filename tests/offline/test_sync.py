@@ -4,6 +4,7 @@ import os.path as osp
 import sqlite3
 from datetime import datetime
 from queue import Queue
+from unittest.mock import Mock
 
 import pytest
 
@@ -24,6 +25,7 @@ from cumulus.path_cache import PathIDCache
 from cumulus.sync import ActivityNode, ActivityTree, Conflict, SyncEngine
 from cumulus.utils.appdirs import get_home_dir
 from cumulus.utils.path import delete
+from tests.fake_drive import ROOT_ID, FakeDrive
 
 EVENT1 = SyncEvent(
     remote_path="/d0/file1.txt",
@@ -561,3 +563,91 @@ def test_echo_suppression_records_headrevisionid_and_skips_download(
         sync_engine._check_download_conflict(echo)
         is Conflict.LocalNewerOrIdentical
     )
+
+
+# ==== Upload-side conflict signal (cluster A regression) =============================
+#
+# A modify-upload whose remote headRevisionId moved under us raises
+# DataChangedError in writes.upload — the definitive "remote changed" conflict
+# signal. The download side's "unresolved upload error => Conflict" branch in
+# _check_download_conflict relies on a recorded Up sync error for the path; if
+# the upload side swallows the signal, conflict detection degrades to a
+# timing-sensitive ctime heuristic and the local edit can be overwritten
+# without a conflicted copy.
+
+
+def _local_modified_event(
+    sync: SyncEngine, remote_path: str, content_hash: str
+) -> SyncEvent:
+    """Build a local file-modified upload SyncEvent."""
+    return SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id="id:remote",
+        local_path=sync.to_local_path_from_cased(remote_path),
+        rev=None,
+        content_hash=content_hash,
+        symlink_target=None,
+        change_type=ChangeType.Modified,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+
+def test_upload_rev_mismatch_records_conflict_not_silent_skip(
+    sync_engine: SyncEngine,
+):
+    """A modify-upload whose remote rev moved must surface a conflict signal.
+
+    Regression for the cluster-A data-loss bug: the rev-mismatch
+    DataChangedError was swallowed as SyncStatus.Skipped with no sync error
+    recorded, so the download side never created a conflicted copy and the
+    remote change overwrote the local edit.
+    """
+    remote_path = "/conflict_up.txt"
+
+    # FakeDrive holds the file at a NEWER head revision ("rev-1", assigned by
+    # the fake) than our index records below.
+    fake = FakeDrive()
+    file_id = fake.add_file(remote_path, content=b"remote content 2")
+    assert fake.files[file_id]["headRevisionId"] != "REV-OLD"
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    # Point the path cache at the fake file so the upload resolves it.
+    sync_engine.client._path_cache.set(
+        remote_path,
+        file_id,
+        parent_id=ROOT_ID,
+        name="conflict_up.txt",
+        is_folder=False,
+    )
+
+    # Index + local disk reflect an OLDER rev with locally-modified content.
+    local_data = b"local edit the user wants to keep"
+    _write_local_file(sync_engine, remote_path, local_data)
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="REV-OLD",
+        content_hash=_md5(b"original content"),
+        last_sync=0.0,
+    )
+
+    event = _local_modified_event(
+        sync_engine, remote_path, content_hash=_md5(local_data)
+    )
+
+    # Drive the full upload wrapper (it catches SyncError and records it).
+    sync_engine._create_remote_entry(event)
+
+    # The conflict signal MUST be recorded for the path on the Up direction, so
+    # the download side will create the conflicted copy instead of overwriting.
+    up_errors = sync_engine.sync_errors_for_path(
+        remote_path.lower(), direction=SyncDirection.Up
+    )
+    assert (
+        len(up_errors) > 0
+    ), "rev-mismatch upload silently skipped — local edit would be lost"
