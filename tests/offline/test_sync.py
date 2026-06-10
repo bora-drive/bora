@@ -953,3 +953,220 @@ def test_out_of_order_children_before_parent_all_created(sync_engine: SyncEngine
         assert f.read() == b"content"
 
     assert sync_engine.sync_errors == []
+
+
+# ==== Cluster E (F3): remote moves must move the local item by remote_id ============
+#
+# Drive's change feed emits a SINGLE entry at the NEW path for a remote rename
+# or reparent — no DeletedMetadata for the old path and no per-child entries
+# for folders. The engine only deleted local items on DeletedMetadata, so a
+# remote move used to leave the old local file (or whole folder tree) and its
+# IndexEntry behind forever. _apply_remote_move must detect the move via
+# remote_id, move the local item, and re-key the index subtree.
+
+
+def _seed_entry(
+    sync: SyncEngine,
+    remote_path: str,
+    remote_id: str,
+    item_type: ItemType,
+    rev: str,
+    content_hash: str | None,
+) -> None:
+    entry = IndexEntry(
+        remote_path_cased=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=remote_id,
+        item_type=item_type,
+        last_sync=0.0,
+        rev=rev,
+        content_hash=content_hash,
+        symlink_target=None,
+    )
+    with sync._database_access():
+        sync._index_table.update(entry)
+
+
+def test_remote_file_rename_moves_local_file(sync_engine: SyncEngine):
+    """A remote rename (same id, new path) must move the local file and
+    re-key the index — not leave the old copy on disk forever (review F3)."""
+    data = b"file content unchanged by the rename"
+    fake = FakeDrive()
+    file_id = fake.add_file("/b.txt", data)
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._path_cache.set(
+        "/b.txt", file_id, parent_id=ROOT_ID, name="b.txt", is_folder=False
+    )
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Fully synced state before the remote rename: local /a.txt + index entry.
+    local_old = _write_local_file(sync_engine, "/a.txt", data)
+    _seed_entry(
+        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+    )
+
+    # The change feed delivers ONE file event, at the new path, same id and rev.
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/b.txt",
+        remote_path_lower="/b.txt",
+        remote_id=file_id,
+        local_path=sync_engine.to_local_path_from_cased("/b.txt"),
+        rev="rev-1",
+        content_hash=_md5(data),
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=len(data),
+        completed=0,
+    )
+
+    sync_engine._create_local_entry(event)
+
+    # The old local copy is gone, the new path holds the content.
+    assert not osp.exists(local_old)
+    local_new = sync_engine.to_local_path_from_cased("/b.txt")
+    assert osp.isfile(local_new)
+    with open(local_new, "rb") as f:
+        assert f.read() == data
+
+    # The index was re-keyed: old path gone, new path holds the remote id.
+    assert sync_engine.get_index_entry("/a.txt") is None
+    new_entry = sync_engine.get_index_entry("/b.txt")
+    assert new_entry is not None
+    assert new_entry.remote_id == file_id
+
+    assert event.status in (SyncStatus.Done, SyncStatus.Skipped)
+    assert sync_engine.sync_errors == []
+
+
+def test_remote_folder_rename_moves_local_tree(sync_engine: SyncEngine):
+    """A remote folder rename must take the whole local subtree and its
+    index rows with it (Drive emits no per-child change entries)."""
+    # Fully synced state before the remote rename: /old/kid.txt on disk + index.
+    _write_local_file(sync_engine, "/old/kid.txt", b"kid")
+    _seed_entry(
+        sync_engine, "/old", "id-dir", ItemType.Folder, rev="folder", content_hash="folder"
+    )
+    _seed_entry(
+        sync_engine,
+        "/old/kid.txt",
+        "id-kid",
+        ItemType.File,
+        rev="rev-kid",
+        content_hash=_md5(b"kid"),
+    )
+
+    # The change feed delivers ONE folder event, at the new path, same id.
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.Folder,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/new",
+        remote_path_lower="/new",
+        remote_id="id-dir",
+        local_path=sync_engine.to_local_path_from_cased("/new"),
+        rev="folder",
+        content_hash="folder",
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+    sync_engine._create_local_entry(event)
+
+    # The whole subtree moved on disk; nothing remains at the old path.
+    assert osp.isdir(sync_engine.to_local_path_from_cased("/new"))
+    assert osp.isfile(sync_engine.to_local_path_from_cased("/new/kid.txt"))
+    assert not osp.exists(sync_engine.to_local_path_from_cased("/old"))
+
+    # The index subtree was re-keyed with it.
+    assert sync_engine.get_index_entry("/old") is None
+    assert sync_engine.get_index_entry("/old/kid.txt") is None
+    dir_entry = sync_engine.get_index_entry("/new")
+    assert dir_entry is not None
+    assert dir_entry.remote_id == "id-dir"
+    kid_entry = sync_engine.get_index_entry("/new/kid.txt")
+    assert kid_entry is not None
+    assert kid_entry.remote_id == "id-kid"
+
+    assert event.status in (SyncStatus.Done, SyncStatus.Skipped)
+    assert sync_engine.sync_errors == []
+
+
+def test_remote_reparent_into_unsynced_parent_moves_local_file(
+    sync_engine: SyncEngine,
+):
+    """A remote reparent whose new parent folder is not yet synced locally must
+    sync the parent on demand and still move the local file (no stale copy)."""
+    data = b"reparented content"
+    fake = FakeDrive()
+    dir_id = fake.add_folder("/dir")
+    file_id = fake.add_file("/dir/b.txt", data)
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._path_cache.set(
+        "/dir", dir_id, parent_id=ROOT_ID, name="dir", is_folder=True
+    )
+    sync_engine.client._path_cache.set(
+        "/dir/b.txt", file_id, parent_id=dir_id, name="b.txt", is_folder=False
+    )
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Fully synced state before the remote reparent: local /a.txt only.
+    local_old = _write_local_file(sync_engine, "/a.txt", data)
+    _seed_entry(
+        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+    )
+
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/dir/b.txt",
+        remote_path_lower="/dir/b.txt",
+        remote_id=file_id,
+        local_path=sync_engine.to_local_path_from_cased("/dir/b.txt"),
+        rev="rev-1",
+        content_hash=_md5(data),
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=len(data),
+        completed=0,
+    )
+
+    sync_engine._create_local_entry(event)
+
+    # The old copy moved into the on-demand-created parent folder.
+    assert not osp.exists(local_old)
+    assert osp.isdir(sync_engine.to_local_path_from_cased("/dir"))
+    local_new = sync_engine.to_local_path_from_cased("/dir/b.txt")
+    assert osp.isfile(local_new)
+    with open(local_new, "rb") as f:
+        assert f.read() == data
+
+    # Index: parent synced, old key gone, new key holds the remote id.
+    assert sync_engine.get_index_entry("/dir") is not None
+    assert sync_engine.get_index_entry("/a.txt") is None
+    new_entry = sync_engine.get_index_entry("/dir/b.txt")
+    assert new_entry is not None
+    assert new_entry.remote_id == file_id
+
+    assert event.status in (SyncStatus.Done, SyncStatus.Skipped)
+    assert sync_engine.sync_errors == []
