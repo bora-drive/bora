@@ -206,12 +206,26 @@ def _emit_apply(
     old_path = path_cache.id_to_path(file["id"])
     is_folder = mime == GOOGLE_FOLDER_MIME_TYPE
     if old_path is None:
-        path_cache.set(
+        stored = path_cache.set(
             new_path, file["id"], parent_id, file["name"], is_folder
         )
     elif old_path != new_path:
-        path_cache.move(old_path, new_path)
-    # else: pure content update; cache path already correct.
+        stored = path_cache.move(old_path, new_path)
+    else:
+        stored = True  # pure content update; cache path already correct.
+    if not stored:
+        # The cache rejected the path (duplicate-name / case-fold conflict
+        # with a different file id). Emitting metadata at this path would
+        # cross-wire two files' content. Drop the entry; the path keeps
+        # mapping to the first file (first-id-wins, matching
+        # populate_from_listing).
+        logger.warning(
+            "Dropping change for %r (id=%s): path conflicts with an "
+            "existing item. Rename one of the duplicates in the Google "
+            "Drive web UI to sync both.",
+            new_path, file["id"],
+        )
+        return
     if is_folder:
         out_entries.append(to_folder_metadata(file, new_path))
     else:
