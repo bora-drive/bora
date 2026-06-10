@@ -1163,3 +1163,40 @@ def test_download_via_fake_writes_correct_bytes(client_on_fake, tmp_path):
     assert isinstance(result, FileMetadata)
     assert result.id == file_id
     assert result.content_hash == hashlib.md5(content).hexdigest()
+
+
+# ==== list_folder_iterator (recursive scoped — review F1) =================
+
+def test_recursive_list_of_subfolder_is_scoped(client_on_fake, fake_drive):
+    """list_folder(path, recursive=True) for a non-root path must return only
+    that subtree and must NOT rebuild the path cache (review F1)."""
+    cof = client_on_fake
+    cache = cof.client._path_cache
+
+    sub_id = fake_drive.add_folder("/sub")
+    inner_id = fake_drive.add_file("/sub/inner.txt", content=b"x")
+    out_id = fake_drive.add_file("/outside.txt", content=b"y")
+
+    # Bootstrap once so the cache knows everything.
+    cache.set("/sub", sub_id, ROOT_ID, "sub", True)
+    cache.set("/sub/inner.txt", inner_id, sub_id, "inner.txt", False)
+    cache.set("/outside.txt", out_id, ROOT_ID, "outside.txt", False)
+    # Trigger a root bootstrap to prime the cache via the real path.
+    cof.client.list_folder("/", recursive=True)
+
+    result = cof.client.list_folder("/sub", recursive=True)
+    paths = {md.path_display for md in result.entries}
+    assert paths == {"/sub/inner.txt"}, paths
+
+    # Cache must still know the out-of-subtree file (no clear+rebuild).
+    assert cache.path_to_id("/outside.txt") == out_id
+    assert cache.path_to_id("/sub") == sub_id
+    assert cache.path_to_id("/sub/inner.txt") == inner_id
+
+
+def test_recursive_list_of_root_still_bootstraps(client_on_fake, fake_drive):
+    """recursive=True on '/' keeps the bootstrap semantics (initial sync)."""
+    cof = client_on_fake
+    fake_drive.add_file("/a.txt", content=b"a")
+    result = cof.client.list_folder("/", recursive=True)
+    assert {md.path_display for md in result.entries} == {"/a.txt"}

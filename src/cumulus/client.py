@@ -930,7 +930,14 @@ class GoogleDriveClient:
         """
         self._ensure_root_id()
         if recursive:
-            yield from self._bootstrap_recursive(include_non_downloadable_files)
+            if remote_path in ("", "/"):
+                # Initial-sync bootstrap: enumerate the whole Drive and
+                # atomically (re)build the path cache.
+                yield from self._bootstrap_recursive(include_non_downloadable_files)
+            else:
+                yield from self._scoped_recursive(
+                    remote_path, include_non_downloadable_files
+                )
             return
 
         parent_id = self._path_cache.path_to_id(remote_path)
@@ -1085,6 +1092,66 @@ class GoogleDriveClient:
                 has_more=not is_last,
                 cursor=start_token if is_last else "",
             )
+
+    def _scoped_recursive(
+        self, remote_path: str, include_non_downloadable_files: bool = False
+    ) -> Iterator[ListFolderResult]:
+        """BFS-list one subtree via per-folder ``files.list`` calls.
+
+        Unlike :meth:`_bootstrap_recursive` this never clears the cache:
+        discovered items are written through with ``path_cache.set`` so
+        later operations can resolve them. Used by the sync engine to
+        refresh an index subtree after a folder move.
+        """
+        root_folder_id = self._path_cache.path_to_id(remote_path)
+        if root_folder_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No folder at '{remote_path}' is known to Cumulus.",
+                remote_path=remote_path,
+            )
+        queue: list[tuple[str, str]] = [(root_folder_id, remote_path)]
+        while queue:
+            folder_id, folder_path = queue.pop(0)
+            page_token: str | None = None
+            while True:
+                with convert_api_errors(remote_path=folder_path):
+                    resp = self._retry_transient(
+                        lambda pt=page_token, fid=folder_id: self._get_service()
+                        .files()
+                        .list(
+                            q=f"'{fid}' in parents and trashed=false",
+                            fields=f"nextPageToken, files({FILE_FIELDS})",
+                            pageSize=_LIST_PAGE_SIZE,
+                            pageToken=pt,
+                        )
+                        .execute()
+                    )
+                self._count_request()
+                entries: list[Metadata] = []
+                for file in resp.get("files", []):
+                    mime = file.get("mimeType")
+                    if is_google_native(mime) and not include_non_downloadable_files:
+                        continue
+                    child_path = compose_path(folder_path, file["name"])
+                    is_folder = is_google_folder(mime)
+                    self._path_cache.set(
+                        child_path, file["id"], parent_id=folder_id,
+                        name=file["name"], is_folder=is_folder,
+                    )
+                    if is_folder:
+                        entries.append(to_folder_metadata(file, child_path))
+                        queue.append((file["id"], child_path))
+                    else:
+                        entries.append(to_file_metadata(file, child_path))
+                page_token = resp.get("nextPageToken")
+                yield ListFolderResult(
+                    entries=entries,
+                    has_more=bool(page_token) or bool(queue),
+                    cursor="",
+                )
+                if not page_token:
+                    break
 
     def wait_for_remote_changes(
         self, last_cursor: str, timeout: int = DEFAULT_POLL_INTERVAL
