@@ -793,6 +793,7 @@ def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEng
     # The remote rename has already happened: Drive holds /FOLDER/Subfolder.
     folder_id = fake.add_folder("/FOLDER")
     sub_id = fake.add_folder("/FOLDER/Subfolder")
+    nested_id = fake.add_file("/FOLDER/Subfolder/nested.txt", b"nested")
     sync_engine.client._get_service = Mock(return_value=fake.service())
     # Path cache as the change feed leaves it (PathIDCache.move re-cases children).
     sync_engine.client._path_cache.set(
@@ -801,14 +802,25 @@ def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEng
     sync_engine.client._path_cache.set(
         "/FOLDER/Subfolder", sub_id, parent_id=folder_id, name="Subfolder", is_folder=True
     )
+    sync_engine.client._path_cache.set(
+        "/FOLDER/Subfolder/nested.txt",
+        nested_id,
+        parent_id=sub_id,
+        name="nested.txt",
+        is_folder=False,
+    )
 
     # Index + disk reflect the OLD casing (fully synced before the remote rename).
-    for cased, rid in [("/folder", folder_id), ("/folder/Subfolder", sub_id)]:
+    for cased, rid, item_type in [
+        ("/folder", folder_id, ItemType.Folder),
+        ("/folder/Subfolder", sub_id, ItemType.Folder),
+        ("/folder/Subfolder/nested.txt", nested_id, ItemType.File),
+    ]:
         entry = IndexEntry(
             remote_path_cased=cased,
             remote_path_lower=cased.lower(),
             remote_id=rid,
-            item_type=ItemType.Folder,
+            item_type=item_type,
             last_sync=0.0,
             rev="folder",
             content_hash="folder",
@@ -817,6 +829,10 @@ def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEng
         with sync_engine._database_access():
             sync_engine._index_table.update(entry)
     os.makedirs(sync_engine.to_local_path_from_cased("/folder/Subfolder"))
+    with open(
+        sync_engine.to_local_path_from_cased("/folder/Subfolder/nested.txt"), "wb"
+    ) as f:
+        f.write(b"nested")
 
     # The change feed delivers ONE folder event, for the renamed folder itself.
     event = SyncEvent(
@@ -853,3 +869,19 @@ def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEng
     child_entry = sync_engine.get_index_entry("/folder/subfolder")
     assert child_entry is not None
     assert child_entry.remote_path_cased == "/FOLDER/Subfolder"
+
+    # ... including grandchildren, not just direct children.
+    grandchild_entry = sync_engine.get_index_entry("/folder/subfolder/nested.txt")
+    assert grandchild_entry is not None
+    assert grandchild_entry.remote_path_cased == "/FOLDER/Subfolder/nested.txt"
+
+    # The case-conversion cache was refreshed alongside the index rows.
+    assert sync_engine._case_conversion_cache.get("/folder/subfolder") == (
+        "/FOLDER/Subfolder"
+    )
+
+    # The event terminated as a success, not Failed. The folder's content is
+    # identical (rev matches the index), so after applying the case change
+    # _on_remote_folder reports Skipped — which the engine treats as success
+    # alongside Done.
+    assert event.status == SyncStatus.Skipped
