@@ -179,3 +179,12 @@ git commit -m "docs(cluster-d): finalize Drive-vs-Dropbox unicode + path-length 
 - **Scope:** no production code changes — these are accepted platform differences, per the user's option (b).
 - **Coverage:** both xfails are removed; both tests now assert Drive's real behavior; both are cross-referenced to the differences doc.
 - **Placeholder check:** the only deferred detail is whether `create_remote_tree` recurses (Task 2 Step 2 note) — the assertion contract is fully specified either way.
+
+---
+
+## Execution notes (2026-06-10)
+
+- **Task 1 (4ab88a3):** `test_unicode_decomposed` rewritten to assert NFD persistence (Linux: NFD exists / NFC absent, after create and after renaming the NFD path; Darwin samefile branch kept). Live 3× PASS (2 implementer + 1 reviewer).
+- **Task 2 (4c111b6):** `test_long_path_error` rebuilt with nested parents. Pre-approved deviation from the sketch: 255-char (`max_name_length`) segments → 17 levels instead of ~586 6-char levels (18 Drive calls vs ~587). Verified `create_remote_tree` recurses creating each parent. Live 3× PASS. Reviewer confirmed teardown leaves no remote residue (`clean_drive_dir` deletes the top folder by id, recursive).
+- **Bonus production fix (709d03f), found in review:** `fs_max_lengths_for_path` returns `(path_max, name_max)` but its docstring said the reverse; `errorhandling.py` unpacked it reversed, so PathError messages reported the name/path limits swapped. Fixed both + offline regression test.
+- **Task 3 gates:** differences doc §5/§6 verified accurate by implementer + reviewer (no touch-ups needed). Offline suite 479 passed. Full linked integration FINAL GATE: **58 passed / 3 skipped / 3 xfailed / 2 xpassed / 0 failed** (46m24s, exit 0). Remaining markers: 4 cluster-A-pinned replace+unsynced siblings (one xpassed this run — the known flaky one) + the test_file_lifecycle unicode timing param (xpassed this run).
