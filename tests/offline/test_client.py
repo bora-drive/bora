@@ -1178,10 +1178,6 @@ def test_recursive_list_of_subfolder_is_scoped(client_on_fake, fake_drive):
     out_id = fake_drive.add_file("/outside.txt", content=b"y")
 
     # Bootstrap once so the cache knows everything.
-    cache.set("/sub", sub_id, ROOT_ID, "sub", True)
-    cache.set("/sub/inner.txt", inner_id, sub_id, "inner.txt", False)
-    cache.set("/outside.txt", out_id, ROOT_ID, "outside.txt", False)
-    # Trigger a root bootstrap to prime the cache via the real path.
     cof.client.list_folder("/", recursive=True)
 
     result = cof.client.list_folder("/sub", recursive=True)
@@ -1200,3 +1196,46 @@ def test_recursive_list_of_root_still_bootstraps(client_on_fake, fake_drive):
     fake_drive.add_file("/a.txt", content=b"a")
     result = cof.client.list_folder("/", recursive=True)
     assert {md.path_display for md in result.entries} == {"/a.txt"}
+
+
+def test_scoped_recursive_writes_new_items_through_to_cache(client_on_fake, fake_drive):
+    """Items created on Drive after bootstrap are discovered by a scoped
+    listing and become resolvable in the path cache."""
+    fake_drive.add_folder("/sub")
+    client_on_fake.client.list_folder("/", recursive=True)
+    new_file = fake_drive.add_file("/sub/late.txt", content=b"z")
+    nested = fake_drive.add_folder("/sub/nested")
+    deep = fake_drive.add_file("/sub/nested/deep.txt", content=b"d")
+
+    result = client_on_fake.client.list_folder("/sub", recursive=True)
+
+    cache = client_on_fake.client._path_cache
+    assert cache.path_to_id("/sub/late.txt") == new_file
+    assert cache.path_to_id("/sub/nested") == nested
+    assert cache.path_to_id("/sub/nested/deep.txt") == deep
+    assert {md.path_display for md in result.entries} == {
+        "/sub/late.txt", "/sub/nested", "/sub/nested/deep.txt",
+    }
+
+
+def test_scoped_recursive_skips_fold_conflicted_entry(client_on_fake, fake_drive):
+    """A Drive file whose case-folded name collides with an already-cached
+    entry must not appear in results, and the cache must still map the
+    folded path to the original file id."""
+    fake_drive.add_folder("/sub")
+    orig_id = fake_drive.add_file("/sub/Report.pdf", content=b"original")
+    # Bootstrap so /sub/Report.pdf is in the cache.
+    client_on_fake.client.list_folder("/", recursive=True)
+
+    # Add a second file whose name folds to the same key as Report.pdf.
+    fake_drive.add_file("/sub/report.pdf", content=b"conflict",
+                        literal_name="report.pdf")
+
+    result = client_on_fake.client.list_folder("/sub", recursive=True)
+
+    cache = client_on_fake.client._path_cache
+    # The colliding entry must be absent from results.
+    result_paths = {md.path_display for md in result.entries}
+    assert "/sub/report.pdf" not in result_paths
+    # The cache must still resolve the folded key to the original id.
+    assert cache.path_to_id("/sub/Report.pdf") == orig_id
