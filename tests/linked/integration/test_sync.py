@@ -1230,26 +1230,33 @@ def test_local_permission_error(m: Maestral) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Drive-model difference: the test creates a too-long path as a single flat slash-containing key. Dropbox auto-created intermediate parents and enforced a remote path length; Google Drive requires each parent folder to exist and imposes no remote path-length limit, so create_remote_tree fails at parent resolution. Needs a nested-creation rewrite to exercise the local-path-too-long download path.", strict=False)
 def test_long_path_error(m: Maestral) -> None:
-    """Tests error handling on trying to download an item with a too long path."""
+    """A remote item whose path exceeds the LOCAL filesystem limit surfaces a
+    PathError on download.
 
-    max_path_length, _ = fs_max_lengths_for_path()
+    Google Drive imposes no remote path-length limit and does not auto-create
+    intermediate parents, so the deep path must be built as nested folders (one
+    parent at a time). The only path-length limit is the local filesystem's.
+    See docs/superpowers/references/dropbox-vs-drive-differences.md §6.
+    """
+    max_path_length, max_name_length = fs_max_lengths_for_path()
 
-    # Create a remote file with a path name longer than locally allowed.
-    test_path = "/nested" * (max_path_length // 6)
+    # Build a nested folder chain whose cumulative LOCAL path exceeds the
+    # path-length limit while each segment stays within the per-name limit.
+    # Maximal segments minimize the number of levels (and Drive API calls).
+    segment = "x" * max_name_length
+    depth = (max_path_length // (len(segment) + 1)) + 1
+    nested_tree: DirTreeType = {"file.txt": "content"}
+    for _ in range(depth):
+        nested_tree = {segment: nested_tree}
 
-    try:
-        create_remote_tree(m, {test_path: "content"})
-    except PathError:
-        pytest.skip(f"Cannot create path with {len(test_path)} chars on Drive")
+    create_remote_tree(m, nested_tree)
 
     wait_for_idle(m)
 
     sync_errors = m.sync_errors
 
     assert len(sync_errors) > 0
-    assert sync_errors[-1].remote_path == test_path
     assert sync_errors[-1].type == "PathError"
     assert sync_errors[-1].direction == SyncDirection.Down
 
