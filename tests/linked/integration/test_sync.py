@@ -564,7 +564,6 @@ def test_unix_permissions(m: Maestral) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Stage-5 follow-up [E2]: local-vs-remote file-modification conflict resolution is timing-flaky under Drive's change feed — the conflicted copy of the local change is not reliably created (the local change can be lost). Passes intermittently.", strict=False)
 def test_file_conflict_modified(m: Maestral) -> None:
     """Tests conflicting local vs remote file changes."""
 
@@ -598,7 +597,6 @@ def test_file_conflict_modified(m: Maestral) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Stage-5 follow-up [E2]: simultaneous local+remote file creation conflict resolution is timing-flaky under Drive's change feed — local and remote contents are not reliably reconciled into a conflicted copy. Passes intermittently.", strict=False)
 def test_file_conflict_created(m: Maestral) -> None:
     """Tests conflicting local vs remote file creations."""
 
