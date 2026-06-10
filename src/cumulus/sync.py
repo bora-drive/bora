@@ -903,6 +903,17 @@ class SyncEngine:
         with self._database_access():
             return self._index_table.get(remote_path_lower)
 
+    def get_index_entry_by_remote_id(self, remote_id: str) -> IndexEntry | None:
+        """
+        Gets the index entry currently holding the given remote ID, if any.
+
+        :param remote_id: Unique remote ID of the item.
+        :returns: Index entry or ``None`` if no entry exists for the given ID.
+        """
+        with self._database_access():
+            rows = self._index_table.select_sql("WHERE remote_id = ?", remote_id)
+        return rows[0] if rows else None
+
     def get_index_entry_for_local_path(self, local_path: str) -> IndexEntry | None:
         """
         Gets the index entry for the given local path. Ensures that the index entry has
@@ -3562,6 +3573,7 @@ class SyncEngine:
         :returns: SyncEvent corresponding to local item or None if no local changes
             are made.
         """
+        self._apply_remote_move(event)
         self._apply_case_change(event)
 
         # Store the new entry at the given path in your local state. If the required
@@ -3673,6 +3685,7 @@ class SyncEngine:
         :returns: SyncEvent corresponding to local item or None if no local changes
             are made.
         """
+        self._apply_remote_move(event)
         self._apply_case_change(event)
 
         # Store the new entry at the given path in your local state. If the required
@@ -3770,6 +3783,94 @@ class SyncEngine:
             return SyncStatus.Skipped
         else:
             raise os_to_cumulus_error(exc, remote_path=event.remote_path)
+
+    def _apply_remote_move(self, event: SyncEvent) -> None:
+        """
+        Applies a remote rename / reparent locally before downloading.
+
+        Drive's change feed emits a single entry at the NEW path for a moved
+        item — no DeletedMetadata for the old path and no per-child entries
+        for folders. Detect the move by remote ID, move the local item, and
+        re-key the index subtree, so the engine does not leave a stale copy
+        at the old path. Case-only renames (folded key unchanged) are handled
+        by :meth:`_apply_case_change` instead.
+
+        :param event: Download SyncEvent.
+        """
+        if not event.remote_id:
+            return
+
+        entry = self.get_index_entry_by_remote_id(event.remote_id)
+
+        if entry is None or entry.remote_path_lower == event.remote_path_lower:
+            return
+
+        local_path_old = self.to_local_path_from_cased(entry.remote_path_cased)
+        old_lower = entry.remote_path_lower
+        old_cased = entry.remote_path_cased
+
+        if osp.exists(local_path_old) and not osp.exists(event.local_path):
+            # A reparent may be delivered before its new parent folder has
+            # been synced. Create the parent first so the move cannot fail.
+            self._ensure_parent(event)
+
+            event_cls = DirMovedEvent if isdir(local_path_old) else FileMovedEvent
+            with self.fs_events.ignore(event_cls(local_path_old, event.local_path)):
+                exc = move(local_path_old, event.local_path)
+
+            if exc is not None or not osp.exists(event.local_path):
+                # The move failed or silently no-oped (move() swallows
+                # FileNotFoundError, e.g. for a still-missing parent dir).
+                # Leave the index keyed at the old path so that it stays
+                # consistent with the on-disk state. The download will then
+                # proceed at the new path as for a newly created item.
+                self._logger.debug(
+                    'Could not move local item "%s" -> "%s" (remote move, '
+                    "id=%s): %s",
+                    old_cased,
+                    event.remote_path,
+                    event.remote_id,
+                    exc,
+                )
+                return
+
+            self._logger.debug(
+                'Moved local item "%s" -> "%s" (remote move, id=%s)',
+                old_cased,
+                event.remote_path,
+                event.remote_id,
+            )
+
+        with self._database_access(), self._db.transaction():
+            # remote_path_lower is the primary key, so re-keying a row means
+            # deleting it under the old key and re-inserting it under the new
+            # one. All rows of the subtree must move together: a partial
+            # commit would leave children orphaned under the old prefix with
+            # no remaining trigger to fix them up (the entry lookup above
+            # would no longer match).
+            rows = [entry]
+
+            if entry.item_type is ItemType.Folder:
+                rows += [
+                    child
+                    for child in self._index_table.select(
+                        PathTreeQuery(IndexEntry.remote_path_lower, old_lower)
+                    )
+                    if child.remote_path_lower != old_lower
+                ]
+
+            for row in rows:
+                old_pk = row.remote_path_lower
+                row.remote_path_lower = (
+                    event.remote_path_lower + row.remote_path_lower[len(old_lower):]
+                )
+                row.remote_path_cased = (
+                    event.remote_path + row.remote_path_cased[len(old_cased):]
+                )
+                self._index_table.delete_primary_key(old_pk)
+                self._index_table.update(row)
+
+            self._case_conversion_cache.clear()
 
     def _apply_case_change(self, event: SyncEvent) -> None:
         """
