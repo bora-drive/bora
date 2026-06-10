@@ -11,6 +11,7 @@ mkdir), file restore, and sharing.
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import logging
 import os
@@ -912,10 +913,14 @@ class GoogleDriveClient:
     ) -> Iterator[ListFolderResult]:
         """Lists folder contents as a paginated iterator.
 
-        ``recursive=True`` (only meaningful for the sync root ``"/"``) is
-        the initial-sync bootstrap: it enumerates the whole reachable
-        subtree and atomically populates the path cache. See
-        :meth:`_bootstrap_recursive`.
+        ``recursive=True`` on ``"/"`` runs the initial-sync bootstrap:
+        it enumerates the whole reachable subtree and atomically
+        (re)builds the path cache. See :meth:`_bootstrap_recursive`.
+        On any other path it BFS-lists that subtree with cache
+        write-through (new items are discoverable via the cache after
+        the call) and never clears the cache. Note that
+        ``include_deleted`` is ignored on recursive paths — both
+        implementations list ``trashed=false`` only.
 
         ``recursive=False`` lists one folder's direct children;
         *remote_path* must already be known to the path cache.
@@ -1110,9 +1115,11 @@ class GoogleDriveClient:
                 f"No folder at '{remote_path}' is known to Cumulus.",
                 remote_path=remote_path,
             )
-        queue: list[tuple[str, str]] = [(root_folder_id, remote_path)]
+        queue: collections.deque[tuple[str, str]] = collections.deque(
+            [(root_folder_id, remote_path)]
+        )
         while queue:
-            folder_id, folder_path = queue.pop(0)
+            folder_id, folder_path = queue.popleft()
             page_token: str | None = None
             while True:
                 with convert_api_errors(remote_path=folder_path):
@@ -1135,10 +1142,16 @@ class GoogleDriveClient:
                         continue
                     child_path = compose_path(folder_path, file["name"])
                     is_folder = is_google_folder(mime)
-                    self._path_cache.set(
+                    stored = self._path_cache.set(
                         child_path, file["id"], parent_id=folder_id,
                         name=file["name"], is_folder=is_folder,
                     )
+                    if not stored:
+                        # Fold-key conflict with a different file id —
+                        # yielding it would index this item's metadata at
+                        # a path the cache maps to ANOTHER file (F2
+                        # cross-write). set() already logged a warning.
+                        continue
                     if is_folder:
                         entries.append(to_folder_metadata(file, child_path))
                         queue.append((file["id"], child_path))
