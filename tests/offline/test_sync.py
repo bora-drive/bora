@@ -12,6 +12,7 @@ from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
 from cumulus.core import FileMetadata
 from cumulus.database.core import Database
+from cumulus.exceptions import DataChangedError
 from cumulus.keyring import CredentialStorage
 from cumulus.models import (
     ChangeType,
@@ -657,3 +658,43 @@ def test_upload_rev_mismatch_records_conflict_not_silent_skip(
     # error is recorded but the event is still Done/Skipped and errors get
     # cleared.
     assert event.status == SyncStatus.Failed
+
+
+def test_download_conflict_when_upload_error_present(sync_engine: SyncEngine):
+    """With an unresolved Up error for the path, the remote change is a Conflict
+    (which triggers conflicted-copy creation) — not a RemoteNewer overwrite.
+
+    We seed ``last_sync`` in the future so that, absent the recorded upload
+    error, the ctime heuristic would classify the event as RemoteNewer (see
+    test_conflict_remote_newer_when_no_local_changes). The recorded Up error
+    must take precedence and force Conflict.
+    """
+    remote_path = "/conflict_down.txt"
+    local_data = b"local edit"
+    _write_local_file(sync_engine, remote_path, local_data)
+    future = datetime.today().timestamp() + 10_000_000
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="REV-OLD",
+        content_hash=_md5(b"original"),
+        last_sync=future,
+    )
+
+    # Simulate the upload having recorded an Up conflict error for this path.
+    err = DataChangedError(
+        "Item changed on Google Drive",
+        "rev mismatch",
+        remote_path=remote_path,
+        local_path=sync_engine.to_local_path_from_cased(remote_path),
+    )
+    sync_engine._handle_sync_error(err, direction=SyncDirection.Up)
+
+    event = _download_event(
+        sync_engine,
+        remote_path,
+        rev="REV-REMOTE-NEW",
+        content_hash=_md5(b"remote content 2"),
+    )
+
+    assert sync_engine._check_download_conflict(event) is Conflict.Conflict
