@@ -939,14 +939,17 @@ def test_case_conflict(m: Maestral) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Drive-behavior difference: this assumes the server normalizes decomposed (NFD) unicode names to NFC and mirrors the rename locally (Dropbox behavior). Google Drive does not normalize unicode file names, so the NFD name persists. Revisit when defining the port's unicode-normalization policy (Stage-1 follow-up).", strict=False)
 def test_unicode_decomposed(m: Maestral) -> None:
-    """
-    Tests the lifecycle of a file with decomposed unicode characters.
+    """A file with decomposed (NFD) unicode characters round-trips as NFD.
+
+    Google Drive does not normalize unicode file names (unlike Dropbox, which
+    re-composed NFD -> NFC and mirrored the rename locally). The decomposed
+    name therefore persists end-to-end.
+    See docs/superpowers/references/dropbox-vs-drive-differences.md §5.
     """
     file_name = b"fo\xcc\x81lder".decode()  # decomposed ó (NFD)
     local_path = f"{m.sync_path}/{file_name}"
-    local_path_normalized = normalize_unicode(local_path)
+    local_path_normalized = normalize_unicode(local_path)  # NFC form
 
     with open(local_path, "a") as f:
         f.write("content")
@@ -954,31 +957,30 @@ def test_unicode_decomposed(m: Maestral) -> None:
     wait_for_idle(m)
 
     if platform.system() == "Darwin":
-        # Local file stays as is, macOS treats unicode normalisations transparently.
+        # macOS normalizes unicode at the filesystem layer; either spelling
+        # resolves to the same file.
         assert osp.exists(local_path)
         assert osp.samefile(local_path, local_path_normalized)
     else:
-        # Rename to NFC version on Drive servers is mirrored locally.
-        assert not osp.exists(local_path)
-        assert osp.exists(local_path_normalized)
+        # Drive preserves NFD: the decomposed name stays, the NFC name is absent.
+        assert osp.exists(local_path)
+        assert not osp.exists(local_path_normalized)
 
     assert_no_errors(m)
     assert_synced(m)
 
-    # Test rename.
+    # Rename: the decomposed name still persists as decomposed after a rename.
     target_path = local_path + "_target"
     target_path_normalized = normalize_unicode(target_path)
-    os.rename(local_path_normalized, target_path)
+    os.rename(local_path, target_path)
     wait_for_idle(m)
 
     if platform.system() == "Darwin":
-        # Local file stays as is, macOS treats unicode normalisations transparently.
         assert osp.exists(target_path)
         assert osp.samefile(target_path, target_path_normalized)
     else:
-        # Rename to NFC version on Drive servers is mirrored locally.
-        assert not osp.exists(target_path)
-        assert osp.exists(target_path_normalized)
+        assert osp.exists(target_path)
+        assert not osp.exists(target_path_normalized)
 
     assert_no_errors(m)
     assert_synced(m)
