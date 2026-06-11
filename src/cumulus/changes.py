@@ -238,32 +238,37 @@ def iter_remote_changes(
     path_cache: "PathIDCache",
     last_cursor: str,
 ) -> "Iterator[ListFolderResult]":
-    """Page Drive's ``changes.list`` and yield one
-    :class:`~cumulus.core.ListFolderResult` per page.
+    """Drain Drive's ``changes.list`` pages and yield one
+    :class:`~cumulus.core.ListFolderResult` per poll cycle.
 
     Each yielded entry has its path resolved via *path_cache*, and the
     cache is mutated as a side effect (``set`` / ``move`` / ``remove``).
-    Native docs and shortcuts are dropped. The cursor on each page is
-    the next ``pageToken``; on the final page it is the
-    ``newStartPageToken`` to resume polling from.
+    Native docs and shortcuts are dropped. The cursor on the single
+    yielded result is the ``newStartPageToken`` to resume polling from.
 
-    Within a page, entries are *not* applied in Drive's delivery order.
-    ``changes.list`` does not guarantee parent-before-child ordering — a
-    file created inside a brand-new folder can be delivered before the
-    folder's own change (verified against a real account). Applying in
-    delivery order would resolve such a file against a path cache that
-    does not yet know its parent, misclassifying it as out-of-scope and
-    silently dropping it. So each page is resolved with a fixpoint:
-    parent-dependent changes are replayed until a pass resolves nothing
-    new. (A parent/child split *across* page boundaries is still
-    delivery-order dependent — see the plan deviations file.)
+    ``changes.list`` does not guarantee parent-before-child ordering —
+    a file created inside a brand-new folder can arrive before the
+    folder's own change, and this can happen *across* page boundaries
+    (a child on page N, its parent on page N+1). To handle this
+    correctly all pages are drained to the final ``newStartPageToken``
+    before classification begins. The fixpoint then runs over the whole
+    batch so a parent resolved on any page unblocks its children.
+
+    The cursor is only persisted after the entire batch is classified.
+    A crash mid-batch causes the batch to be re-fetched on next startup;
+    downloads are idempotent so this is safe.
 
     :param service_factory: zero-arg callable returning a Drive service.
     :param retry: the client's ``_retry_transient`` helper.
     :param path_cache: the path cache to resolve and mutate.
     :param last_cursor: the page token to start from.
     """
+    # Phase 1: drain every page to the final newStartPageToken, buffering
+    # raw changes. Parent-before-child is not guaranteed even ACROSS
+    # pages, so classification must see the whole batch (review F6). A
+    # poll cycle's batch is bounded by the changes since the last poll.
     cursor = last_cursor
+    raw: list[dict[str, Any]] = []
     while True:
         resp = retry(
             lambda c=cursor: service_factory()
@@ -276,52 +281,44 @@ def iter_remote_changes(
             )
             .execute()
         )
-        out_entries: list[Any] = []
-
-        # Handle terminal changes up front — a hard-delete, a trash, or
-        # a malformed entry needs no parent, so its outcome does not
-        # depend on what else is in the page. Everything else is
-        # parent-dependent and goes to the fixpoint below.
-        pending: list[dict[str, Any]] = []
-        for change in resp.get("changes", []):
-            file = change.get("file")
-            if change.get("removed") or (
-                file is not None and file.get("trashed")
-            ):
-                _emit_delete(change, path_cache, out_entries)
-            elif file is None:
-                logger.debug("Skipping malformed change entry: %r", change)
-            else:
-                pending.append(change)
-
-        # Fixpoint: apply every change whose parent now resolves, then
-        # repeat — a folder applied this pass unblocks its children.
-        # Stop once a pass resolves nothing new.
-        while pending:
-            deferred: list[dict[str, Any]] = []
-            for change in pending:
-                if classify(change, path_cache) is ChangeDecision.APPLY:
-                    _emit_apply(change, path_cache, out_entries)
-                else:
-                    deferred.append(change)
-            if len(deferred) == len(pending):
-                break  # no parent resolved this pass; the rest never will
-            pending = deferred
-
-        # Survivors are genuinely outside the sync root: a move-out of a
-        # file the cache knew (propagate the delete) or a never-in-scope
-        # create (drop silently).
-        for change in pending:
-            if classify(change, path_cache) is ChangeDecision.DELETE:
-                _emit_delete(change, path_cache, out_entries)
-
+        raw.extend(resp.get("changes", []))
         next_token = resp.get("nextPageToken")
-        new_start = resp.get("newStartPageToken")
-        cursor = next_token or new_start or ""
-        yield ListFolderResult(
-            entries=out_entries,
-            has_more=bool(next_token),
-            cursor=cursor,
-        )
+        cursor = next_token or resp.get("newStartPageToken") or ""
         if not next_token:
             break
+
+    # Phase 2: terminal changes first (deletes/trash need no parent),
+    # then the parent-dependent fixpoint over the WHOLE batch.
+    out_entries: list[Any] = []
+    pending: list[dict[str, Any]] = []
+    for change in raw:
+        file = change.get("file")
+        if change.get("removed") or (file is not None and file.get("trashed")):
+            _emit_delete(change, path_cache, out_entries)
+        elif file is None:
+            logger.debug("Skipping malformed change entry: %r", change)
+        else:
+            pending.append(change)
+
+    # Fixpoint: apply every change whose parent now resolves, then
+    # repeat — a folder applied this pass unblocks its children.
+    # Stop once a pass resolves nothing new.
+    while pending:
+        deferred: list[dict[str, Any]] = []
+        for change in pending:
+            if classify(change, path_cache) is ChangeDecision.APPLY:
+                _emit_apply(change, path_cache, out_entries)
+            else:
+                deferred.append(change)
+        if len(deferred) == len(pending):
+            break  # no parent resolved this pass; the rest never will
+        pending = deferred
+
+    # Survivors are genuinely outside the sync root: a move-out of a
+    # file the cache knew (propagate the delete) or a never-in-scope
+    # create (drop silently).
+    for change in pending:
+        if classify(change, path_cache) is ChangeDecision.DELETE:
+            _emit_delete(change, path_cache, out_entries)
+
+    yield ListFolderResult(entries=out_entries, has_more=False, cursor=cursor)

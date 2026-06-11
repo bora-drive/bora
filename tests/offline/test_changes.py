@@ -354,10 +354,12 @@ def test_iter_changes_drops_unknown_delete():
 
 
 def test_iter_changes_paginates():
-    """Changes spanning two pages are both yielded; has_more is set correctly.
+    """Changes spanning two Drive pages are both included in a single result.
 
-    We force two pages by patching _CHANGE_PAGE_SIZE to 1, so each of the
-    two seeded files ends up on its own page.
+    We force two Drive pages by patching _CHANGE_PAGE_SIZE to 1.  Since the
+    function now drains all pages before yielding (review F6), it returns one
+    ListFolderResult whose entries cover both Drive pages.  has_more is always
+    False; the cursor is the final newStartPageToken.
     """
     fake = FakeDrive()
     cache = _fake_cache()
@@ -375,9 +377,8 @@ def test_iter_changes_paginates():
             start,
         ))
 
-    assert len(pages) == 2
-    assert pages[0].has_more is True
-    assert pages[1].has_more is False
+    assert len(pages) == 1, "all Drive pages are drained into a single result"
+    assert pages[0].has_more is False
     all_entries = [e for page in pages for e in page.entries]
     paths = {e.path_display for e in all_entries}
     assert "/a.pdf" in paths
@@ -453,3 +454,58 @@ def test_move_to_conflicting_path_is_not_emitted():
     assert out == [], "rejected move leaked into the feed output"
     assert cache.path_to_id("/other.txt") == "id-B"   # original path kept
     assert cache.path_to_id("/report.pdf") == "id-A"  # original owner untouched
+
+
+# ==== cross-page parent/child resolution (review F6) =====================
+
+
+def test_child_before_parent_across_pages_is_not_dropped():
+    """A child delivered on page N whose brand-new parent folder arrives on
+    page N+1 must still be emitted (review F6).
+
+    The per-page fixpoint cannot resolve the child on page 1 because the
+    parent hasn't arrived yet — it appears on page 2.  After the fix the
+    whole batch is drained before classification, so the parent is already
+    in the cache when the fixpoint runs.
+    """
+    import sqlite3
+    from cumulus.database.core import Database
+    from cumulus.path_cache import PathIDCache
+
+    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    cache.root_id = "root"
+
+    child = {
+        "fileId": "id-c",
+        "file": {
+            "id": "id-c", "name": "kid.txt", "parents": ["id-p"],
+            "mimeType": "text/plain", "trashed": False,
+        },
+    }
+    parent = {
+        "fileId": "id-p",
+        "file": {
+            "id": "id-p", "name": "newdir", "parents": ["root"],
+            "mimeType": "application/vnd.google-apps.folder", "trashed": False,
+        },
+    }
+    pages = [
+        {"changes": [child], "nextPageToken": "t2"},
+        {"changes": [parent], "newStartPageToken": "t3"},
+    ]
+
+    class _Svc:
+        def changes(self):
+            return self
+
+        def list(self, **kw):
+            return self
+
+        def execute(self):
+            return pages.pop(0)
+
+    results = list(iter_remote_changes(lambda: _Svc(), lambda fn: fn(), cache, "t1"))
+    entries = [e for r in results for e in r.entries]
+    paths = {e.path_display for e in entries}
+    assert "/newdir/kid.txt" in paths, paths
+    assert results[-1].cursor == "t3"
