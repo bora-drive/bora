@@ -3809,7 +3809,25 @@ class SyncEngine:
         old_lower = entry.remote_path_lower
         old_cased = entry.remote_path_cased
 
-        if osp.exists(local_path_old) and not osp.exists(event.local_path):
+        if osp.exists(local_path_old):
+            if osp.exists(event.local_path):
+                # The new local path is occupied by a different item: leave
+                # disk and index untouched. Re-keying the index here would
+                # adopt the occupant into the moved item's sync identity and
+                # silently overwrite the remote file on the next local scan.
+                # The downstream conflict logic conflicted-copies the occupant
+                # and downloads the moved item at the new path; the stale
+                # old-path copy and its index row remain until the next local
+                # scan.
+                self._logger.info(
+                    'Target of remote move "%s" -> "%s" (id=%s) is occupied '
+                    "by a different local item: leaving old copy in place",
+                    old_cased,
+                    event.remote_path,
+                    event.remote_id,
+                )
+                return
+
             # A reparent may be delivered before its new parent folder has
             # been synced. Create the parent first so the move cannot fail.
             self._ensure_parent(event)
@@ -3824,7 +3842,7 @@ class SyncEngine:
                 # Leave the index keyed at the old path so that it stays
                 # consistent with the on-disk state. The download will then
                 # proceed at the new path as for a newly created item.
-                self._logger.debug(
+                self._logger.info(
                     'Could not move local item "%s" -> "%s" (remote move, '
                     "id=%s): %s",
                     old_cased,
@@ -3859,7 +3877,22 @@ class SyncEngine:
                     if child.remote_path_lower != old_lower
                 ]
 
+            old_lower_prefix = old_lower + "/"
+            old_cased_prefix = old_cased + "/"
+
             for row in rows:
+                if row.remote_path_lower != old_lower and not (
+                    row.remote_path_lower.startswith(old_lower_prefix)
+                    and row.remote_path_cased.startswith(old_cased_prefix)
+                ):
+                    self._logger.warning(
+                        'Index inconsistency: path "%s" ("%s") does not start '
+                        'with parent prefix "%s", skipping re-key',
+                        row.remote_path_lower,
+                        row.remote_path_cased,
+                        old_lower_prefix,
+                    )
+                    continue
                 old_pk = row.remote_path_lower
                 row.remote_path_lower = (
                     event.remote_path_lower + row.remote_path_lower[len(old_lower):]
