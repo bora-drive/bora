@@ -1170,3 +1170,83 @@ def test_remote_reparent_into_unsynced_parent_moves_local_file(
 
     assert event.status in (SyncStatus.Done, SyncStatus.Skipped)
     assert sync_engine.sync_errors == []
+
+
+def test_remote_move_with_occupied_target_keeps_index_and_conflicts(
+    sync_engine: SyncEngine,
+):
+    """If a foreign local item already occupies the target of a remote move,
+    the engine must NOT re-key the index onto the occupant: that would adopt
+    the occupant into the moved file's sync identity (equal revs => Skipped),
+    silently overwrite the remote file with the occupant's content on the next
+    local scan, and resurrect the old path as a new upload. Instead, leave
+    disk and index untouched so the downstream conflict logic conflicted-copies
+    the occupant and downloads the moved file at the new path."""
+    data = b"moved file content"
+    occupant_data = b"foreign occupant created offline"
+    fake = FakeDrive()
+    file_id = fake.add_file("/b.txt", data)
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._path_cache.set(
+        "/b.txt", file_id, parent_id=ROOT_ID, name="b.txt", is_folder=False
+    )
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Fully synced state before the remote rename: local /a.txt + index entry.
+    local_old = _write_local_file(sync_engine, "/a.txt", data)
+    _seed_entry(
+        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+    )
+
+    # A DIFFERENT local item (no index row) occupies the move target.
+    local_new = _write_local_file(sync_engine, "/b.txt", occupant_data)
+
+    # The change feed delivers ONE file event, at the new path, same id and rev.
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/b.txt",
+        remote_path_lower="/b.txt",
+        remote_id=file_id,
+        local_path=local_new,
+        rev="rev-1",
+        content_hash=_md5(data),
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=len(data),
+        completed=0,
+    )
+
+    sync_engine._create_local_entry(event)
+
+    # The old path is untouched: disk copy still there, index row NOT re-keyed.
+    assert osp.isfile(local_old)
+    old_entry = sync_engine.get_index_entry("/a.txt")
+    assert old_entry is not None
+    assert old_entry.remote_id == file_id
+
+    # The occupant was moved to a conflicted copy in the same folder.
+    folder = osp.dirname(local_new)
+    cc_paths = [
+        osp.join(folder, name)
+        for name in os.listdir(folder)
+        if "conflicted copy" in name
+    ]
+    assert len(cc_paths) == 1, f"expected one conflicted copy in {os.listdir(folder)}"
+    with open(cc_paths[0], "rb") as f:
+        assert f.read() == occupant_data
+
+    # The moved file was downloaded at the new path.
+    assert osp.isfile(local_new)
+    with open(local_new, "rb") as f:
+        assert f.read() == data
+
+    assert event.status is SyncStatus.Conflict
