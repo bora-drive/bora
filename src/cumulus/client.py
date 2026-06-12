@@ -1155,9 +1155,12 @@ class GoogleDriveClient:
             folder_id, folder_path = queue.popleft()
             page_token: str | None = None
             while True:
-                with convert_api_errors(remote_path=folder_path):
-                    resp = self._retry_transient(
-                        lambda pt=page_token, fid=folder_id: self._get_service()
+
+                def _fetch_page(
+                    pt: str | None = page_token, fid: str = folder_id
+                ) -> dict[str, Any]:
+                    return (
+                        self._get_service()
                         .files()
                         .list(
                             q=f"'{fid}' in parents and trashed=false",
@@ -1167,6 +1170,9 @@ class GoogleDriveClient:
                         )
                         .execute()
                     )
+
+                with convert_api_errors(remote_path=folder_path):
+                    resp = self._retry_transient(_fetch_page)
                 self._count_request()
                 entries: list[Metadata] = []
                 for file in resp.get("files", []):
