@@ -878,17 +878,37 @@ class _WriteHelper:
                 # Adopt the existing folder into the cache so follow-up
                 # operations (get_metadata in the engine's merge branch)
                 # resolve it.
-                client._path_cache.set(
+                adopted = client._path_cache.set(
                     remote_path,
                     hits[0]["id"],
                     parent_id=parent_id,
                     name=hits[0]["name"],
                     is_folder=True,
                 )
+                if not adopted:
+                    # A stale entry (a different id) occupies the folded path —
+                    # e.g. another device deleted and recreated the folder while
+                    # our change feed lagged.  The probe result is fresher;
+                    # evict the stale entry and re-adopt.
+                    logger.debug(
+                        "Evicting stale cache entry for %r; probe found "
+                        "fresher id %r.",
+                        remote_path,
+                        hits[0]["id"],
+                    )
+                    client._path_cache.remove(remote_path)
+                    client._path_cache.set(
+                        remote_path,
+                        hits[0]["id"],
+                        parent_id=parent_id,
+                        name=hits[0]["name"],
+                        is_folder=True,
+                    )
                 raise FolderConflictError(
                     "Folder already exists",
-                    f"A folder already exists at {remote_path!r} on Google "
-                    "Drive; it will be merged with the local folder.",
+                    f"A folder with this name already exists at {remote_path!r} "
+                    "on Google Drive; the existing folder can be merged instead "
+                    "of creating a duplicate.",
                     remote_path=remote_path,
                 )
 
