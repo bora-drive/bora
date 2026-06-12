@@ -201,3 +201,16 @@ All three fixes are localized, tested (213 offline tests still pass
 unchanged), and don't alter the public surface of any module. None of
 them invalidate prior task reviews — they're stage-completion fix-ups
 exposed only by end-to-end smoke testing.
+
+## Superseded by cluster-E Task 13 (2026-06-12, commit `61da1e6`)
+
+- **Spec §5.1 "access-token link is functionally not linked" is
+  superseded.** `link(access_token=...)` now yields a usable
+  short-lived session: the `linked` property accepts an in-process
+  access-token-only credential (restoring upstream maestral's
+  `link() == 0 ⇒ usable` contract), while the from-storage path still
+  requires a refresh token, so the relaxation cannot leak across
+  restarts (a persisted token-only blob fails
+  `Credentials.from_authorized_user_info` and loads as None). When the
+  1-hour token expires, API calls surface a clean `TokenRevokedError`
+  with re-link instructions — no crash, no ADC fall-through.
