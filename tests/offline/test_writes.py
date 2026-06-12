@@ -1555,9 +1555,10 @@ def test_fake_remove_batch_trashes_files(client_on_fake):
 def test_fake_restore_round_trips_content(client_on_fake, tmp_path):
     """restore() downloads the revision content then re-uploads it.
 
-    The FakeDrive revisions.get_media returns the file's current content, so
-    after restore the fake record should still have the same bytes (the content
-    written by the initial upload), and the cache/metadata should be consistent.
+    The FakeDrive revisions.get_media returns the content snapshot stored
+    with the requested revision, so after restore the fake record should
+    still have the same bytes (the content written by the initial upload),
+    and the cache/metadata should be consistent.
     """
     client = client_on_fake.client
     fake = client_on_fake.fake
@@ -1578,6 +1579,118 @@ def test_fake_restore_round_trips_content(client_on_fake, tmp_path):
     rec = fake.files[fid]
     assert rec["content"] == data
     assert rec["trashed"] is False
+
+
+# ---- rev-check TOCTOU audit via fake (cluster-E Task 5, review F4) ---------
+
+def test_fake_upload_update_rescues_interleaved_remote_revision(
+    client_on_fake, tmp_path
+):
+    """If a remote revision lands between the rev check and our update,
+    the clobbered revision must be rescued as a remote conflicted copy
+    (review F4: Drive v3 has no atomic write precondition)."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/doc.txt", b"v1")
+    rev1 = fake.files[fid]["headRevisionId"]
+    client._path_cache.set(
+        "/doc.txt", fid, parent_id=ROOT_ID, name="doc.txt", is_folder=False
+    )
+
+    # Simulate the race: a collaborator commits v2 AFTER our client read
+    # rev1 (the pre-update check uses files.get) but BEFORE files.update
+    # executes. The one-shot hook fires inside files.update finalize.
+    collab = b"v2-collaborator"
+
+    def interleave():
+        rec = fake.files[fid]
+        rec["content"] = collab
+        rec["md5Checksum"] = hashlib.md5(collab).hexdigest()
+        rec["size"] = len(collab)
+        rec["headRevisionId"] = fake._new_rev()
+        rec["revisions"].append(fake._revision_dict(rec))
+        fake._record_change(fid)
+
+    fake.on_next_update = interleave
+
+    local = tmp_path / "doc.txt"
+    local.write_bytes(b"v3-ours")
+    client._writes.upload(
+        str(local), "/doc.txt", write_mode=WriteMode.Update, update_rev=rev1
+    )
+
+    # Our write won at /doc.txt ...
+    assert fake.files[fid]["content"] == b"v3-ours"
+    # ... and the collaborator's clobbered revision was rescued as a
+    # same-folder conflicted-copy sibling carrying the collaborator's bytes.
+    cc = [
+        r for r in fake.files.values()
+        if "conflicted copy" in r["name"] and not r["trashed"]
+    ]
+    assert len(cc) == 1, sorted(r["name"] for r in fake.files.values())
+    assert cc[0]["content"] == collab
+    assert ROOT_ID in cc[0]["parents"]
+
+
+def test_fake_upload_update_rev_no_race_creates_no_conflicted_copy(
+    client_on_fake, tmp_path
+):
+    """The audit must be a no-op when no revision interleaved: the upload
+    succeeds and no conflicted copy appears."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/doc.txt", b"v1")
+    rev1 = fake.files[fid]["headRevisionId"]
+    client._path_cache.set(
+        "/doc.txt", fid, parent_id=ROOT_ID, name="doc.txt", is_folder=False
+    )
+
+    local = tmp_path / "doc.txt"
+    local.write_bytes(b"v2-ours")
+    result = client._writes.upload(
+        str(local), "/doc.txt", write_mode=WriteMode.Update, update_rev=rev1
+    )
+
+    assert result.id == fid
+    assert fake.files[fid]["content"] == b"v2-ours"
+    assert not any(
+        "conflicted copy" in r["name"] for r in fake.files.values()
+    )
+
+
+def test_fake_upload_update_rev_audit_failure_is_swallowed(
+    client_on_fake, tmp_path, caplog
+):
+    """A failing post-upload audit must not fail the (already successful)
+    upload: the error is logged at warning and the metadata is returned."""
+    import logging as _logging
+
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fid = fake.add_file("/doc.txt", b"v1")
+    rev1 = fake.files[fid]["headRevisionId"]
+    client._path_cache.set(
+        "/doc.txt", fid, parent_id=ROOT_ID, name="doc.txt", is_folder=False
+    )
+
+    fake.fail_next("revisions.list", _make_http_error(404, "notFound"))
+
+    local = tmp_path / "doc.txt"
+    local.write_bytes(b"v2-ours")
+    with caplog.at_level(_logging.WARNING, logger="cumulus.writes"):
+        result = client._writes.upload(
+            str(local), "/doc.txt", write_mode=WriteMode.Update, update_rev=rev1
+        )
+
+    assert result.id == fid
+    assert fake.files[fid]["content"] == b"v2-ours"
+    assert any("audit" in r.message.lower() for r in caplog.records)
 
 
 # ---- error paths: quota and 412 via fake ----------------------------------
