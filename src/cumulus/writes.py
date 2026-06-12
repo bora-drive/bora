@@ -316,6 +316,28 @@ class _WriteHelper:
                 local_path=local_path,
             )
 
+        # Post-upload TOCTOU audit (review F4). Drive v3 has no atomic write
+        # precondition, so the headRevisionId check above is check-then-write
+        # with a race window spanning the whole upload. Detect an interleaved
+        # remote revision from revision history and rescue it. Best-effort:
+        # our own write already committed, so a failing audit/rescue must not
+        # fail the upload — the buried revision stays recoverable from the
+        # file's revision history on Drive.
+        if mode == "update" and update_rev is not None:
+            try:
+                self._audit_update_rev(
+                    resp["id"], update_rev, resp.get("headRevisionId"),
+                    remote_path=remote_path, local_path=local_path,
+                )
+            except (CumulusApiError, OSError) as exc:
+                logger.warning(
+                    "Post-upload revision audit for %r failed (%s); a remote "
+                    "revision committed during our upload may not have been "
+                    "rescued as a conflicted copy. It remains recoverable "
+                    "from the file's revision history on Drive.",
+                    remote_path, exc,
+                )
+
         if mode == "create":
             cache.set(
                 remote_path, resp["id"],
@@ -395,6 +417,104 @@ class _WriteHelper:
 
         client._count_request()
         return response
+
+    def _audit_update_rev(
+        self,
+        file_id: str,
+        expected_prev: str,
+        new_head: str | None,
+        *,
+        remote_path: str,
+        local_path: str,
+    ) -> None:
+        """Post-upload TOCTOU audit (review F4).
+
+        Drive v3 offers no atomic write precondition (no If-Match), so a
+        remote revision can land between our ``headRevisionId`` check and
+        the ``files.update`` — the window spans the whole resumable upload.
+        Detect that from revision history: if the revision immediately
+        preceding our new head is not the rev we checked against, a foreign
+        revision was committed during our upload and buried. Rescue it as a
+        remote conflicted copy (Drive retains non-head revisions of binary
+        files, so its content is still downloadable).
+
+        Costs exactly one ``revisions.list`` per rev-checked update in the
+        no-race case (more only for >1000 revisions). If several foreign
+        revisions interleaved, only the newest (the one directly under our
+        head) is rescued; older ones remain in revision history.
+
+        Native Google docs cannot be downloaded via ``revisions.get_media``,
+        but they never enter the path cache / sync index (the change feed
+        drops them), so the rev-checked update path cannot target them; if
+        one is ever hit regardless, the rescue fails and is swallowed by the
+        caller's best-effort guard.
+        """
+        client = self._client
+        ids: list[str] = []
+        page_token: str | None = None
+        while True:
+            with convert_api_errors(
+                remote_path=remote_path, local_path=local_path
+            ):
+                resp = client._retry_transient(
+                    lambda token=page_token: client._get_service()
+                    .revisions()
+                    .list(
+                        fileId=file_id,
+                        fields="nextPageToken,revisions(id)",
+                        pageSize=1000,
+                        pageToken=token,
+                    )
+                    .execute()
+                )
+            client._count_request()
+            ids.extend(r["id"] for r in resp.get("revisions", []))
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+
+        if new_head is None or new_head not in ids:
+            return  # history truncated/purged; nothing to audit against
+        head_idx = ids.index(new_head)  # revisions are oldest-first
+        if head_idx == 0:
+            return
+        prev = ids[head_idx - 1]
+        if prev == expected_prev:
+            return
+        logger.warning(
+            "Remote revision %s of %r was committed during our upload and "
+            "overwritten; rescuing it as a conflicted copy.",
+            prev, remote_path,
+        )
+        self._rescue_revision(file_id, prev, remote_path)
+
+    def _rescue_revision(
+        self, file_id: str, revision_id: str, remote_path: str
+    ) -> None:
+        """Download *revision_id* and re-upload it as a same-folder
+        ``name (conflicted copy <date>).ext`` sibling. The change feed then
+        delivers the sibling to every device, converging both edits.
+
+        Cannot recurse: the rescue upload uses ``WriteMode.Add`` without
+        ``update_rev``, so it never re-enters the audit.
+        """
+        tmp_path = self._download_revision_to_tempfile(file_id, revision_id)
+        try:
+            # Match the established conflicted-copy naming (sync.py
+            # _local_cc_filename's ownerless fallback). The suffix is
+            # path_codec-safe, so splitting the encoded path is fine.
+            stem, ext = os.path.splitext(remote_path)
+            date = datetime.now().strftime("%Y-%m-%d")
+            cc_path = f"{stem} (conflicted copy {date}){ext}"
+            self.upload(
+                tmp_path, cc_path,
+                write_mode=WriteMode.Add, autorename=True,
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     def remove(
         self, remote_path: str, parent_rev: str | None = None

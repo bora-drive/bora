@@ -43,6 +43,11 @@ class FakeDrive:
         self._seq = 100  # opaque change cursor; ints rendered as str
         self._change_log: list[tuple[int, str]] = []  # (seq, fileId)
         self._fail: dict[str, list[Exception]] = {}
+        # One-shot hook fired at the start of the next files.update finalize,
+        # before the update is applied. Used to deterministically interleave a
+        # "collaborator" write inside the check-then-write race window
+        # (cluster-E Task 5 / review F4).
+        self.on_next_update: Callable[[], None] | None = None
         self.user = {
             "permissionId": "perm-1",
             "displayName": "Test User",
@@ -151,6 +156,9 @@ class FakeDrive:
             "size": rec["size"],
             "md5Checksum": rec["md5Checksum"],
             "lastModifyingUser": {"permissionId": "perm-1"},
+            # Snapshot of the content at this revision; consumed by
+            # revisions.get_media and stripped from revisions.list responses.
+            "content": rec["content"],
         }
 
 
@@ -405,6 +413,10 @@ class _FilesResource:
     def update(self, fileId, body=None, media_body=None, addParents=None,
                removeParents=None, fields="", **_):
         def finalize():
+            hook = self._d.on_next_update
+            if hook is not None:
+                self._d.on_next_update = None
+                hook()
             rec = self._d.files[fileId]
             body_ = body or {}
             if "name" in body_:
@@ -500,8 +512,13 @@ class _RevisionsResource:
         def run():
             revs = self._d.files[fileId]["revisions"]
             start = int(pageToken) if pageToken else 0
-            page = revs[start:start + pageSize]
-            resp = {"revisions": list(page)}
+            # Oldest-first like the real API; strip the fake-internal
+            # content snapshot from the wire response.
+            page = [
+                {k: v for k, v in r.items() if k != "content"}
+                for r in revs[start:start + pageSize]
+            ]
+            resp = {"revisions": page}
             if start + pageSize < len(revs):
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
@@ -509,7 +526,10 @@ class _RevisionsResource:
 
     def get_media(self, fileId, revisionId, **_):
         rec = self._d.files[fileId]
-        return _MediaRequest(rec["content"])
+        for rev in rec["revisions"]:
+            if rev["id"] == revisionId:
+                return _MediaRequest(rev["content"])
+        raise make_http_error(404, "notFound", "Revision not found")
 
 
 class _Batch:
