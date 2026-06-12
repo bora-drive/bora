@@ -7,7 +7,10 @@ import pytest
 from cumulus.path_codec import (
     compose_path,
     decode_name,
+    decode_path,
     encode_name,
+    encode_path,
+    fold_human,
     fold_key,
     fold_path,
 )
@@ -198,3 +201,51 @@ class TestFoldPath:
 
     def test_mixed_case_segments(self) -> None:
         assert fold_path("/FOO/Bar/BAZ") == "/foo/bar/baz"
+
+
+class TestFoldHuman:
+    """fold_human: quoting-free canonical fold of decoded paths.
+
+    Identity: ``decode_path(fold_path(encode_path(p))) == fold_human(p)``
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Ördner",
+            "Report (1).txt",
+            "ΣΣΣ",
+            "İstanbul",
+            "a%b",
+            "ümlaut ß",
+        ],
+    )
+    def test_fold_human_matches_decoded_fold_path(self, name: str) -> None:
+        """fold_human must equal decode_path(fold_path(encode_path(p)))."""
+        decoded_path = "/" + name
+        encoded = encode_path(decoded_path)
+        assert decode_path(fold_path(encoded)) == fold_human(decoded_path)
+
+    def test_fold_human_idempotent(self) -> None:
+        path = "/Ördner/Straße"
+        assert fold_human(fold_human(path)) == fold_human(path)
+
+    def test_fold_human_idempotent_turkish_i(self) -> None:
+        path = "/İstanbul/Report"
+        assert fold_human(fold_human(path)) == fold_human(path)
+
+    def test_fold_human_root(self) -> None:
+        assert fold_human("/") == "/"
+
+    def test_fold_human_empty(self) -> None:
+        assert fold_human("") == ""
+
+    def test_fold_human_ascii_casefolds(self) -> None:
+        assert fold_human("/Documents/Report.TXT") == "/documents/report.txt"
+
+    def test_fold_human_german_sharp_s(self) -> None:
+        # ß casefolds to 'ss'
+        assert fold_human("/Straße") == "/strasse"
+
+    def test_fold_human_nested(self) -> None:
+        assert fold_human("/Ördner/Straße") == "/ördner/strasse"

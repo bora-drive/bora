@@ -82,6 +82,7 @@ from .path_cache import PathIDCache
 from .sync import SyncDirection, SyncEngine, pf_repr
 from .utils import get_newer_version
 from .utils.appdirs import get_cache_path, get_data_path
+from .path_codec import fold_human
 from .utils.path import (
     delete,
     is_child,
@@ -1262,7 +1263,9 @@ class Maestral:
         """
         self._check_linked()
 
-        remote_path_lower = normalize(remote_path.rstrip("/"))
+        # excluded_items are stored in fold_human form (decoded, casefolded).
+        # Apply the same fold to the caller-supplied path before comparing.
+        remote_path_lower = fold_human(remote_path.rstrip("/"))
 
         if any(is_equal_or_child(remote_path_lower, f) for f in self.sync.excluded_items):
             return "excluded"

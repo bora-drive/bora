@@ -113,7 +113,7 @@ from .utils import exc_info_tuple, removeprefix, sanitize_string
 from .utils.appdirs import get_data_path
 from .utils.caches import LRUCache
 from .utils.integration import CPU_CORE_COUNT, cpu_usage_percent
-from .path_codec import decode_path, encode_path, fold_path
+from .path_codec import decode_path, encode_path, fold_human, fold_path
 from .utils.path import (
     content_hash,
     delete,
@@ -697,13 +697,19 @@ class SyncEngine:
     def clean_excluded_items_list(remote_paths: Collection[str]) -> set[str]:
         """
         Removes all duplicates and children of excluded items from the excluded items
-        list. Normalises all paths to lower case.
+        list. Canonicalises paths to the fold_human form (quoting-free casefold over
+        the decoded human-readable path) so that user-supplied paths with non-ASCII
+        or common punctuation (e.g. 'Ördner', 'Reports (2024)') compare correctly
+        against engine paths decoded via :func:`~cumulus.path_codec.decode_path`.
 
-        :param remote_paths: remote paths to exclude.
-        :returns: Cleaned up items.
+        :param remote_paths: remote paths to exclude (human-readable, user-supplied).
+        :returns: Cleaned up items in fold_human canonical form.
         """
-        # Remove duplicate entries by creating set, strip trailing '/'.
-        remote_paths_lower = {normalize(f).rstrip("/") for f in remote_paths}
+        # fold_human is idempotent, so re-cleaning stored entries is safe.
+        # Existing configs may hold normalize()-form entries; fold_human subsumes
+        # that form (normalize = NFC + casefold on decoded text = fold_human for
+        # paths that contain no percent-encoded segments).
+        remote_paths_lower = {fold_human(f).rstrip("/") for f in remote_paths}
 
         # Remove all children of excluded folders.
         for path in remote_paths_lower.copy():
@@ -1494,10 +1500,15 @@ class SyncEngine:
         """
         Check if file has been excluded through "selective sync" by the user.
 
-        :param remote_path_lower: Normalised lower case remote path.
+        :param remote_path_lower: Fold-path lower remote path (percent-encoded virtual
+            form, already casefolded by :func:`~cumulus.path_codec.fold_path`).
         :returns: Whether the path is excluded from download syncing by the user.
         """
-        return any(is_equal_or_child(remote_path_lower, p) for p in self.excluded_items)
+        # excluded_items are stored in fold_human form (decoded, casefolded).
+        # Decode the engine fold-path'd key to the same canonical form before
+        # comparing — this makes names with non-ASCII or common punctuation work.
+        decoded = decode_path(remote_path_lower)
+        return any(is_equal_or_child(decoded, p) for p in self.excluded_items)
 
     def is_mignore(self, event: SyncEvent) -> bool:
         """
@@ -1514,7 +1525,13 @@ class SyncEngine:
         ) and not self.get_local_rev(event.remote_path_lower)
 
     def _is_mignore_path(self, remote_path: str, is_dir: bool = False) -> bool:
-        relative_path = remote_path.lstrip("/")
+        # remote_path is the percent-encoded virtual path; users write .mignore
+        # patterns against the human-readable (decoded) form.  Decode each
+        # segment before matching so that non-ASCII names and punctuation
+        # (e.g. 'Ördner', 'Report (1).txt') are matched correctly.
+        # gitwildmatch is case-sensitive; we pass the cased decoded form so
+        # case parity with upstream maestral (pre-port) is preserved.
+        relative_path = decode_path(remote_path).lstrip("/")
 
         if is_dir:
             relative_path = f"{relative_path}/"
@@ -1612,9 +1629,11 @@ class SyncEngine:
 
         # Save sync errors to retry later.
 
-        remote_path_lower = normalize(err.remote_path)
+        # err.remote_path is the percent-encoded virtual path; fold_path is the
+        # correct fold for encoded paths (not normalize(), which is Dropbox-form).
+        remote_path_lower = fold_path(err.remote_path)
         if err.remote_path_from:
-            remote_path_from_lower = normalize(err.remote_path_from)
+            remote_path_from_lower = fold_path(err.remote_path_from)
         else:
             remote_path_from_lower = None
 
@@ -2219,8 +2238,8 @@ class SyncEngine:
         if (
             self.is_excluded(event.src_path)
             or self.is_excluded(event.dest_path)
-            or self.is_excluded_by_user(normalize(remote_src_path))
-            or self.is_excluded_by_user(normalize(remote_dest_path))
+            or self.is_excluded_by_user(fold_path(remote_src_path))
+            or self.is_excluded_by_user(fold_path(remote_dest_path))
         ):
             return True
 
