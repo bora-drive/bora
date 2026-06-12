@@ -2766,7 +2766,14 @@ class SyncEngine:
             except NotFoundError:
                 md = None
             if md is not None:
-                self._create_local_entry(SyncEvent.from_metadata(md, self))
+                dl_event = SyncEvent.from_metadata(md, self)
+                self._create_local_entry(dl_event)
+                if dl_event.status == SyncStatus.Failed:
+                    self._logger.warning(
+                        'Could not restore "%s" after the remote item '
+                        "changed; it will be downloaded on the next sync cycle",
+                        event.remote_path,
+                    )
 
         return status
 

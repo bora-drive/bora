@@ -1328,3 +1328,110 @@ def test_local_delete_of_remotely_changed_file_redownloads(sync_engine: SyncEngi
     entry = sync_engine.get_index_entry(remote_path)
     assert entry is not None, "index entry missing after redownload"
     assert entry.rev == new_rev, f"index rev {entry.rev!r} != new_rev {new_rev!r}"
+
+
+# ==== Cluster E (F10): _on_local_moved DataChangedError branch ========================
+#
+# client.remove raises DataChangedError when the destination already exists with a
+# newer rev than what our index recorded.  Before 8b91c3f the except clause caught
+# FileConflictError (unreachable), so DataChangedError would propagate and be
+# recorded as an Up error — effectively trashing a file we no longer own.  The fix
+# catches DataChangedError and falls through so move(..., autorename=True) conflict-
+# renames around the still-live destination.
+
+
+def test_local_move_to_remotely_changed_destination_conflict_renames(
+    sync_engine: SyncEngine,
+):
+    """Moving a.txt → b.txt locally when the remote b.txt changed since last
+    sync must NOT trash b.txt; the source must arrive on remote under an
+    autorename suffix and the stale b.txt index entry must be removed
+    (review F10 — DataChangedError branch in _on_local_moved)."""
+    src_data = b"source file content"
+    dst_new_content = b"destination changed remotely"
+
+    # Set up FakeDrive: b.txt exists with a new rev; a.txt is the move source.
+    fake = FakeDrive()
+    b_id = fake.add_file("/b.txt", content=dst_new_content)
+    b_new_rev = fake.files[b_id]["headRevisionId"]
+    a_id = fake.add_file("/a.txt", content=src_data)
+    a_rev = fake.files[a_id]["headRevisionId"]
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+
+    # Path cache reflects both files.
+    sync_engine.client._path_cache.set(
+        "/a.txt", a_id, parent_id=ROOT_ID, name="a.txt", is_folder=False
+    )
+    sync_engine.client._path_cache.set(
+        "/b.txt", b_id, parent_id=ROOT_ID, name="b.txt", is_folder=False
+    )
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Index: /a.txt at its current rev; /b.txt at a STALE rev so remove() raises
+    # DataChangedError (rev precondition mismatch).
+    _seed_entry(
+        sync_engine, "/a.txt", a_id, ItemType.File, rev=a_rev, content_hash=_md5(src_data)
+    )
+    _seed_entry(
+        sync_engine,
+        "/b.txt",
+        b_id,
+        ItemType.File,
+        rev="rev-stale",
+        content_hash=_md5(b"old b content"),
+    )
+
+    # Local disk: the user moved a.txt → b.txt; a.txt is gone, b.txt holds the
+    # moved content.
+    local_path_from = sync_engine.to_local_path_from_cased("/a.txt")
+    local_path_to = _write_local_file(sync_engine, "/b.txt", src_data)
+
+    event = SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/b.txt",
+        remote_path_lower="/b.txt",
+        remote_path_from="/a.txt",
+        remote_path_from_lower="/a.txt",
+        remote_id=a_id,
+        local_path=local_path_to,
+        local_path_from=local_path_from,
+        rev=a_rev,
+        content_hash=_md5(src_data),
+        symlink_target=None,
+        change_type=ChangeType.Moved,
+        status=SyncStatus.Queued,
+        size=len(src_data),
+        completed=0,
+    )
+
+    sync_engine._create_remote_entry(event)
+
+    # Remote /b.txt must NOT have been trashed.
+    assert not fake.files[b_id]["trashed"], "remote b.txt was trashed despite rev mismatch"
+
+    # The move source must have arrived remotely under an autorename suffix
+    # (autorename=True gives "b (1).txt" since "b.txt" is already occupied).
+    remote_names = [r["name"] for r in fake.files.values() if not r["trashed"]]
+    assert any(
+        "b" in name and name != "b.txt" for name in remote_names
+    ), f"no autorename sibling found; remote names: {remote_names}"
+
+    # The stale /b.txt index entry must have been removed (replaced by the
+    # conflict-renamed entry from _update_index_recursive).
+    b_entry = sync_engine.get_index_entry("/b.txt")
+    assert b_entry is None, (
+        "stale /b.txt index entry was not removed after conflict rename; "
+        f"entry: {b_entry}"
+    )
+
+    # No lingering Up error for /b.txt.
+    up_errors = sync_engine.sync_errors_for_path("/b.txt", direction=SyncDirection.Up)
+    assert len(up_errors) == 0, f"unexpected Up errors for /b.txt: {up_errors}"
