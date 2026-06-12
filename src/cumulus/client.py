@@ -1225,7 +1225,7 @@ class GoogleDriveClient:
                     .list(
                         pageToken=last_cursor,
                         pageSize=1,
-                        fields="changes(fileId)",
+                        fields="nextPageToken, changes(fileId)",
                     )
                     .execute()
                 )
@@ -1239,7 +1239,7 @@ class GoogleDriveClient:
                     ) from exc
                 raise
         self._count_request()
-        return len(resp.get("changes", [])) > 0
+        return bool(resp.get("changes")) or bool(resp.get("nextPageToken"))
 
     def list_remote_changes(self, last_cursor: str) -> ListFolderResult:
         """Lists changes since *last_cursor*, exhausting all pages."""
