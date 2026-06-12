@@ -1545,3 +1545,48 @@ def test_excluded_items_stale_config_form_matches(sync_engine: SyncEngine) -> No
     # A stale entry '/a%b' stored literally must still match.
     sync_engine._excluded_items = {"/ördner"}  # bypass setter, inject stale form
     assert sync_engine.is_excluded_by_user(fold_path(encode_path("/Ördner")))
+
+
+def test_excluded_items_cleaned_at_config_load(sync_engine: SyncEngine) -> None:
+    """Configs written before the fold_human migration can hold normalize()-form
+    entries. For casefold-divergent names these never match again: the stale
+    entry for 'Straße' is '/straße' (NFC + lower) while the engine compares
+    against '/strasse' (fold_human: casefold maps ß → ss). The list must be
+    canonicalised when it is loaded from the config."""
+    sync_engine._conf.set("sync", "excluded_items", ["/straße"])
+    sync_engine.reload_cached_config()
+
+    assert sync_engine._excluded_items == {"/strasse"}
+    assert sync_engine.is_excluded_by_user(fold_path(encode_path("/Straße")))
+
+
+def test_apply_remote_changes_prunes_deleted_excluded_item(
+    sync_engine: SyncEngine,
+) -> None:
+    """A remotely deleted item that is excluded by the user must be pruned from
+    excluded_items. Entries are stored in fold_human form while
+    event.remote_path_lower is in fold_path (encoded) form — the comparison
+    must decode the event side, mirroring is_excluded_by_user."""
+    sync_engine.excluded_items = ["/Ördner"]
+
+    encoded = encode_path("/Ördner")
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.Folder,
+        sync_time=datetime.today().timestamp(),
+        remote_path=encoded,
+        remote_path_lower=fold_path(encoded),
+        remote_id="id:deleted",
+        local_path=sync_engine.to_local_path_from_cased(encoded),
+        rev=None,
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Removed,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+    sync_engine.apply_remote_changes([event])
+
+    assert sync_engine.excluded_items == set()

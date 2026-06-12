@@ -82,13 +82,12 @@ from .path_cache import PathIDCache
 from .sync import SyncDirection, SyncEngine, pf_repr
 from .utils import get_newer_version
 from .utils.appdirs import get_cache_path, get_data_path
-from .path_codec import fold_human
+from .path_codec import decode_path, encode_path, fold_human, fold_path
 from .utils.path import (
     delete,
     is_child,
     is_equal_or_child,
     isdir,
-    normalize,
     to_existing_unnormalized_path,
 )
 
@@ -452,9 +451,14 @@ class Maestral:
                         self._remove_after_excluded(path)
 
                     for path in added_included_items:
-                        if not self.sync.is_excluded_by_user(path):
+                        # ``path`` is in fold_human form (the stored form of
+                        # ``excluded_items``); engine APIs take the encoded
+                        # virtual-path form.
+                        if not self.sync.is_excluded_by_user(
+                            fold_path(encode_path(path))
+                        ):
                             self._logger.info("Included %s", path)
-                            self.manager.download_queue.put(path)
+                            self.manager.download_queue.put(encode_path(path))
 
                     self._logger.info(IDLE)
 
@@ -1133,7 +1137,7 @@ class Maestral:
         self._check_linked()
         self._check_sync_dir()
 
-        remote_paths_lower = {normalize(p.rstrip("/")) for p in remote_paths}
+        remote_paths_lower = {fold_human(p.rstrip("/")) for p in remote_paths}
 
         # ---- input cleanup -----------------------------------------------------------
         excluded_items_old = self.sync.excluded_items
@@ -1163,11 +1167,20 @@ class Maestral:
             raise BusyError("Cannot add excluded items", "Please try again when idle.")
 
     def _remove_after_excluded(self, remote_path_lower: str) -> None:
-        # Perform housekeeping.
-        self.sync.remove_node_from_index(remote_path_lower)
-        self.sync.clear_sync_errors_for_path(remote_path_lower, recursive=True)
+        # ``remote_path_lower`` is in fold_human form (decoded, casefolded) — the
+        # stored form of ``excluded_items``. The index and sync-error tables are
+        # keyed by the fold_path form (encoded). Re-encoding the fold_human form
+        # yields exactly that key: fold_path(encode_path(fold_human(p))) ==
+        # fold_path(encode_path(p)), because decode_path ∘ encode_path == id and
+        # fold_human is idempotent.
+        remote_path_fold = fold_path(encode_path(remote_path_lower))
 
-        # Remove item from local drive.
+        # Perform housekeeping.
+        self.sync.remove_node_from_index(remote_path_fold)
+        self.sync.clear_sync_errors_for_path(remote_path_fold, recursive=True)
+
+        # Remove item from local drive. Local paths use the decoded (human)
+        # form, so the fold_human key is the right one here.
         local_path_uncased = f"{self.sync_path}{remote_path_lower}"
 
         try:
@@ -1204,12 +1217,17 @@ class Maestral:
         self._check_linked()
         self._check_sync_dir()
 
-        remote_paths_lower = {normalize(p.rstrip("/")) for p in remote_paths}
+        remote_paths_lower = {fold_human(p.rstrip("/")) for p in remote_paths}
 
         # ---- input validation --------------------------------------------------------
         excluded_items = self.sync.excluded_items
+        # ``remote_paths_lower`` is in fold_human form, the stored form of
+        # ``excluded_items``; ``is_excluded_by_user`` takes the encoded
+        # fold_path form.
         newly_included_items = {
-            p for p in remote_paths_lower if self.sync.is_excluded_by_user(p)
+            p
+            for p in remote_paths_lower
+            if self.sync.is_excluded_by_user(fold_path(encode_path(p)))
         }
         if len(newly_included_items) == 0:
             return
@@ -1225,10 +1243,17 @@ class Maestral:
                     # Remove parent folder from excluded list.
                     excluded_items.discard(folder)
                     # Re-add their children (except parents of remote_path_lower).
-                    for res in self.client.list_folder_iterator(folder):
+                    # The client speaks encoded virtual paths: encode the
+                    # fold_human entry on the way in, and decode the metadata's
+                    # fold_path ``path_lower`` back to fold_human on the way out
+                    # so the stored entries stay comparable.
+                    for res in self.client.list_folder_iterator(encode_path(folder)):
                         for entry in res.entries:
-                            if not is_equal_or_child(remote_path_lower, entry.path_lower):
-                                excluded_items.add(entry.path_lower)
+                            entry_path_lower = decode_path(entry.path_lower)
+                            if not is_equal_or_child(
+                                remote_path_lower, entry_path_lower
+                            ):
+                                excluded_items.add(entry_path_lower)
 
                     # Add the parent to the download list.
                     newly_included_items.add(folder)
@@ -1245,7 +1270,8 @@ class Maestral:
                 self.sync.excluded_items = excluded_items
                 for remote_path_lower in newly_included_items:
                     self._logger.info("Included '%s'", remote_path_lower)
-                    self.manager.download_queue.put(remote_path_lower)
+                    # The download queue carries encoded virtual paths.
+                    self.manager.download_queue.put(encode_path(remote_path_lower))
             finally:
                 self.sync.sync_lock.release()
 

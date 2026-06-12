@@ -129,7 +129,6 @@ from .utils.path import (
     isdir,
     isfile,
     move,
-    normalize,
     normalize_case,
     normalize_unicode,
     to_existing_unnormalized_path,
@@ -617,7 +616,14 @@ class SyncEngine:
         self._mignore_path: str = osp.join(self._sync_path, MIGNORE_FILE)
         self._file_cache_path: str = osp.join(self._sync_path, FILE_CACHE)
 
-        self._excluded_items: set[str] = set(self._conf.get("sync", "excluded_items"))
+        # Configs written before the fold_human migration may hold entries in
+        # the old normalize() form (NFC + lower of the decoded path), which
+        # diverges from fold_human for casefold-divergent names (ß, ς,
+        # ligatures). Canonicalise on load; the cleaned list is persisted the
+        # next time the ``excluded_items`` setter runs.
+        self._excluded_items: set[str] = self.clean_excluded_items_list(
+            self._conf.get("sync", "excluded_items")
+        )
         self._max_cpu_percent: float = (
             self._conf.get("sync", "max_cpu_percent") * CPU_CORE_COUNT
         )
@@ -3133,10 +3139,14 @@ class SyncEngine:
             if is_excluded:
                 if event.is_deleted:
                     # Remove deleted item and its children from the excluded list.
+                    # ``excluded_items`` entries are in fold_human form; decode
+                    # the engine's fold_path key to the same form before
+                    # comparing (mirrors ``is_excluded_by_user``).
+                    deleted_path_lower = decode_path(event.remote_path_lower)
                     new_excluded = {
                         path
                         for path in new_excluded
-                        if not is_equal_or_child(path, event.remote_path_lower)
+                        if not is_equal_or_child(path, deleted_path_lower)
                     }
 
             else:

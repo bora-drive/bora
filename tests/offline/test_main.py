@@ -5,9 +5,12 @@ import requests
 
 import cumulus.main
 from cumulus.constants import GITHUB_RELEASES_API
+from cumulus.core import FolderMetadata, ListFolderResult
 from cumulus.exceptions import NotLinkedError
 from cumulus.main import Maestral
+from cumulus.models import IndexEntry, ItemType
 from cumulus.path_cache import PathIDCache
+from cumulus.path_codec import encode_path, fold_path
 
 
 def test_check_for_updates(m: Maestral) -> None:
@@ -74,3 +77,119 @@ def test_shutdown_daemon_calls_client_close(m: Maestral) -> None:
     assert call_order.index("close") < call_order.index("stop_sync"), (
         "client.close() must be called before stop_sync()"
     )
+
+
+# ==== excluded-items pipeline: fold_human form throughout =============================
+#
+# excluded_items entries are stored in fold_human form (decoded human path,
+# per-segment NFC(casefold(NFC))). Every comparison against the stored entries
+# must use the same form; every call into engine APIs (index, sync errors,
+# client, download queue) must use the encoded virtual-path form.
+
+
+def _bypass_link_checks():
+    """exclude/include_items guard on a linked account and a sync dir; neither
+    exists in the offline harness, and neither is needed by the code under test."""
+    return (
+        patch.object(Maestral, "_check_linked"),
+        patch.object(Maestral, "_check_sync_dir"),
+    )
+
+
+def test_include_items_casefold_divergent_name(m: Maestral) -> None:
+    """exclude → include round-trip for a casefold-divergent name.
+
+    'Straße' is stored as '/strasse' (fold_human: casefold maps ß → ss), but
+    normalize() yields '/straße' (lower keeps ß). If include_items queries
+    with the normalize() form, re-inclusion is a silent no-op."""
+    m.sync.excluded_items = ["/Straße"]
+    assert m.sync.excluded_items == {"/strasse"}
+
+    check_linked, check_sync_dir = _bypass_link_checks()
+    with check_linked, check_sync_dir:
+        m.include_items("/Straße")
+
+    assert m.sync.excluded_items == set()
+
+
+def test_include_items_literal_percent_name(m: Maestral) -> None:
+    """A name containing a literal percent-escape ('a%20b') must survive the
+    round-trip: it is stored verbatim in fold_human form and must not be
+    unquoted by any comparison along the way."""
+    m.sync.excluded_items = ["/a%20b"]
+    assert m.sync.excluded_items == {"/a%20b"}
+
+    check_linked, check_sync_dir = _bypass_link_checks()
+    with check_linked, check_sync_dir:
+        m.include_items("/a%20b")
+
+    assert m.sync.excluded_items == set()
+
+
+def test_exclude_items_removes_index_entries_by_fold_path_key(m: Maestral) -> None:
+    """_remove_after_excluded must key index housekeeping by the fold_path
+    (encoded) form — the index's remote_path_lower — not the fold_human form."""
+    encoded = encode_path("/Ördner/datei.txt")
+    folded = fold_path(encoded)  # '/%C3%B6rdner/datei.txt'
+    entry = IndexEntry(
+        remote_path_cased=encoded,
+        remote_path_lower=folded,
+        remote_id="id:seed",
+        item_type=ItemType.File,
+        last_sync=0.0,
+        rev="rev-1",
+        content_hash=None,
+        symlink_target=None,
+    )
+    with m.sync._database_access():
+        m.sync._index_table.update(entry)
+
+    check_linked, check_sync_dir = _bypass_link_checks()
+    with check_linked, check_sync_dir:
+        m.exclude_items("/Ördner")
+
+    assert m.sync.excluded_items == {"/ördner"}
+    assert m.sync.get_index_entry(folded) is None, (
+        "index entry keyed by fold_path form was not removed on exclusion"
+    )
+
+
+def test_include_items_readds_children_in_fold_human_form(m: Maestral) -> None:
+    """Including a child of an excluded folder re-adds its siblings to
+    excluded_items. The metadata's path_lower is in fold_path (encoded) form
+    and must be decoded before insertion, and the client must be queried with
+    the encoded form of the excluded folder."""
+    m.sync.excluded_items = ["/Übergeordnet"]
+    assert m.sync.excluded_items == {"/übergeordnet"}
+
+    def _folder(human_path: str) -> FolderMetadata:
+        encoded = encode_path(human_path)
+        return FolderMetadata(
+            name=human_path.rsplit("/", 1)[-1],
+            path_lower=fold_path(encoded),
+            path_display=encoded,
+            id=f"id:{human_path}",
+            shared=False,
+        )
+
+    listing = ListFolderResult(
+        entries=[_folder("/Übergeordnet/Ördner (2)"), _folder("/Übergeordnet/Kind")],
+        has_more=False,
+        cursor="",
+    )
+
+    check_linked, check_sync_dir = _bypass_link_checks()
+    with (
+        check_linked,
+        check_sync_dir,
+        patch.object(
+            m.client, "list_folder_iterator", return_value=iter([listing])
+        ) as mock_list,
+    ):
+        m.include_items("/Übergeordnet/Kind")
+
+    # The client speaks encoded virtual paths.
+    mock_list.assert_called_once_with(encode_path("/übergeordnet"))
+    # The sibling is re-added in fold_human (decoded) form, not as the dead
+    # encoded entry '/übergeordnet/%c3%b6rdner %282%29'.
+    assert m.sync.excluded_items == {"/übergeordnet/ördner (2)"}
