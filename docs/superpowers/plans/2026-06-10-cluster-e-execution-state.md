@@ -22,7 +22,7 @@
 | 11. PathIDCache internal lock | F10 | ✅ COMPLETE | `377eefc`, `8d2af6d` | Spec ✅ (red empirically verified: InterfaceError/ValueError corruption pre-lock); quality ✅ "Ready: Yes" (leaf-lock discipline + lock ordering traced; populate-vs-writer already sync_lock-serialized) + polish `8d2af6d` |
 | 12. Longpoll gate nextPageToken | F12 | ✅ COMPLETE | `108dd6f` | Combined spec+quality ✅ "Ready: Yes" (busy-loop impossibility traced: cursor persists per cycle even on zero applied events) |
 | 13. Auth edges | F13 | ✅ COMPLETE | `61da1e6`, `153a864` | Spec ✅ after docs note `153a864` (Stage-2 §5.1 supersession recorded); quality ✅ "Ready: Yes" (cross-restart safety double-layered + pre-pinned; no expiry loop; paste-flow retry safe) |
-| 14. Quota model correction | F14 | ⬜ pending | — | |
+| 14. Quota model correction | F14 | ✅ COMPLETE | `92bde7d` | Combined spec+quality ✅ "Ready: Yes" (errorhandling dailyLimitExceeded keep-decision verified correct; counter now session-cumulative, docstring updated) |
 | 15. Final gate | — | ⬜ pending | — | full offline suite + lint + deviations file + whole-branch review |
 
 Session task list (TaskList tool) mirrors this table: #1-#2 completed, #3 in_progress, #4-#15 pending.
@@ -30,7 +30,7 @@ Session task list (TaskList tool) mirrors this table: #1-#2 completed, #3 in_pro
 ## Resume procedure
 
 1. `git branch --show-current` must be `google-drive-port`; `git status` clean; HEAD should be `425642d` (or later if resumed mid-task).
-2. **Next action: Task 14** (quota model correction, plan line 1511), then Task 15 (final gate). (HEAD after Task 13: `153a864`; suite counts: auth trio 43; test_client 73.)
+2. **Next action: Task 15 (final gate)** — full offline suite (⚠️ verify no smoke-test account linked first), lint/type gate, linked-suite spot checks (needs real account — may require user), deviations file. (HEAD after Task 14: `92bde7d`.)
 3. Test discipline: targeted modules per task (full offline suite = ~18 min, run only at Task 15). NEVER run tests/linked (needs real account). ⚠️ Never run tests/offline while a real smoke-test account is linked (keyring collision). Suite counts after Task 8: test_client.py 70; test_changes.py + test_manager.py 35; test_writes.py + test_sync.py 107; test_fake_drive.py + test_changes.py 51; test_client_auth.py 23.
 
 ## Task 3 — review resolution (2026-06-11)
