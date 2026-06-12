@@ -91,8 +91,24 @@ class FakeDrive:
         (e.g. ``"files.list"``). Used by Stage 7b fault-injection."""
         self._fail.setdefault(key, []).append(exc)
 
+    def fail_after(self, key: str, exc: Exception) -> None:
+        """Queue *exc* to be raised AFTER the next ``.execute()`` of *key*
+        commits (i.e. finalize() runs first, then the exception is raised).
+
+        Models a "committed but response lost" scenario: the server-side
+        create succeeded and the record is in fake.files, but the response
+        is never delivered to the caller because the transport faults out.
+        See Task 6 / review F7.
+        """
+        self._fail.setdefault(f"__after__{key}", []).append(exc)
+
     def _maybe_fail(self, key: str) -> None:
         queue = self._fail.get(key)
+        if queue:
+            raise queue.pop(0)
+
+    def _maybe_fail_after(self, key: str) -> None:
+        queue = self._fail.get(f"__after__{key}")
         if queue:
             raise queue.pop(0)
 
@@ -234,11 +250,19 @@ class _ResumableRequest:
     so chunking is simulated purely to exercise writes.py's progress loop.
     """
 
-    def __init__(self, fail_key, fail_check, content: bytes, finalize):
+    def __init__(
+        self,
+        fail_key,
+        fail_check,
+        content: bytes,
+        finalize,
+        fail_after_check=None,
+    ):
         self._fail_key = fail_key
         self._fail_check = fail_check
         self._content = content
         self._finalize = finalize
+        self._fail_after_check = fail_after_check
         self._step = 0
 
     def next_chunk(self, num_retries: int = 0):
@@ -249,20 +273,32 @@ class _ResumableRequest:
             half = max(1, total // 2)
             return _MediaUploadProgress(half, total), None
         response = self._finalize()
+        if self._fail_after_check is not None:
+            self._fail_after_check(self._fail_key)
         return _MediaUploadProgress(total, total), response
 
 
 class _Request:
     """Mimics a googleapiclient HttpRequest: only ``.execute()`` is used."""
 
-    def __init__(self, fail_key: str, fail_check: Callable[[str], None], fn: Callable[[], Any]):
+    def __init__(
+        self,
+        fail_key: str,
+        fail_check: Callable[[str], None],
+        fn: Callable[[], Any],
+        fail_after_check: Callable[[str], None] | None = None,
+    ):
         self._fail_key = fail_key
         self._fail_check = fail_check
         self._fn = fn
+        self._fail_after_check = fail_after_check
 
     def execute(self, num_retries: int = 0, http: Any = None) -> Any:
         self._fail_check(self._fail_key)
-        return self._fn()
+        result = self._fn()
+        if self._fail_after_check is not None:
+            self._fail_after_check(self._fail_key)
+        return result
 
 
 def _parse_field_keys(fields: str) -> list[str]:
@@ -367,7 +403,15 @@ class _FilesResource:
             body_ = body or {}
             content = _read_media(media_body) if media_body is not None else b""
             mime = body_.get("mimeType", "text/plain" if media_body is not None else FOLDER_MIME)
-            fid = self._d._new_id()
+            # Honor a pre-generated id supplied in the body (Task 6 idempotency).
+            # If the id already exists, raise 409 — a previous attempt committed.
+            if body_.get("id"):
+                fid = body_["id"]
+                if fid in self._d.files:
+                    raise make_http_error(409, "conflict",
+                                          "A file already exists with the provided ID.")
+            else:
+                fid = self._d._new_id()
             is_folder = mime == FOLDER_MIME
             rec = {
                 "id": fid, "name": body_["name"],
@@ -390,9 +434,13 @@ class _FilesResource:
         _resumable = callable(getattr(media_body, "resumable", None)) and media_body.resumable()
         if media_body is not None and _resumable:
             return _ResumableRequest(
-                "files.create", self._d._maybe_fail, _read_media(media_body), finalize
+                "files.create", self._d._maybe_fail, _read_media(media_body), finalize,
+                fail_after_check=self._d._maybe_fail_after,
             )
-        return _Request("files.create", self._d._maybe_fail, finalize)
+        return _Request(
+            "files.create", self._d._maybe_fail, finalize,
+            fail_after_check=self._d._maybe_fail_after,
+        )
 
     def delete(self, fileId, **_):
         def run():

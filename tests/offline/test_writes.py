@@ -53,8 +53,31 @@ def client(cache: PathIDCache):
     remove_configuration(_CONFIG)
 
 
+_fake_id_counter = 0
+
+
 def fake_service() -> MagicMock:
-    return MagicMock(name="drive-service")
+    """Build a MagicMock Drive service pre-wired so that
+    ``files().generateIds(...).execute()`` returns a fresh pool of IDs.
+
+    This lets tests that use ``client.reserve_file_id()`` (called by all
+    create paths after Task 6) work without any extra setup.
+    """
+    global _fake_id_counter
+    svc = MagicMock(name="drive-service")
+
+    def _gen_ids(count=1, **_):
+        global _fake_id_counter
+        ids = []
+        for _ in range(count):
+            _fake_id_counter += 1
+            ids.append(f"mock-id-{_fake_id_counter}")
+        m = MagicMock()
+        m.execute.return_value = {"ids": ids}
+        return m
+
+    svc.files.return_value.generateIds.side_effect = _gen_ids
+    return svc
 
 
 # ==== make_dir ============================================================
@@ -74,11 +97,11 @@ def test_make_dir_creates_folder_and_updates_cache(client, cache):
     create = svc.files.return_value.create
     create.assert_called_once()
     body = create.call_args.kwargs["body"]
-    assert body == {
-        "name": "foo",
-        "mimeType": "application/vnd.google-apps.folder",
-        "parents": ["ROOT"],
-    }
+    # Task 6: body now includes a pre-generated "id" for idempotent creates.
+    assert body["name"] == "foo"
+    assert body["mimeType"] == "application/vnd.google-apps.folder"
+    assert body["parents"] == ["ROOT"]
+    assert "id" in body  # pre-generated id for idempotent retry
     # Cache write-through
     assert cache.path_to_id("/foo") == "F-new"
     # Return value
@@ -192,6 +215,10 @@ def test_make_dir_counts_request(client, cache):
     }
     client._get_service = Mock(return_value=svc)
     client._count_request = Mock()
+    # Pre-seed the id pool so reserve_file_id() doesn't consume a request slot
+    # for generateIds (Task 6: reserve_file_id calls _count_request when it
+    # fetches a new batch; pre-seeding avoids that call in this unit test).
+    client._id_pool = ["pre-seeded-id"]
 
     client._writes.make_dir("/foo")
 
@@ -944,6 +971,9 @@ def test_make_dir_batch_counts_subrequests(client, cache):
     )
     client._get_service = Mock(return_value=svc)
     client._count_request = Mock()
+    # Pre-seed the id pool so reserve_file_id() doesn't add a generateIds
+    # call to _count_request (Task 6: pool fetch counts as 1 request).
+    client._id_pool = ["pre-id-a", "pre-id-b"]
 
     client._writes.make_dir_batch(["/a", "/b"])
 
@@ -1874,3 +1904,139 @@ def test_fake_move_412_condition_not_met_raises_data_changed(client_on_fake):
 
     # Cache unchanged — move was aborted.
     assert client._path_cache.path_to_id("/src.txt") == fid
+
+
+# ===========================================================================
+# Task 6 — Idempotent creates via pre-generated file IDs (review F7)
+# ===========================================================================
+
+def test_create_retry_after_lost_response_does_not_duplicate_simple(
+    client_on_fake, tmp_path
+):
+    """A files.create (simple upload) whose response is lost after server-side
+    commit must not produce a same-name sibling when retried (review F7).
+
+    The fake commits the file then raises ConnectionError to model "committed
+    but response lost". The retry must resolve to the existing record via 409,
+    not insert a second record.
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    data = b"hello"
+    local = tmp_path / "new.txt"
+    local.write_bytes(data)
+
+    # Model "committed but response lost": finalize() inserts the record,
+    # then ConnectionError is raised before the response reaches the caller.
+    fake.fail_after("files.create", ConnectionError("connection reset by peer"))
+
+    md = client._writes.upload(str(local), "/new.txt", write_mode=WriteMode.Add)
+
+    siblings = [
+        r for r in fake.files.values()
+        if r["name"] == "new.txt" and not r["trashed"]
+    ]
+    assert len(siblings) == 1, f"duplicate created on retry: {[r['id'] for r in siblings]}"
+    assert md.id == siblings[0]["id"]
+
+
+def test_create_retry_after_lost_response_does_not_duplicate_make_dir(
+    client_on_fake,
+):
+    """make_dir whose response is lost after server-side commit must not
+    create a same-name sibling on retry (review F7)."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    fake.fail_after("files.create", ConnectionError("connection reset by peer"))
+
+    result = client._writes.make_dir("/mydir")
+
+    siblings = [
+        r for r in fake.files.values()
+        if r["name"] == "mydir" and not r["trashed"]
+    ]
+    assert len(siblings) == 1, f"duplicate created on retry: {[r['id'] for r in siblings]}"
+    assert result.id == siblings[0]["id"]
+
+
+def test_create_retry_409_resolves_batch_callback(client_on_fake):
+    """make_dir_batch: a 409 in the batch callback (duplicate id) must
+    resolve to the existing record rather than propagating as an error."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    # Pre-seed the fake so that when reserve_file_id returns an id, the
+    # batch callback sees a 409. We simulate this by pre-inserting a file
+    # with the same id that generateIds will return.
+    # The simplest approach: get the next id that generateIds will return
+    # by peeking at the counter. generateIds calls _new_id() which increments
+    # _id_counter. We can seed a fake id pool on the client.
+    next_id = fake._new_id()  # consume one: this becomes the "pre-generated" id
+    # Insert a record with this id directly to simulate prior commit
+    from tests.fake_drive import FOLDER_MIME
+    fake.files[next_id] = {
+        "id": next_id, "name": "batchdir", "parents": [ROOT_ID],
+        "mimeType": FOLDER_MIME,
+        "modifiedTime": "2026-01-01T00:00:00Z",
+        "createdTime": "2026-01-01T00:00:00Z",
+        "trashed": False, "shared": False,
+        "md5Checksum": None, "size": None, "headRevisionId": None,
+        "content": b"", "revisions": [],
+        "lastModifyingUser": {"permissionId": "perm-1"},
+    }
+    # Seed the client's id pool with this pre-consumed id so the batch
+    # create body carries it and triggers the 409 resolution path.
+    client._id_pool = [next_id]
+
+    results = client._writes.make_dir_batch(["/batchdir"])
+
+    from cumulus.exceptions import CumulusApiError
+    assert not isinstance(results[0], CumulusApiError), f"unexpected error: {results[0]}"
+    assert results[0].id == next_id
+
+
+def test_reserve_file_id_fetches_pool_and_returns_ids(client_on_fake):
+    """reserve_file_id() returns Drive-generated IDs and refetches when exhausted."""
+    client = client_on_fake.client
+    client._ensure_root_id = Mock()
+
+    id1 = client.reserve_file_id()
+    id2 = client.reserve_file_id()
+
+    assert id1 != id2
+    assert id1.startswith("file-")
+    assert id2.startswith("file-")
+
+
+def test_reserve_file_id_thread_safe(client_on_fake):
+    """reserve_file_id() is callable from multiple threads without returning
+    the same id twice."""
+    import threading
+
+    client = client_on_fake.client
+    client._ensure_root_id = Mock()
+
+    ids = []
+    errors = []
+
+    def worker():
+        try:
+            for _ in range(10):
+                ids.append(client.reserve_file_id())
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Errors from threads: {errors}"
+    # All 50 ids must be unique.
+    assert len(ids) == len(set(ids)), "Duplicate ids returned from concurrent reserve_file_id()"

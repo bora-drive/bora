@@ -281,23 +281,53 @@ class _WriteHelper:
             )
         else:
             # Simple path.
-            with convert_api_errors(remote_path=remote_path, local_path=local_path):
-                if mode == "create":
-                    body = {
-                        "name": drive_name,
-                        "parents": [parent_id],
-                        "modifiedTime": modified_rfc3339,
-                    }
-                    request = client._get_service().files().create(
-                        body=body, media_body=media, fields=fields,
-                    )
-                else:
+            if mode == "create":
+                # Reserve a pre-generated ID so a retried create (after a
+                # "committed but response lost" connection error) fails with
+                # 409 instead of inserting a same-name duplicate (review F7).
+                new_file_id = client.reserve_file_id()
+                body = {
+                    "id": new_file_id,
+                    "name": drive_name,
+                    "parents": [parent_id],
+                    "modifiedTime": modified_rfc3339,
+                }
+                request = client._get_service().files().create(
+                    body=body, media_body=media, fields=fields,
+                )
+                try:
+                    with convert_api_errors(
+                        remote_path=remote_path, local_path=local_path
+                    ):
+                        resp = client._retry_transient(request.execute)
+                except CumulusApiError as exc:
+                    if (
+                        isinstance(exc.__cause__, HttpError)
+                        and exc.__cause__.resp.status == 409
+                    ):
+                        # A previous create attempt committed but its response
+                        # was lost. Fetch the record by the known id.
+                        with convert_api_errors(
+                            remote_path=remote_path, local_path=local_path
+                        ):
+                            resp = client._retry_transient(
+                                lambda: client._get_service()
+                                .files()
+                                .get(fileId=new_file_id, fields=fields)
+                                .execute()
+                            )
+                    else:
+                        raise
+            else:
+                with convert_api_errors(
+                    remote_path=remote_path, local_path=local_path
+                ):
                     request = client._get_service().files().update(
                         fileId=target_id,
                         body={"modifiedTime": modified_rfc3339},
                         media_body=media, fields=fields,
                     )
-                resp = client._retry_transient(request.execute)
+                    resp = client._retry_transient(request.execute)
             client._count_request()
 
         # MD5 verify.
@@ -383,37 +413,56 @@ class _WriteHelper:
     ) -> dict[str, Any]:
         client = self._client
 
-        with convert_api_errors(remote_path=remote_path, local_path=local_path):
-            if mode == "create":
-                body = {
-                    "name": drive_name,
-                    "parents": [parent_id],
-                    "modifiedTime": modified_rfc3339,
-                }
-                request = (
-                    client._get_service().files().create(
-                        body=body, media_body=media, fields=fields,
-                    )
-                )
-            else:
-                request = (
-                    client._get_service().files().update(
-                        fileId=target_id,
-                        body={"modifiedTime": modified_rfc3339},
-                        media_body=media, fields=fields,
-                    )
-                )
+        if mode == "create":
+            # Reserve a pre-generated ID for idempotency (review F7): if the
+            # session commits but the response is lost, a retry's 409 resolves
+            # to the already-committed record instead of duplicating.
+            new_file_id = client.reserve_file_id()
+            body = {
+                "id": new_file_id,
+                "name": drive_name,
+                "parents": [parent_id],
+                "modifiedTime": modified_rfc3339,
+            }
+            request = client._get_service().files().create(
+                body=body, media_body=media, fields=fields,
+            )
+        else:
+            new_file_id = None
+            request = client._get_service().files().update(
+                fileId=target_id,
+                body={"modifiedTime": modified_rfc3339},
+                media_body=media, fields=fields,
+            )
 
-            response: dict[str, Any] | None = None
-            while response is None:
-                if client._poll_event.is_set():
-                    raise CancelledError(
-                        "Upload cancelled",
-                        f"Upload of {local_path!r} was interrupted by shutdown.",
+        response: dict[str, Any] | None = None
+        try:
+            with convert_api_errors(remote_path=remote_path, local_path=local_path):
+                while response is None:
+                    if client._poll_event.is_set():
+                        raise CancelledError(
+                            "Upload cancelled",
+                            f"Upload of {local_path!r} was interrupted by shutdown.",
+                        )
+                    status, response = client._retry_transient(request.next_chunk)
+                    if sync_event is not None and status is not None:
+                        sync_event.completed = status.resumable_progress
+        except CumulusApiError as exc:
+            if (
+                new_file_id is not None
+                and isinstance(exc.__cause__, HttpError)
+                and exc.__cause__.resp.status == 409
+            ):
+                # Previous resumable session committed but response was lost.
+                with convert_api_errors(remote_path=remote_path, local_path=local_path):
+                    response = client._retry_transient(
+                        lambda: client._get_service()
+                        .files()
+                        .get(fileId=new_file_id, fields=fields)
+                        .execute()
                     )
-                status, response = client._retry_transient(request.next_chunk)
-                if sync_event is not None and status is not None:
-                    sync_event.completed = status.resumable_progress
+            else:
+                raise
 
         client._count_request()
         return response
@@ -786,18 +835,36 @@ class _WriteHelper:
         drive_name = self._decode_segment(raw_name)
         parent_id = self._resolve_parent_id(parent_path, for_path=remote_path)
 
+        new_folder_id = client.reserve_file_id()
         body = {
+            "id": new_folder_id,
             "name": drive_name,
             "mimeType": _FOLDER_MIME,
             "parents": [parent_id],
         }
-        with convert_api_errors(remote_path=remote_path):
-            resp = client._retry_transient(
-                lambda: client._get_service()
-                .files()
-                .create(body=body, fields="id,name,mimeType")
-                .execute()
-            )
+        try:
+            with convert_api_errors(remote_path=remote_path):
+                resp = client._retry_transient(
+                    lambda: client._get_service()
+                    .files()
+                    .create(body=body, fields="id,name,mimeType")
+                    .execute()
+                )
+        except CumulusApiError as exc:
+            if (
+                isinstance(exc.__cause__, HttpError)
+                and exc.__cause__.resp.status == 409
+            ):
+                # Previous create committed; fetch the existing folder.
+                with convert_api_errors(remote_path=remote_path):
+                    resp = client._retry_transient(
+                        lambda: client._get_service()
+                        .files()
+                        .get(fileId=new_folder_id, fields="id,name,mimeType")
+                        .execute()
+                    )
+            else:
+                raise
         client._count_request()
         client._path_cache.set(
             remote_path,
@@ -842,7 +909,9 @@ class _WriteHelper:
                 except CumulusApiError as e:
                     results[idx] = e
                     continue
+                new_folder_id = client.reserve_file_id()
                 body = {
+                    "id": new_folder_id,
                     "name": drive_name,
                     "mimeType": _FOLDER_MIME,
                     "parents": [parent_id],
@@ -856,6 +925,7 @@ class _WriteHelper:
                     request,
                     callback=self._make_dir_batch_callback(
                         results, idx, remote_path, drive_name, parent_id,
+                        new_folder_id,
                     ),
                     request_id=str(idx),
                 )
@@ -873,17 +943,35 @@ class _WriteHelper:
 
     def _make_dir_batch_callback(
         self, results: list, idx: int, remote_path: str,
-        drive_name: str, parent_id: str,
+        drive_name: str, parent_id: str, new_folder_id: str,
     ):
         """Build a per-sub-request callback for make_dir_batch."""
         client = self._client
 
         def cb(request_id, response, exception):
             if exception is not None:
-                results[idx] = self._batch_exception_to_cumulus(
-                    exception, remote_path
-                )
-                return
+                if (
+                    isinstance(exception, HttpError)
+                    and exception.resp.status == 409
+                ):
+                    # Previous create committed; fetch the existing folder by
+                    # the pre-generated id.
+                    try:
+                        with convert_api_errors(remote_path=remote_path):
+                            response = client._retry_transient(
+                                lambda: client._get_service()
+                                .files()
+                                .get(fileId=new_folder_id, fields="id,name,mimeType")
+                                .execute()
+                            )
+                    except CumulusApiError as fetch_exc:
+                        results[idx] = fetch_exc
+                        return
+                else:
+                    results[idx] = self._batch_exception_to_cumulus(
+                        exception, remote_path
+                    )
+                    return
             client._path_cache.set(
                 remote_path, response["id"],
                 parent_id=parent_id,
