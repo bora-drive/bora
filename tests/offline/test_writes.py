@@ -1546,6 +1546,77 @@ def test_fake_make_dir_conflict_adopts_existing_into_cache(client_on_fake):
     assert client._path_cache.path_to_id("/Docs") == existing_id
 
 
+def test_fake_make_dir_conflict_stale_cache_entry_evicted(client_on_fake):
+    """Adoption must evict a stale cache entry that mapped /Docs to a dead id.
+
+    Scenario: another device deleted and recreated /Docs while our feed lagged.
+    The path cache still holds "stale-id" at /Docs, but the probe returns the
+    real (current) folder.  After make_dir raises FolderConflictError the cache
+    must hold the PROBED id, not "stale-id".
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    # Seed the real folder in the fake (what the probe will find).
+    real_id = fake.add_folder("/Docs")
+
+    # Pre-seed the cache with a DIFFERENT (stale) id at the same path.
+    stale_id = "stale-id"
+    # We bypass path_cache.set (which would reject stale_id because real_id
+    # already maps the fold) by inserting directly via the ORM.
+    from cumulus.path_cache import PathCacheEntry
+    from cumulus.path_codec import fold_path
+    client._path_cache._table.update(
+        PathCacheEntry(
+            file_id=stale_id,
+            remote_path="/Docs",
+            remote_path_fold=fold_path("/Docs"),
+            parent_id=ROOT_ID,
+            name="Docs",
+            is_folder=1,
+        )
+    )
+    assert client._path_cache.path_to_id("/Docs") == stale_id
+
+    with pytest.raises(FolderConflictError):
+        client._writes.make_dir("/Docs")
+
+    # After conflict the cache must map /Docs to the PROBED (real) id.
+    assert client._path_cache.path_to_id("/Docs") == real_id, (
+        "stale cache entry was not evicted; path still maps to stale_id"
+    )
+
+
+def test_fake_make_dir_trashed_folder_does_not_trigger_conflict(client_on_fake):
+    """A trashed same-name folder must not trigger FolderConflictError.
+
+    The probe q carries 'trashed = false'; this test pins that clause against
+    regression — make_dir must succeed and create a fresh non-trashed folder.
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    # Add a folder then trash it.
+    trashed_id = fake.add_folder("/Docs")
+    fake.files[trashed_id]["trashed"] = True
+
+    # make_dir must not raise FolderConflictError.
+    result = client._writes.make_dir("/Docs")
+
+    assert result is not None
+    # Exactly one non-trashed Docs folder must exist (the newly created one).
+    live_docs = [
+        r for r in fake.files.values()
+        if r["name"] == "Docs" and not r["trashed"]
+    ]
+    assert len(live_docs) == 1, (
+        f"expected exactly 1 live Docs folder, found {len(live_docs)}"
+    )
+    assert live_docs[0]["id"] != trashed_id
+
+
 def test_fake_make_dir_autorename_true_skips_probe_and_creates(client_on_fake):
     """autorename=True must skip the conflict probe and create the folder
     (possibly with a suffixed name); no FolderConflictError raised."""
