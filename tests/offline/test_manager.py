@@ -1,10 +1,11 @@
 import os
 import os.path as osp
 from threading import Event
+from unittest.mock import Mock
 
 import pytest
 
-from cumulus import oauth
+from cumulus import notify, oauth
 from cumulus.exceptions import CursorResetError, NoSyncDirError
 from cumulus.main import Maestral
 from cumulus.utils.appdirs import get_home_dir
@@ -90,8 +91,14 @@ def test_cursor_reset_triggers_reindex_and_autostart(m: Maestral, tmp_path) -> N
     running = manager.running
     autostart = manager.autostart
 
+    # Attach a mock desktop notifier so the notification code path actually
+    # executes (a None notifier would silently skip it).
+    manager.desktop_notifier = Mock()
+
     with manager._handle_sync_thread_errors(running, autostart):
         raise CursorResetError("Sync cursor reset", "token expired")
 
     assert m.sync.remote_cursor == ""        # full re-index scheduled
     assert manager.autostart.is_set()       # sync will resume
+    manager.desktop_notifier.notify.assert_called_once()
+    assert manager.desktop_notifier.notify.call_args.kwargs["level"] == notify.INFO

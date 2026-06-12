@@ -519,11 +519,10 @@ class _WriteHelper:
         ids: list[str] = []
         page_token: str | None = None
         while True:
-            with convert_api_errors(
-                remote_path=remote_path, local_path=local_path
-            ):
-                resp = client._retry_transient(
-                    lambda token=page_token: client._get_service()
+
+            def _fetch_page(token: str | None = page_token) -> dict[str, Any]:
+                return (
+                    client._get_service()
                     .revisions()
                     .list(
                         fileId=file_id,
@@ -533,6 +532,11 @@ class _WriteHelper:
                     )
                     .execute()
                 )
+
+            with convert_api_errors(
+                remote_path=remote_path, local_path=local_path
+            ):
+                resp = client._retry_transient(_fetch_page)
             client._count_request()
             ids.extend(r["id"] for r in resp.get("revisions", []))
             page_token = resp.get("nextPageToken")
