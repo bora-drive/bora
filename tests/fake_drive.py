@@ -349,6 +349,8 @@ def _match_query(rec: dict, query: str) -> bool:
     Supported fragments joined by ' and ':
       "'<parent_id>' in parents"   -> parent membership
       "trashed=false"              -> not trashed
+      "name = '<value>'"           -> name equality (Drive-escaped)
+      "mimeType = '<value>'"       -> mimeType equality
     """
     if not query:
         return True
@@ -360,6 +362,16 @@ def _match_query(rec: dict, query: str) -> bool:
         elif " in parents" in frag:
             pid = frag.split(" in parents")[0].strip().strip("'")
             if pid not in rec["parents"]:
+                return False
+        elif frag.startswith("name = '") and frag.endswith("'"):
+            # Unescape Drive-style escapes: \' -> '  \\ -> \
+            raw = frag[len("name = '"):-1]
+            unescaped = raw.replace("\\'", "'").replace("\\\\", "\\")
+            if rec["name"] != unescaped:
+                return False
+        elif frag.startswith("mimeType = '") and frag.endswith("'"):
+            value = frag[len("mimeType = '"):-1]
+            if rec["mimeType"] != value:
                 return False
         else:
             raise AssertionError(f"FakeDrive: unsupported query fragment {frag!r}")

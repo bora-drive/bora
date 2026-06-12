@@ -31,6 +31,7 @@ from .exceptions import (
     DataChangedError,
     DataCorruptionError,
     FileConflictError,
+    FolderConflictError,
     NotFoundError,
     UnsupportedFileError,
 )
@@ -829,6 +830,15 @@ class _WriteHelper:
             )
         return self._wrap_metadata(resp, new_path)
 
+    @staticmethod
+    def _escape_drive_name(name: str) -> str:
+        """Escape a Drive name for use in a ``files.list`` query string.
+
+        Drive query strings use single-quoted values; backslash and single-quote
+        must be escaped as ``\\`` and ``\\'`` respectively.
+        """
+        return name.replace("\\", "\\\\").replace("'", "\\'")
+
     def make_dir(
         self, remote_path: str, *, autorename: bool = False
     ) -> FolderMetadata:
@@ -840,6 +850,47 @@ class _WriteHelper:
             remote_path = parent_path + "/" + raw_name
         drive_name = self._decode_segment(raw_name)
         parent_id = self._resolve_parent_id(parent_path, for_path=remote_path)
+
+        # Conflict probe (review F11): before creating, check whether a
+        # same-name folder already exists under the same parent on Drive.
+        # This can happen when another device created the folder and the local
+        # change feed hasn't delivered the event yet (stale cache).
+        # Skipped when autorename=True because that path WANTS a unique name.
+        if not autorename:
+            escaped = self._escape_drive_name(drive_name)
+            with convert_api_errors(remote_path=remote_path):
+                probe = client._retry_transient(
+                    lambda: client._get_service()
+                    .files()
+                    .list(
+                        q=(
+                            f"name = '{escaped}' and '{parent_id}' in parents "
+                            f"and mimeType = '{_FOLDER_MIME}' and trashed = false"
+                        ),
+                        fields="files(id, name)",
+                        pageSize=1,
+                    )
+                    .execute()
+                )
+            client._count_request()
+            hits = probe.get("files", [])
+            if hits:
+                # Adopt the existing folder into the cache so follow-up
+                # operations (get_metadata in the engine's merge branch)
+                # resolve it.
+                client._path_cache.set(
+                    remote_path,
+                    hits[0]["id"],
+                    parent_id=parent_id,
+                    name=hits[0]["name"],
+                    is_folder=True,
+                )
+                raise FolderConflictError(
+                    "Folder already exists",
+                    f"A folder already exists at {remote_path!r} on Google "
+                    "Drive; it will be merged with the local folder.",
+                    remote_path=remote_path,
+                )
 
         new_folder_id = client.reserve_file_id()
         body = {
@@ -875,13 +926,19 @@ class _WriteHelper:
             else:
                 raise
         client._count_request()
-        client._path_cache.set(
+        if not client._path_cache.set(
             remote_path,
             resp["id"],
             parent_id=parent_id,
             name=drive_name,
             is_folder=True,
-        )
+        ):
+            logger.warning(
+                "path_cache.set(%r, %r) rejected by case-conflict; "
+                "cache and Drive may be out of sync until the change feed "
+                "corrects this.",
+                remote_path, resp["id"],
+            )
         return FolderMetadata(
             name=resp["name"],
             path_lower=fold_path(remote_path),
