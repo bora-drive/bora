@@ -1693,6 +1693,87 @@ def test_fake_upload_update_rev_audit_failure_is_swallowed(
     assert any("audit" in r.message.lower() for r in caplog.records)
 
 
+def test_fake_upload_update_coalesced_head_creates_no_conflicted_copy(
+    client_on_fake, tmp_path, caplog, monkeypatch
+):
+    """Drive can coalesce rapid same-user updates into the same head revision.
+
+    When ``files.update`` returns the same ``headRevisionId`` we checked
+    against (``new_head == expected_prev``), no foreign revision interleaved —
+    the audit must return early without creating a conflicted copy.
+
+    Regression for: without the coalescing guard the audit computes
+    ``prev = ids[head_idx - 1]`` (the revision *before* expected_prev), which
+    is never equal to ``expected_prev``, so a spurious rescue fires every time.
+
+    The bug only manifests when the file already has a prior revision (rev0
+    before rev1) so that head_idx > 0 after the coalesced upload.
+    """
+    import logging as _logging
+
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    # Create the file with an initial revision (rev0), then advance it to rev1
+    # by a prior content update, giving the file a 2-revision history before
+    # our coalesced upload.
+    fid = fake.add_file("/doc.txt", b"v0")
+    rev0 = fake.files[fid]["headRevisionId"]
+
+    # Advance to rev1 via a direct mutation (no upload — bypasses the write
+    # helper to avoid any audit side-effects on setup).
+    rec = fake.files[fid]
+    rec["content"] = b"v1"
+    rec["md5Checksum"] = hashlib.md5(b"v1").hexdigest()
+    rec["size"] = len(b"v1")
+    rec["headRevisionId"] = fake._new_rev()
+    rec["revisions"].append(fake._revision_dict(rec))
+    rev1 = rec["headRevisionId"]
+
+    client._path_cache.set(
+        "/doc.txt", fid, parent_id=ROOT_ID, name="doc.txt", is_folder=False
+    )
+
+    # Sanity: file now has two revisions [rev0, rev1].
+    assert [r["id"] for r in fake.files[fid]["revisions"]] == [rev0, rev1]
+
+    # Simulate Drive coalescing: the update succeeds but headRevisionId stays
+    # equal to the one we checked (rev1). Monkeypatch _new_rev for one call so
+    # the fake's finalize() produces rev1 instead of a fresh token.
+    # Without the fix, head_idx = ids.index(rev1) = 1 (in [rev0, rev1, rev1]),
+    # prev = ids[0] = rev0 ≠ rev1, causing a spurious rescue.
+    original_new_rev = fake.__class__._new_rev
+    call_count = [0]
+
+    def _new_rev_once_coalesced(self_fake):
+        if call_count[0] == 0:
+            call_count[0] += 1
+            return rev1  # simulate coalesced: head stays the same
+        return original_new_rev(self_fake)
+
+    monkeypatch.setattr(fake.__class__, "_new_rev", _new_rev_once_coalesced)
+
+    local = tmp_path / "doc.txt"
+    local.write_bytes(b"v1-coalesced")
+    with caplog.at_level(_logging.WARNING, logger="cumulus.writes"):
+        result = client._writes.upload(
+            str(local), "/doc.txt", write_mode=WriteMode.Update, update_rev=rev1
+        )
+
+    assert result.id == fid
+    assert fake.files[fid]["content"] == b"v1-coalesced"
+    # The coalescing guard must prevent any conflicted-copy rescue.
+    assert not any(
+        "conflicted copy" in r["name"] for r in fake.files.values()
+    ), "Spurious conflicted copy created for coalesced same-head revision"
+    # No rescue warning must appear.
+    assert not any(
+        "conflicted" in r.message.lower() or "rescuing" in r.message.lower()
+        for r in caplog.records
+    )
+
+
 # ---- error paths: quota and 412 via fake ----------------------------------
 
 def test_fake_upload_quota_exceeded_raises_insufficient_space(client_on_fake, tmp_path):
