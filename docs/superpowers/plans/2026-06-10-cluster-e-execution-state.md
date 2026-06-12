@@ -20,7 +20,7 @@
 | 9. Dead except clauses + re-download | F9 | ✅ COMPLETE | `8b91c3f`, `a952431` | Spec ✅; quality verified upstream fidelity (delete loses vs newer remote — upstream parity, eager variant); 1 Important (moved-handler conflict branch untested) → pinned in `a952431` + failed-redownload warning; re-review ✅ "Ready: Yes" |
 | 10. mignore/excluded decoded matching | F8 | ✅ COMPLETE | `cfb202e`, `b692861`, `0af58b7` | Spec review 1 found a real regression the impl audit missed (include_items normalize-query → ß/ς/ligature/literal-%XX never re-includable) + 3 mixed-form sites + stale-config window → all fixed in `b692861` (whole pipeline single-form, setter incl.); spec re-review ✅; quality ✅ "Ready: Yes" + polish `0af58b7` |
 | 11. PathIDCache internal lock | F10 | ✅ COMPLETE | `377eefc`, `8d2af6d` | Spec ✅ (red empirically verified: InterfaceError/ValueError corruption pre-lock); quality ✅ "Ready: Yes" (leaf-lock discipline + lock ordering traced; populate-vs-writer already sync_lock-serialized) + polish `8d2af6d` |
-| 12. Longpoll gate nextPageToken | F12 | ⬜ pending | — | |
+| 12. Longpoll gate nextPageToken | F12 | ✅ COMPLETE | `108dd6f` | Combined spec+quality ✅ "Ready: Yes" (busy-loop impossibility traced: cursor persists per cycle even on zero applied events) |
 | 13. Auth edges | F13 | ⬜ pending | — | |
 | 14. Quota model correction | F14 | ⬜ pending | — | |
 | 15. Final gate | — | ⬜ pending | — | full offline suite + lint + deviations file + whole-branch review |
@@ -30,7 +30,7 @@ Session task list (TaskList tool) mirrors this table: #1-#2 completed, #3 in_pro
 ## Resume procedure
 
 1. `git branch --show-current` must be `google-drive-port`; `git status` clean; HEAD should be `425642d` (or later if resumed mid-task).
-2. **Next action: Task 12** (longpoll gate nextPageToken, plan line 1339), then Tasks 13→15 in order, one implementer at a time, two-stage review each. (HEAD after Task 11: `8d2af6d`; suite counts: test_path_cache 38; sync+writes+changes 147.)
+2. **Next action: Task 13** (auth edges, plan line 1399), then Tasks 14→15 in order, one implementer at a time, two-stage review each. (HEAD after Task 12: `108dd6f`; suite counts: test_client 73; manager+changes+sync 67.)
 3. Test discipline: targeted modules per task (full offline suite = ~18 min, run only at Task 15). NEVER run tests/linked (needs real account). ⚠️ Never run tests/offline while a real smoke-test account is linked (keyring collision). Suite counts after Task 8: test_client.py 70; test_changes.py + test_manager.py 35; test_writes.py + test_sync.py 107; test_fake_drive.py + test_changes.py 51; test_client_auth.py 23.
 
 ## Task 3 — review resolution (2026-06-11)
