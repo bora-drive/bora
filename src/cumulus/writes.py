@@ -35,7 +35,7 @@ from .exceptions import (
     UnsupportedFileError,
 )
 from .native_docs import is_google_native
-from .path_codec import decode_name, encode_name, fold_path
+from .path_codec import compose_path, decode_name, encode_name, fold_path
 
 if TYPE_CHECKING:  # avoid runtime cycle
     from .client import GoogleDriveClient
@@ -450,6 +450,16 @@ class _WriteHelper:
         caller's best-effort guard.
         """
         client = self._client
+
+        # Fix 3: hoist the None check above the pagination loop to avoid
+        # wasted RPCs when the upload response omitted headRevisionId.
+        # Fix 1: if the head id is unchanged, Drive coalesced our burst update
+        # into the same revision — no foreign interleave is possible, so
+        # return immediately. A foreign commit always produces a new revision
+        # id, so this guard is unconditionally sound.
+        if new_head is None or new_head == expected_prev:
+            return
+
         ids: list[str] = []
         page_token: str | None = None
         while True:
@@ -473,7 +483,7 @@ class _WriteHelper:
             if not page_token:
                 break
 
-        if new_head is None or new_head not in ids:
+        if new_head not in ids:
             return  # history truncated/purged; nothing to audit against
         head_idx = ids.index(new_head)  # revisions are oldest-first
         if head_idx == 0:
@@ -500,12 +510,13 @@ class _WriteHelper:
         """
         tmp_path = self._download_revision_to_tempfile(file_id, revision_id)
         try:
-            # Match the established conflicted-copy naming (sync.py
-            # _local_cc_filename's ownerless fallback). The suffix is
-            # path_codec-safe, so splitting the encoded path is fine.
-            stem, ext = os.path.splitext(remote_path)
+            # Build the cc_path canonically: decode the encoded leaf, split
+            # stem/ext on the human-readable name, re-encode via compose_path
+            # (mirrors _autorename_unique's decode → suffix → re-encode idiom).
+            parent_path, raw_leaf = self._split_parent_name(remote_path)
+            stem, ext = os.path.splitext(decode_name(raw_leaf))
             date = datetime.now().strftime("%Y-%m-%d")
-            cc_path = f"{stem} (conflicted copy {date}){ext}"
+            cc_path = compose_path(parent_path or "/", f"{stem} (conflicted copy {date}){ext}")
             self.upload(
                 tmp_path, cc_path,
                 write_mode=WriteMode.Add, autorename=True,
