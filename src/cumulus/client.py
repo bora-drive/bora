@@ -220,6 +220,12 @@ class GoogleDriveClient:
         # so the daemon stops within ~1 ms instead of waiting them out.
         self._poll_event = threading.Event()
 
+        # Pre-generated file-ID pool for idempotent creates (Task 6 / review F7).
+        # IDs are fetched 100 at a time from files.generateIds; unused IDs are
+        # harmless (they never expire and are free to discard on process exit).
+        self._id_pool: list[str] = []
+        self._id_pool_lock = threading.Lock()
+
         # Write-side helper (Stage 4). Local import avoids a module-level
         # cycle between client.py and writes.py.
         from .writes import _WriteHelper
@@ -444,6 +450,32 @@ class GoogleDriveClient:
         root_id = resp["id"]
         self._path_cache.root_id = root_id
         return root_id
+
+    def reserve_file_id(self) -> str:
+        """Return a pre-generated Drive file ID for an idempotent create.
+
+        Supplying the id in the create body makes a retried create fail
+        with 409 ("already exists with the provided ID") instead of
+        committing a same-name duplicate. IDs are fetched 100 at a time
+        from ``files.generateIds``; unused IDs are harmless (they never
+        expire and are safe to discard on process exit).
+
+        Thread-safe: the lock covers the pool fetch; the generateIds RPC
+        runs under the lock (blocking other reservers for ~one RPC latency)
+        which is acceptable for the expected call rate.
+        """
+        with self._id_pool_lock:
+            if not self._id_pool:
+                with convert_api_errors():
+                    resp = self._retry_transient(
+                        lambda: self._get_service()
+                        .files()
+                        .generateIds(count=100, space="drive")
+                        .execute()
+                    )
+                self._count_request()
+                self._id_pool = list(resp.get("ids", []))
+            return self._id_pool.pop()
 
     # ---- Properties ------------------------------------------------------------------
 
