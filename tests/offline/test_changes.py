@@ -575,3 +575,32 @@ def test_child_before_parent_across_pages_is_not_dropped():
     paths = {e.path_display for e in entries}
     assert "/newdir/kid.txt" in paths, paths
     assert results[-1].cursor == "t3"
+
+
+# ==== expired change token → CursorResetError (Task 8 / review F5) =======
+
+
+from cumulus.exceptions import CursorResetError
+
+
+def test_invalid_page_token_raises_cursor_reset(make_http_error):
+    """A 400 from changes.list (stale/invalid pageToken) must raise
+    CursorResetError, not propagate as BadInputError (review F5)."""
+
+    exc = make_http_error(400, "badRequest")
+
+    class _Svc:
+        def changes(self):
+            return self
+
+        def list(self, **kw):
+            return self
+
+        def execute(self):
+            raise exc
+
+    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    cache.root_id = "ROOT"
+
+    with pytest.raises(CursorResetError):
+        list(iter_remote_changes(lambda: _Svc(), lambda fn: fn(), cache, "stale"))

@@ -26,7 +26,10 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
+from googleapiclient.errors import HttpError
+
 from .core import DeletedMetadata, FileMetadata, FolderMetadata, ListFolderResult
+from .exceptions import CursorResetError
 from .native_docs import GOOGLE_FOLDER_MIME_TYPE, is_google_native
 from .path_codec import compose_path, fold_path
 
@@ -281,17 +284,27 @@ def iter_remote_changes(
     cursor = last_cursor
     raw: list[dict[str, Any]] = []
     while True:
-        resp = retry(
-            lambda c=cursor: service_factory()
-            .changes()
-            .list(
-                pageToken=c,
-                fields=_CHANGE_FIELDS,
-                pageSize=_CHANGE_PAGE_SIZE,
-                includeRemoved=True,
+        try:
+            resp = retry(
+                lambda c=cursor: service_factory()
+                .changes()
+                .list(
+                    pageToken=c,
+                    fields=_CHANGE_FIELDS,
+                    pageSize=_CHANGE_PAGE_SIZE,
+                    includeRemoved=True,
+                )
+                .execute()
             )
-            .execute()
-        )
+        except HttpError as exc:
+            if exc.resp.status == 400:
+                raise CursorResetError(
+                    "Sync cursor reset",
+                    "The saved Google Drive change token is no longer "
+                    "valid (Cumulus was offline too long). The index "
+                    "will be rebuilt.",
+                ) from exc
+            raise
         raw.extend(resp.get("changes", []))
         next_token = resp.get("nextPageToken")
         cursor = next_token or resp.get("newStartPageToken") or ""

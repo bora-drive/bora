@@ -26,6 +26,7 @@ from .constants import CONNECTED, CONNECTING, DISCONNECTED, IDLE, PAUSED, SYNCIN
 from .exceptions import (
     CancelledError,
     ConnectionError,
+    CursorResetError,
     InotifyError,
     CumulusApiError,
     NoSyncDirError,
@@ -557,6 +558,20 @@ class SyncManager:
         except CancelledError:
             # Shutdown will be handled externally.
             running.clear()
+        except CursorResetError:
+            self._logger.warning(
+                "Google Drive change token expired; rebuilding the index."
+            )
+            if self.desktop_notifier:
+                self.desktop_notifier.notify(
+                    "Rebuilding index",
+                    "Cumulus was offline too long and will re-index "
+                    "Google Drive. Sync resumes automatically.",
+                    level=notify.INFO,
+                )
+            self.stop()
+            self.sync.reset_sync_state()
+            self.autostart.set()
         except (ConnectionError, ServerError):
             self._logger.debug("Connection error", exc_info=True)
             self._logger.info(DISCONNECTED)
