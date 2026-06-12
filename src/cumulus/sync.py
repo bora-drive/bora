@@ -712,9 +712,10 @@ class SyncEngine:
         :returns: Cleaned up items in fold_human canonical form.
         """
         # fold_human is idempotent, so re-cleaning stored entries is safe.
-        # Existing configs may hold normalize()-form entries; fold_human subsumes
-        # that form (normalize = NFC + casefold on decoded text = fold_human for
-        # paths that contain no percent-encoded segments).
+        # Legacy configs may hold entries in the old normalize() form (NFC +
+        # lower() of the decoded path), which diverges from fold_human for
+        # casefold-divergent names (ß, ς, ligatures); that is why
+        # reload_cached_config re-cleans the list at config load.
         remote_paths_lower = {fold_human(f).rstrip("/") for f in remote_paths}
 
         # Remove all children of excluded folders.
