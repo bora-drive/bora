@@ -1250,3 +1250,81 @@ def test_remote_move_with_occupied_target_keeps_index_and_conflicts(
         assert f.read() == data
 
     assert event.status is SyncStatus.Conflict
+
+
+# ==== Cluster E (F9): dead Dropbox-era except clauses in local-event handlers ==========
+#
+# client.remove raises DataChangedError on a rev mismatch (writes.py).
+# _on_local_deleted used to catch PathError (unreachable), so a
+# delete-vs-remote-change conflict escaped as a recorded Up error and
+# replayed on every restart. The fix skips the remote delete and
+# re-downloads the newer remote file instead.
+
+
+def test_local_delete_of_remotely_changed_file_redownloads(sync_engine: SyncEngine):
+    """Deleting locally while the remote changed must skip the remote delete,
+    drop the index entry, and restore the newer remote file — not loop a
+    failing delete on every restart (review F9)."""
+    remote_path = "/f.txt"
+    new_content = b"new remote content"
+
+    # Set up FakeDrive with the file at a new rev.
+    fake = FakeDrive()
+    file_id = fake.add_file(remote_path, content=new_content)
+    new_rev = fake.files[file_id]["headRevisionId"]
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._path_cache.set(
+        remote_path, file_id, parent_id=ROOT_ID, name="f.txt", is_folder=False
+    )
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Index reflects the STALE rev — simulating a locally-deleted file whose
+    # remote counterpart has already been updated since last sync.
+    stale_rev = "REV-STALE"
+    assert stale_rev != new_rev
+    _seed_entry(sync_engine, remote_path, file_id, ItemType.File, rev=stale_rev, content_hash=_md5(b"old content"))
+
+    # The local file is absent (user deleted it locally).
+    local_path = sync_engine.to_local_path_from_cased(remote_path)
+    assert not osp.exists(local_path)
+
+    # Build a local-deleted SyncEvent.
+    event = SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=file_id,
+        local_path=local_path,
+        rev=stale_rev,
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Removed,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+    sync_engine._create_remote_entry(event)
+
+    # Remote file must NOT have been trashed — rev mismatch should skip delete.
+    assert not fake.files[file_id]["trashed"], "remote file was trashed despite rev mismatch"
+
+    # No lingering Up error for the path (was the bug: DataChangedError became a SyncError).
+    up_errors = sync_engine.sync_errors_for_path(remote_path.lower(), direction=SyncDirection.Up)
+    assert len(up_errors) == 0, f"unexpected Up errors: {up_errors}"
+
+    # The newer remote file must have been restored locally.
+    assert osp.exists(local_path), "remote file was not re-downloaded after delete conflict"
+
+    # Index must be re-keyed to the new rev (not the stale one, not absent).
+    entry = sync_engine.get_index_entry(remote_path)
+    assert entry is not None, "index entry missing after redownload"
+    assert entry.rev == new_rev, f"index rev {entry.rev!r} != new_rev {new_rev!r}"

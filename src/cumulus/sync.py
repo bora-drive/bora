@@ -86,6 +86,7 @@ from .exceptions import (
     CacheDirError,
     CancelledError,
     DatabaseError,
+    DataChangedError,
     FileConflictError,
     FolderConflictError,
     InvalidDbidError,
@@ -2429,7 +2430,11 @@ class SyncEngine:
                 self.client.remove(
                     local_entry.remote_path_lower, parent_rev=local_entry.rev
                 )
-            except (NotFoundError, FileConflictError):
+            except (NotFoundError, DataChangedError):
+                # NotFoundError: destination already gone — nothing to remove.
+                # DataChangedError: destination changed remotely since last sync;
+                # leave it in place and let move(..., autorename=True) conflict-rename
+                # around it rather than trashing a file we no longer own.
                 pass
             else:
                 self._logger.debug(
@@ -2727,6 +2732,7 @@ class SyncEngine:
 
             return SyncStatus.Skipped
 
+        redownload = False
         try:
             # Will only perform delete if remote rev matches `local_rev`.
             self.client.remove(
@@ -2739,15 +2745,28 @@ class SyncEngine:
                 event.remote_path,
             )
             status = SyncStatus.Skipped
-        except PathError:
+        except DataChangedError:
             self._logger.debug(
-                'Could not delete "%s": the item has been changed since last sync',
+                'Could not delete "%s": it changed on Drive since last '
+                "sync; re-downloading instead",
                 event.remote_path,
             )
             status = SyncStatus.Skipped
+            redownload = True
 
         # Remove revision metadata.
         self.remove_node_from_index(event.remote_path_lower)
+
+        if redownload:
+            # Restore the newer remote item locally. With the index entry gone,
+            # the metadata classifies as Added and downloads fresh — this also
+            # stops the startup reconciler from replaying the failed delete forever.
+            try:
+                md = self.client.get_metadata(event.remote_path)
+            except NotFoundError:
+                md = None
+            if md is not None:
+                self._create_local_entry(SyncEvent.from_metadata(md, self))
 
         return status
 
