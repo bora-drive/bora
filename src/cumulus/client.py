@@ -96,16 +96,15 @@ logger = logging.getLogger(__name__)
 # Google Drive API health-check URL (used by manager for connectivity checks).
 API_HEALTH_URL = "https://www.googleapis.com"
 
-# Google Drive default per-user quota: 12,000 queries per day.
-# Warn at 80% to give the user a chance to slow down.
-_DAILY_QUOTA = 12_000
-_QUOTA_WARN_THRESHOLD = int(_DAILY_QUOTA * 0.80)  # 9,600
-_QUOTA_CRITICAL_THRESHOLD = int(_DAILY_QUOTA * 0.95)  # 11,400
+# Google Drive's default per-user rate limit is 12,000 queries per
+# 60 seconds (not per day). Transient 429 / rate-limit-403 responses
+# are handled by _retry_transient's backoff; no client-side budget is
+# needed. The request counter below is kept for status/diagnostics.
 
 # Default polling interval for remote change detection (seconds).
 # Dropbox used a long-poll; Google Drive has no equivalent, so we poll.
-# 180 s keeps daily polling cost to ~480 requests, leaving headroom for
-# file operations within the 12k/day quota.
+# 180 s is a latency/courtesy tradeoff — the per-user rate limit
+# (12k queries / 60 s) is nowhere near a constraint at this rate.
 DEFAULT_POLL_INTERVAL = 180
 
 # Transient-error retry policy (Stage 3 spec §7.2).
@@ -207,11 +206,8 @@ class GoogleDriveClient:
         self.bandwidth_limit_up = bandwidth_limit_up
         self.bandwidth_limit_down = bandwidth_limit_down
 
-        # Request quota tracking.
+        # Request counter (kept for status/diagnostics; see comment near DEFAULT_POLL_INTERVAL).
         self._request_count = 0
-        self._request_day: int = 0  # day-of-year when counter was last reset
-        self._warned_at_threshold = False
-        self._warned_at_critical = False
 
         # Auth state.
         self._credentials: oauth.PersistingCredentials | None = None
@@ -233,50 +229,21 @@ class GoogleDriveClient:
         from .writes import _WriteHelper
         self._writes = _WriteHelper(self)
 
-    # ---- Request quota tracking -----------------------------------------------------
+    # ---- Request counter (diagnostics) -----------------------------------------------
 
     def _count_request(self, n: int = 1) -> None:
-        """Increment the daily request counter and warn if approaching limits.
+        """Increment the request counter.
 
         Call this for every Google Drive API request (or pass *n* for batch
-        requests that consume multiple quota units).
+        requests that consume multiple quota units).  The counter is kept for
+        status/diagnostics only; rate limiting is handled by _retry_transient's
+        backoff on 429 / rate-limit-403 responses.
         """
-        today = time.localtime().tm_yday
-        if today != self._request_day:
-            # New day — reset counter.
-            self._request_count = 0
-            self._request_day = today
-            self._warned_at_threshold = False
-            self._warned_at_critical = False
-
         self._request_count += n
-
-        if (
-            self._request_count >= _QUOTA_CRITICAL_THRESHOLD
-            and not self._warned_at_critical
-        ):
-            logger.warning(
-                "Google Drive API quota nearly exhausted: %d / %d requests today. "
-                "Sync operations may start failing.",
-                self._request_count,
-                _DAILY_QUOTA,
-            )
-            self._warned_at_critical = True
-        elif (
-            self._request_count >= _QUOTA_WARN_THRESHOLD
-            and not self._warned_at_threshold
-        ):
-            logger.warning(
-                "Google Drive API quota usage is high: %d / %d requests today. "
-                "Consider reducing sync frequency.",
-                self._request_count,
-                _DAILY_QUOTA,
-            )
-            self._warned_at_threshold = True
 
     @property
     def request_count(self) -> int:
-        """Number of API requests made today."""
+        """Cumulative number of API requests made in this session."""
         return self._request_count
 
     # ---- Auth / linking --------------------------------------------------------------
@@ -863,8 +830,7 @@ class GoogleDriveClient:
 
         .. note:: Implementation should use Google Drive's batch endpoint
            (``POST https://www.googleapis.com/batch/drive/v3``) to group up
-           to 100 delete requests per HTTP round-trip.  This is critical for
-           staying within the 12k requests/day quota.  Each sub-request in a
+           to 100 delete requests per HTTP round-trip.  Each sub-request in a
            batch counts as one quota unit, but the single HTTP call avoids
            per-request overhead and latency.
 

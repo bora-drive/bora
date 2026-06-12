@@ -2995,7 +2995,7 @@ class SyncEngine:
 
         :param last_cursor: Cursor from last sync.
         :param timeout: Timeout in seconds before polling for changes.
-            Defaults to 180s to stay within Google Drive's 12k req/day quota.
+            Defaults to 180s (latency/courtesy tradeoff; the per-user rate limit of 12k queries / 60 s is not a constraint at this rate).
         :returns: ``True`` if changes are available, ``False`` otherwise.
         """
         self._logger.debug("Waiting for remote changes since cursor:\n%s", last_cursor)
