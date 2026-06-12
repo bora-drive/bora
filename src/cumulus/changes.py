@@ -5,11 +5,11 @@ Two responsibilities:
 * **Projection** — pure helpers that turn a Drive ``files`` resource
   dict into a :mod:`cumulus.core` dataclass. Shared by ``client.py``'s
   listing/metadata methods and by the change-feed code below.
-* **Change feed** — :func:`iter_remote_changes` pages Drive's
-  ``changes.list``, classifies each entry against the 4-row
+* **Change feed** — :func:`iter_remote_changes` drains Drive's
+  ``changes.list`` pages, classifies each entry against the 4-row
   disambiguation table (:func:`classify`), resolves file IDs to paths
-  via the path cache, mutates the cache, and yields
-  :class:`~cumulus.core.ListFolderResult` pages.
+  via the path cache, mutates the cache, and yields a single
+  :class:`~cumulus.core.ListFolderResult` per poll cycle.
 
 The module never imports ``client.py``: it receives the service factory
 and the retry helper as parameters, keeping the dependency one-way
@@ -183,19 +183,28 @@ def _emit_apply(
     change: dict[str, Any],
     path_cache: "PathIDCache",
     out_entries: list[Any],
-) -> None:
+    *,
+    warn_on_conflict: bool = True,
+) -> bool:
     """Apply an in-scope create / content-update / move: write the path
     cache and append the projected metadata.
 
     Native docs and shortcuts are dropped (no cache write, no entry).
     The caller invokes this only when :func:`classify` returned
     ``APPLY``, which guarantees at least one in-scope parent.
+
+    Returns ``True`` when the change was consumed (metadata emitted, or
+    intentionally dropped as a native doc / shortcut) and ``False`` when
+    the path cache rejected the write — a move-out delete later in the
+    same batch may vacate the path, so the caller can retry. Retrying
+    callers pass ``warn_on_conflict=False`` so the duplicate-name
+    warning fires only when the entry is finally dropped for good.
     """
     file = change["file"]
     mime = file.get("mimeType")
     # is_google_native already covers shortcuts via the wildcard.
     if is_google_native(mime):
-        return
+        return True
     parents = file.get("parents") or []
     parent_id = next(
         (p for p in parents if path_cache.id_to_path(p) is not None),
@@ -219,17 +228,19 @@ def _emit_apply(
         # cross-wire two files' content. Drop the entry; the path keeps
         # mapping to the first file (first-id-wins, matching
         # populate_from_listing).
-        logger.warning(
-            "Dropping change for %r (id=%s): path conflicts with an "
-            "existing item. Rename one of the duplicates in the Google "
-            "Drive web UI to sync both.",
-            new_path, file["id"],
-        )
-        return
+        if warn_on_conflict:
+            logger.warning(
+                "Dropping change for %r (id=%s): path conflicts with an "
+                "existing item. Rename one of the duplicates in the Google "
+                "Drive web UI to sync both.",
+                new_path, file["id"],
+            )
+        return False
     if is_folder:
         out_entries.append(to_folder_metadata(file, new_path))
     else:
         out_entries.append(to_file_metadata(file, new_path))
+    return True
 
 
 def iter_remote_changes(
@@ -300,25 +311,65 @@ def iter_remote_changes(
         else:
             pending.append(change)
 
-    # Fixpoint: apply every change whose parent now resolves, then
-    # repeat — a folder applied this pass unblocks its children.
-    # Stop once a pass resolves nothing new.
+    # Outer loop: alternate the apply fixpoint and the move-out delete
+    # pass until neither makes progress. Emitting a move-out delete can
+    # vacate a path that a deferred (cache-rejected) apply needs — e.g.
+    # file A moved out of scope and file B created at A's old path in
+    # the same batch. Terminates because every iteration with
+    # ``progress`` consumes at least one pending entry.
     while pending:
-        deferred: list[dict[str, Any]] = []
-        for change in pending:
-            if classify(change, path_cache) is ChangeDecision.APPLY:
-                _emit_apply(change, path_cache, out_entries)
-            else:
-                deferred.append(change)
-        if len(deferred) == len(pending):
-            break  # no parent resolved this pass; the rest never will
-        pending = deferred
+        progress = False
 
-    # Survivors are genuinely outside the sync root: a move-out of a
-    # file the cache knew (propagate the delete) or a never-in-scope
-    # create (drop silently).
-    for change in pending:
-        if classify(change, path_cache) is ChangeDecision.DELETE:
-            _emit_delete(change, path_cache, out_entries)
+        # Fixpoint: apply every change whose parent now resolves, then
+        # repeat — a folder applied this pass unblocks its children.
+        # A cache-rejected apply is DEFERRED (kept pending, no warning):
+        # a move-out delete below may free its path.
+        while pending:
+            deferred: list[dict[str, Any]] = []
+            for change in pending:
+                if classify(change, path_cache) is ChangeDecision.APPLY:
+                    if _emit_apply(
+                        change, path_cache, out_entries,
+                        warn_on_conflict=False,
+                    ):
+                        progress = True
+                    else:
+                        deferred.append(change)
+                else:
+                    deferred.append(change)
+            if len(deferred) == len(pending):
+                break  # nothing resolved this pass
+            pending = deferred
+
+        # Move-out pass: changes now classified DELETE are files the
+        # cache knew that left the sync root — propagate the deletion.
+        remaining: list[dict[str, Any]] = []
+        for change in pending:
+            if classify(change, path_cache) is ChangeDecision.DELETE:
+                _emit_delete(change, path_cache, out_entries)
+                progress = True
+            else:
+                remaining.append(change)
+        pending = remaining
+
+        if not progress:
+            break
+
+    # Leftovers after the loop stalls: never-in-scope creates (drop
+    # silently) and applies whose path the cache rejected on every
+    # attempt — genuinely fold-conflicted; drop them now, warning once.
+    if pending:
+        for change in pending:
+            decision = classify(change, path_cache)
+            if decision is ChangeDecision.DELETE:
+                _emit_delete(change, path_cache, out_entries)
+            elif decision is ChangeDecision.APPLY:
+                # Deterministically rejected again (no cache mutation
+                # since the stall); emits the Task-2 conflict warning.
+                _emit_apply(change, path_cache, out_entries)
+        logger.debug(
+            "%d changes unresolved or out of scope after fixpoint",
+            len(pending),
+        )
 
     yield ListFolderResult(entries=out_entries, has_more=False, cursor=cursor)
