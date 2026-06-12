@@ -79,7 +79,6 @@ def test_ensure_sync_folder_present_passes_when_dir_exists(
 def test_cursor_reset_triggers_reindex_and_autostart(m: Maestral, tmp_path) -> None:
     """CursorResetError from the download worker must reset sync state and
     schedule a restart, not stop permanently (review F5)."""
-    # Point sync_path at a real dir so stop() does not trip on missing folder.
     local_dir = str(tmp_path / "SyncRoot")
     os.makedirs(local_dir)
     m.sync.sync_path = local_dir
