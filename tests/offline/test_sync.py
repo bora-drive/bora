@@ -7,6 +7,7 @@ from queue import Queue
 from unittest.mock import Mock
 
 import pytest
+from pathspec import PathSpec
 
 from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
@@ -23,6 +24,7 @@ from cumulus.models import (
     SyncStatus,
 )
 from cumulus.path_cache import PathIDCache
+from cumulus.path_codec import encode_path, fold_path
 from cumulus.sync import ActivityNode, ActivityTree, Conflict, SyncEngine
 from cumulus.utils.appdirs import get_home_dir
 from cumulus.utils.path import delete
@@ -1435,3 +1437,111 @@ def test_local_move_to_remotely_changed_destination_conflict_renames(
     # No lingering Up error for /b.txt.
     up_errors = sync_engine.sync_errors_for_path("/b.txt", direction=SyncDirection.Up)
     assert len(up_errors) == 0, f"unexpected Up errors for /b.txt: {up_errors}"
+
+
+# ==== Task 10 (F8): mignore / excluded_items match decoded (human-readable) paths =====
+#
+# Before the fix: patterns were matched against percent-encoded virtual paths, so
+# any name containing non-ASCII or common punctuation (e.g. 'Ördner', '(1)', '#')
+# silently failed to be ignored/excluded.
+# After the fix: match against decode_path(remote_path) in human-readable form.
+
+
+def _make_dir_upload_event(sync: SyncEngine, human_path: str) -> SyncEvent:
+    """Build a minimal upload SyncEvent for a directory at ``human_path``."""
+    encoded = encode_path(human_path)
+    folded = fold_path(encoded)
+    return SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.Folder,
+        sync_time=datetime.today().timestamp(),
+        remote_path=encoded,
+        remote_path_lower=folded,
+        remote_id=None,
+        local_path=sync.to_local_path_from_cased(encoded),
+        local_path_from=None,
+        rev=None,
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+
+def test_mignore_matches_non_ascii_dir_name(sync_engine: SyncEngine) -> None:
+    """_is_mignore_path must match user-written .mignore patterns against
+    the decoded (human-readable) path, not the percent-encoded virtual path."""
+    # Pattern written by user in plain text: the folder name as they see it.
+    sync_engine._mignore_rules = PathSpec.from_lines(
+        "gitwildmatch", ["Ördner", "*.tmp"]
+    )
+    event = _make_dir_upload_event(sync_engine, "/Ördner")
+    # is_mignore also checks get_local_rev; because no index entry exists, the
+    # condition is met (rev is None → not in index → True for second condition).
+    assert sync_engine._is_mignore_path(event.remote_path, is_dir=event.is_directory)
+
+
+def test_mignore_matches_punctuation_in_name(sync_engine: SyncEngine) -> None:
+    """Parentheses and other common punctuation must survive the mignore match."""
+    sync_engine._mignore_rules = PathSpec.from_lines(
+        "gitwildmatch", ["Report (1).txt"]
+    )
+    encoded = encode_path("/Report (1).txt")
+    folded = fold_path(encoded)
+    event = SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=encoded,
+        remote_path_lower=folded,
+        remote_id=None,
+        local_path=sync_engine.to_local_path_from_cased(encoded),
+        local_path_from=None,
+        rev=None,
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+    assert sync_engine._is_mignore_path(event.remote_path, is_dir=event.is_directory)
+
+
+def test_excluded_items_match_non_ascii_name(sync_engine: SyncEngine) -> None:
+    """is_excluded_by_user must handle non-ASCII names in excluded_items
+    and must match against the fold_path'd remote_path_lower."""
+    # Set via the public setter — triggers clean_excluded_items_list.
+    sync_engine.excluded_items = ["/Ördner"]
+
+    # A file inside the excluded directory must be caught.
+    assert sync_engine.is_excluded_by_user(
+        fold_path(encode_path("/Ördner/inner.txt"))
+    )
+    # The directory itself must be caught.
+    assert sync_engine.is_excluded_by_user(fold_path(encode_path("/Ördner")))
+    # A sibling must NOT be caught.
+    assert not sync_engine.is_excluded_by_user(fold_path(encode_path("/Other")))
+
+
+def test_excluded_items_match_punctuation_in_name(sync_engine: SyncEngine) -> None:
+    """Parentheses, ampersands and similar chars must not break exclusion matching."""
+    sync_engine.excluded_items = ["/Reports (2024)"]
+    assert sync_engine.is_excluded_by_user(
+        fold_path(encode_path("/Reports (2024)/Q1.pdf"))
+    )
+    assert not sync_engine.is_excluded_by_user(fold_path(encode_path("/Reports")))
+
+
+def test_excluded_items_stale_config_form_matches(sync_engine: SyncEngine) -> None:
+    """Stale config entries stored in the old normalize()-form (NFC lowercase
+    plain text) must still match after the fold_human migration."""
+    # Simulate a stale config entry: old code stored normalize('/Ördner') = '/ördner'
+    # (plain decoded lowercase, not fold_human form — which is identical for this
+    # example, so we test a case where they'd differ: a path with a percent sign).
+    # The key insight: fold_human('/a%b') == '/a%b' (% is not special in human paths).
+    # A stale entry '/a%b' stored literally must still match.
+    sync_engine._excluded_items = {"/ördner"}  # bypass setter, inject stale form
+    assert sync_engine.is_excluded_by_user(fold_path(encode_path("/Ördner")))

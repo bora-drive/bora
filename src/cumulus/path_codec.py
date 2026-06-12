@@ -22,6 +22,7 @@ __all__ = [
     "fold_key",
     "compose_path",
     "fold_path",
+    "fold_human",
 ]
 
 
@@ -150,3 +151,27 @@ def fold_path(encoded_path: str) -> str:
             return p
 
     return "/".join(_fold_segment(p) for p in parts)
+
+
+def fold_human(path: str) -> str:
+    """Quoting-free canonical fold of a DECODED (human-readable) path.
+
+    Per segment: ``NFC(casefold(NFC(segment)))``.
+
+    **Identity:** ``decode_path(fold_path(encode_path(p))) == fold_human(p)``,
+    so this is the canonical form to compare user-supplied paths (mignore
+    patterns, selective-sync exclusions) against engine fold-form paths after
+    :func:`decode_path`. Idempotent.
+
+    ``"/"`` and ``""`` pass through unchanged.
+    """
+    if path in ("", "/"):
+        return path
+
+    def _fold(seg: str) -> str:
+        if not seg:
+            return seg
+        n = unicodedata.normalize("NFC", seg)
+        return unicodedata.normalize("NFC", n.casefold())
+
+    return "/".join(_fold(p) for p in path.split("/"))
