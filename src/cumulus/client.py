@@ -373,6 +373,8 @@ class GoogleDriveClient:
         self._pending_paste_flow = None
         self._cached_account_info = None
         self._cached_space_usage = None
+        with self._id_pool_lock:
+            self._id_pool.clear()
         self._poll_event.set()
 
     # ---- Service builder -------------------------------------------------------------

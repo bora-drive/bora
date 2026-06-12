@@ -1942,6 +1942,42 @@ def test_create_retry_after_lost_response_does_not_duplicate_simple(
     assert md.id == siblings[0]["id"]
 
 
+def test_create_retry_after_lost_response_does_not_duplicate_resumable(
+    client_on_fake, tmp_path
+):
+    """A files.create (resumable upload) whose response is lost after server-side
+    commit must not produce a same-name sibling when retried (review F7).
+
+    Exercises the resumable create's 409-resolve handler (new_file_id is not None
+    guard, try around the next_chunk loop), which is structurally distinct from
+    the simple-path handler.
+    """
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    # 5 MB + 1 byte forces the resumable path (writes._SIMPLE_UPLOAD_THRESHOLD).
+    size = 5 * 1024 * 1024 + 1
+    local = tmp_path / "big.bin"
+    local.write_bytes(b"x" * size)
+
+    # Model "committed but response lost" on the resumable path: finalize()
+    # inserts the record during the final next_chunk(), then ConnectionError
+    # is raised before the response reaches the caller. The retry's next_chunk()
+    # calls finalize() again with the same pre-generated id → 409 → resolved
+    # via files.get() in the resumable 409-resolve handler.
+    fake.fail_after("files.create", ConnectionError("connection reset by peer"))
+
+    md = client._writes.upload(str(local), "/big.bin", write_mode=WriteMode.Add)
+
+    siblings = [
+        r for r in fake.files.values()
+        if r["name"] == "big.bin" and not r["trashed"]
+    ]
+    assert len(siblings) == 1, f"duplicate created on retry: {[r['id'] for r in siblings]}"
+    assert md.id == siblings[0]["id"]
+
+
 def test_create_retry_after_lost_response_does_not_duplicate_make_dir(
     client_on_fake,
 ):
@@ -2001,16 +2037,28 @@ def test_create_retry_409_resolves_batch_callback(client_on_fake):
 
 
 def test_reserve_file_id_fetches_pool_and_returns_ids(client_on_fake):
-    """reserve_file_id() returns Drive-generated IDs and refetches when exhausted."""
+    """reserve_file_id() returns Drive-generated IDs and refetches when exhausted.
+
+    Pre-seeds the pool with a single id so that the second call exhausts the
+    pool and triggers a second generateIds round-trip.
+    """
     client = client_on_fake.client
+    fake = client_on_fake.fake
     client._ensure_root_id = Mock()
 
-    id1 = client.reserve_file_id()
-    id2 = client.reserve_file_id()
+    # Pre-seed the pool with exactly one id so the second reserve_file_id()
+    # call exhausts it and must fetch a fresh batch from generateIds.
+    client._id_pool = ["last-one"]
+    counter_before = fake._id_counter
 
-    assert id1 != id2
-    assert id1.startswith("file-")
+    id1 = client.reserve_file_id()   # draws "last-one", no network call
+    id2 = client.reserve_file_id()   # pool exhausted → generateIds round-trip
+
+    assert id1 == "last-one"
+    assert id2 != id1
     assert id2.startswith("file-")
+    # A second generateIds call fetched 100 ids; counter must have advanced.
+    assert fake._id_counter > counter_before, "generateIds was not called on pool exhaustion"
 
 
 def test_reserve_file_id_thread_safe(client_on_fake):

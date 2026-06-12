@@ -329,3 +329,10 @@ def test_unlink_sets_poll_event(client):
     assert client._poll_event.is_set() is False
     client.unlink()
     assert client._poll_event.is_set() is True
+
+
+def test_unlink_clears_id_pool(client):
+    # Pre-generated ids from account A must not leak into a relinked account B.
+    client._id_pool = ["id-from-account-a", "another-id"]
+    client.unlink()
+    assert client._id_pool == []

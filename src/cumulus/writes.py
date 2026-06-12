@@ -301,6 +301,9 @@ class _WriteHelper:
                     ):
                         resp = client._retry_transient(request.execute)
                 except CumulusApiError as exc:
+                    # convert_api_errors has already converted the HttpError (409
+                    # has no dedicated cumulus class), so inspect __cause__ rather
+                    # than catching HttpError directly.
                     if (
                         isinstance(exc.__cause__, HttpError)
                         and exc.__cause__.resp.status == 409
@@ -448,6 +451,9 @@ class _WriteHelper:
                     if sync_event is not None and status is not None:
                         sync_event.completed = status.resumable_progress
         except CumulusApiError as exc:
+            # convert_api_errors has already converted the HttpError (409
+            # has no dedicated cumulus class), so inspect __cause__ rather
+            # than catching HttpError directly.
             if (
                 new_file_id is not None
                 and isinstance(exc.__cause__, HttpError)
@@ -851,6 +857,9 @@ class _WriteHelper:
                     .execute()
                 )
         except CumulusApiError as exc:
+            # convert_api_errors has already converted the HttpError (409
+            # has no dedicated cumulus class), so inspect __cause__ rather
+            # than catching HttpError directly.
             if (
                 isinstance(exc.__cause__, HttpError)
                 and exc.__cause__.resp.status == 409
