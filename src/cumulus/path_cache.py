@@ -15,9 +15,14 @@ Key responsibilities:
   replaces the simple ``.lower()`` key used in earlier prototypes; Drive
   doesn't return a server-computed fold form (Dropbox did), so we
   compute it client-side.
-* **Concurrency** — the path cache shares ``SyncEngine.sync_lock``. It is
-  only accessed during sync operations that already hold the lock, so no
-  additional lock is needed.
+* **Concurrency** — every public method acquires ``self._lock`` (an
+  ``RLock``) before touching the database or shared state.
+  ``populate_from_listing`` holds the lock across the entire
+  clear + insert transaction, so concurrent reads always see either
+  the old or the new cache — never a half-built one.  RLock is used
+  (rather than Lock) because some public methods call other public
+  methods (e.g. ``set`` calls ``has_case_conflict``).
+  ``SyncEngine.sync_lock`` is no longer the sole guard for cache access.
 * **Atomic populate** — ``populate_from_listing`` runs inside a single
   ``Database.transaction()``; on failure the cache is restored to its
   prior state.
@@ -30,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from typing import TYPE_CHECKING, Any
 
 from .database.orm import Column, Manager, Model, NonNullColumn
@@ -104,6 +110,7 @@ class PathIDCache:
         self._db = db
         self._table: Manager[PathCacheEntry] = Manager(db, PathCacheEntry)
         self._root_id: str | None = None
+        self._lock = threading.RLock()
 
     # -- Root management ---------------------------------------------------
 
@@ -124,29 +131,32 @@ class PathIDCache:
         ``remote_path`` is the encoded path. The lookup is
         case-insensitive (uses ``remote_path_fold``).
         """
-        if remote_path == self.ROOT_PATH:
-            return self._root_id
+        with self._lock:
+            if remote_path == self.ROOT_PATH:
+                return self._root_id
 
-        fold = fold_path(remote_path)
-        rows = self._table.select_sql(
-            "WHERE remote_path_fold = ?", os.fsencode(fold)
-        )
-        if rows:
-            return rows[0].file_id
-        return None
+            fold = fold_path(remote_path)
+            rows = self._table.select_sql(
+                "WHERE remote_path_fold = ?", os.fsencode(fold)
+            )
+            if rows:
+                return rows[0].file_id
+            return None
 
     def id_to_path(self, file_id: str) -> str | None:
         """Return the cached remote path for *file_id*, or ``None``."""
-        entry = self._table.get(file_id)
-        if entry is not None:
-            return entry.remote_path
-        if file_id == self._root_id:
-            return self.ROOT_PATH
-        return None
+        with self._lock:
+            entry = self._table.get(file_id)
+            if entry is not None:
+                return entry.remote_path
+            if file_id == self._root_id:
+                return self.ROOT_PATH
+            return None
 
     def get_entry(self, file_id: str) -> PathCacheEntry | None:
         """Return the full cache entry for *file_id*."""
-        return self._table.get(file_id)
+        with self._lock:
+            return self._table.get(file_id)
 
     # -- Mutations ---------------------------------------------------------
 
@@ -159,14 +169,15 @@ class PathIDCache:
         there is no conflict. An entry with the same *file_id* is **not**
         considered a conflict (that's just an update of the same file).
         """
-        fold = fold_path(remote_path)
-        rows = self._table.select_sql(
-            "WHERE remote_path_fold = ?", os.fsencode(fold)
-        )
-        for row in rows:
-            if row.file_id != file_id:
-                return row.file_id
-        return None
+        with self._lock:
+            fold = fold_path(remote_path)
+            rows = self._table.select_sql(
+                "WHERE remote_path_fold = ?", os.fsencode(fold)
+            )
+            for row in rows:
+                if row.file_id != file_id:
+                    return row.file_id
+            return None
 
     def set(
         self,
@@ -187,47 +198,49 @@ class PathIDCache:
         rejected due to a case-insensitive name conflict with a different
         file. Updating an existing entry (same *file_id*) always succeeds.
         """
-        conflict_id = self.has_case_conflict(remote_path, file_id)
-        if conflict_id is not None:
-            logger.warning(
-                "Case conflict: '%s' (id=%s) conflicts with existing "
-                "entry (id=%s). Skipping — rename one of the files in "
-                "the Google Drive web UI to fix this.",
-                remote_path,
-                file_id,
-                conflict_id,
-            )
-            return False
+        with self._lock:
+            conflict_id = self.has_case_conflict(remote_path, file_id)
+            if conflict_id is not None:
+                logger.warning(
+                    "Case conflict: '%s' (id=%s) conflicts with existing "
+                    "entry (id=%s). Skipping — rename one of the files in "
+                    "the Google Drive web UI to fix this.",
+                    remote_path,
+                    file_id,
+                    conflict_id,
+                )
+                return False
 
-        entry = PathCacheEntry(
-            file_id=file_id,
-            remote_path=remote_path,
-            remote_path_fold=fold_path(remote_path),
-            parent_id=parent_id,
-            name=name,
-            is_folder=int(is_folder),
-        )
-        self._table.update(entry)  # upsert
-        return True
+            entry = PathCacheEntry(
+                file_id=file_id,
+                remote_path=remote_path,
+                remote_path_fold=fold_path(remote_path),
+                parent_id=parent_id,
+                name=name,
+                is_folder=int(is_folder),
+            )
+            self._table.update(entry)  # upsert
+            return True
 
     def remove(self, remote_path: str) -> None:
         """Remove *remote_path* and all its children from the cache.
 
         ``remote_path`` is the encoded path.
         """
-        fold = fold_path(remote_path)
+        with self._lock:
+            fold = fold_path(remote_path)
 
-        # Delete exact match.
-        rows = self._table.select_sql(
-            "WHERE remote_path_fold = ?", os.fsencode(fold)
-        )
-        for row in rows:
-            self._table.delete_primary_key(row.file_id)
+            # Delete exact match.
+            rows = self._table.select_sql(
+                "WHERE remote_path_fold = ?", os.fsencode(fold)
+            )
+            for row in rows:
+                self._table.delete_primary_key(row.file_id)
 
-        # Delete children using a range query on the BLOB column.
-        children = self._select_children(fold)
-        for child in children:
-            self._table.delete_primary_key(child.file_id)
+            # Delete children using a range query on the BLOB column.
+            children = self._select_children(fold)
+            for child in children:
+                self._table.delete_primary_key(child.file_id)
 
     def move(self, old_path: str, new_path: str) -> bool:
         """Rename *old_path* → *new_path*, updating all children atomically.
@@ -236,50 +249,51 @@ class PathIDCache:
         *new_path* case-conflicts with an existing entry that isn't the
         item being moved.
         """
-        old_fold = fold_path(old_path)
-        rows = self._table.select_sql(
-            "WHERE remote_path_fold = ?", os.fsencode(old_fold)
-        )
-        moving_id = rows[0].file_id if rows else None
-
-        # Check for a case conflict at the destination.
-        conflict_id = self.has_case_conflict(new_path, moving_id)
-        if conflict_id is not None:
-            logger.warning(
-                "Case conflict on move: '%s' → '%s' conflicts with "
-                "existing entry (id=%s). Skipping move.",
-                old_path,
-                new_path,
-                conflict_id,
+        with self._lock:
+            old_fold = fold_path(old_path)
+            rows = self._table.select_sql(
+                "WHERE remote_path_fold = ?", os.fsencode(old_fold)
             )
-            return False
+            moving_id = rows[0].file_id if rows else None
 
-        new_fold = fold_path(new_path)
+            # Check for a case conflict at the destination.
+            conflict_id = self.has_case_conflict(new_path, moving_id)
+            if conflict_id is not None:
+                logger.warning(
+                    "Case conflict on move: '%s' → '%s' conflicts with "
+                    "existing entry (id=%s). Skipping move.",
+                    old_path,
+                    new_path,
+                    conflict_id,
+                )
+                return False
 
-        # Update the entry itself: new path, new fold, new raw name. The
-        # leaf of new_path is encoded; decode it to recover the raw Drive
-        # name (the column stores raw form for upload).
-        new_leaf_encoded = new_path.rsplit("/", 1)[-1]
-        new_leaf_raw = decode_name(new_leaf_encoded)
+            new_fold = fold_path(new_path)
 
-        for row in rows:
-            row.remote_path = new_path
-            row.remote_path_fold = new_fold
-            row.name = new_leaf_raw
-            self._table.update(row)
+            # Update the entry itself: new path, new fold, new raw name. The
+            # leaf of new_path is encoded; decode it to recover the raw Drive
+            # name (the column stores raw form for upload).
+            new_leaf_encoded = new_path.rsplit("/", 1)[-1]
+            new_leaf_raw = decode_name(new_leaf_encoded)
 
-        # Update children's paths via prefix substitution. Children's
-        # `name` columns don't change — only their stored paths.
-        old_prefix = old_fold + "/"
-        children = self._select_children(old_fold)
-        for child in children:
-            fold_suffix = child.remote_path_fold[len(old_prefix):]
-            child.remote_path_fold = new_fold + "/" + fold_suffix
-            cased_suffix = child.remote_path[len(old_path) + 1:]
-            child.remote_path = new_path + "/" + cased_suffix
-            self._table.update(child)
+            for row in rows:
+                row.remote_path = new_path
+                row.remote_path_fold = new_fold
+                row.name = new_leaf_raw
+                self._table.update(row)
 
-        return True
+            # Update children's paths via prefix substitution. Children's
+            # `name` columns don't change — only their stored paths.
+            old_prefix = old_fold + "/"
+            children = self._select_children(old_fold)
+            for child in children:
+                fold_suffix = child.remote_path_fold[len(old_prefix):]
+                child.remote_path_fold = new_fold + "/" + fold_suffix
+                cased_suffix = child.remote_path[len(old_path) + 1:]
+                child.remote_path = new_path + "/" + cased_suffix
+                self._table.update(child)
+
+            return True
 
     def resolve_path(self, file_id: str) -> str | None:
         """Walk the parent chain to reconstruct the full encoded path
@@ -288,31 +302,32 @@ class PathIDCache:
         Returns ``None`` if any ancestor is missing from the cache
         (orphan).
         """
-        parts: list[str] = []
-        current_id: str | None = file_id
+        with self._lock:
+            parts: list[str] = []
+            current_id: str | None = file_id
 
-        while current_id and current_id != self._root_id:
-            entry = self._table.get(current_id)
-            if entry is None:
+            while current_id and current_id != self._root_id:
+                entry = self._table.get(current_id)
+                if entry is None:
+                    logger.warning(
+                        "Orphaned file: cannot resolve parent chain for %s",
+                        file_id,
+                    )
+                    return None
+                # Encode each segment as we walk so the result is the encoded
+                # form even when raw `name` contains an unsafe char.
+                parts.append(encode_name(entry.name))
+                current_id = entry.parent_id
+
+            if current_id is None:
+                # Walked off the tree without reaching root — orphan.
                 logger.warning(
-                    "Orphaned file: cannot resolve parent chain for %s",
-                    file_id,
+                    "Orphaned file: parent chain for %s does not reach root", file_id
                 )
                 return None
-            # Encode each segment as we walk so the result is the encoded
-            # form even when raw `name` contains an unsafe char.
-            parts.append(encode_name(entry.name))
-            current_id = entry.parent_id
 
-        if current_id is None:
-            # Walked off the tree without reaching root — orphan.
-            logger.warning(
-                "Orphaned file: parent chain for %s does not reach root", file_id
-            )
-            return None
-
-        parts.reverse()
-        return "/" + "/".join(parts)
+            parts.reverse()
+            return "/" + "/".join(parts)
 
     # -- Bulk operations ---------------------------------------------------
 
@@ -424,19 +439,23 @@ class PathIDCache:
                 parent_repr,
             )
 
-        # Phase 3: atomic swap. clear() + bulk insert under one transaction.
-        with self._db.transaction():
+        # Phase 3: atomic swap. clear() + bulk insert under one transaction,
+        # held under self._lock so concurrent reads see old or new — never
+        # a half-built state.
+        with self._lock, self._db.transaction():
             self._table.clear()
             for entry in plan:
                 self._table.update(entry)
 
     def clear(self) -> None:
         """Remove all entries from the cache."""
-        self._table.clear()
+        with self._lock:
+            self._table.clear()
 
     def count(self) -> int:
         """Return the number of cached entries."""
-        return self._table.count()
+        with self._lock:
+            return self._table.count()
 
     # -- Internal helpers --------------------------------------------------
 

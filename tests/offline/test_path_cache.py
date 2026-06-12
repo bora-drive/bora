@@ -581,6 +581,8 @@ class TestPopulateAtomicity:
             cache.populate_from_listing([])
 
 
+import threading  # noqa: E402
+
 from cumulus.path_codec import compose_path as _compose_path  # noqa: E402
 from cumulus.path_codec import fold_path as _fold_path  # noqa: E402
 
@@ -613,6 +615,49 @@ def _assert_invariants(cache: PathIDCache) -> None:
             f"row {row.file_id!r}: remote_path {row.remote_path!r} != "
             f"compose_path({parent_path!r}, {row.name!r}) == {expected!r}"
         )
+
+
+class TestConcurrentAccess:
+    def test_concurrent_reads_during_populate_are_safe(self, tmp_path) -> None:
+        """path_to_id from another thread during populate_from_listing must
+        see either the old or the new cache — never a half-built one, and
+        never raise (review F10)."""
+        conn = sqlite3.connect(str(tmp_path / "c.db"), check_same_thread=False)
+        db = Database(conn)
+        cache = PathIDCache(db)
+        cache.root_id = "ROOT"
+        cache.set("/seed.txt", "id-seed", "ROOT", "seed.txt", False)
+
+        listing = [
+            {
+                "id": f"id-{i}",
+                "name": f"f{i}.txt",
+                "parents": ["ROOT"],
+                "mimeType": "text/plain",
+            }
+            for i in range(500)
+        ]
+        errors: list[Exception] = []
+        stop = threading.Event()
+
+        def reader() -> None:
+            while not stop.is_set():
+                try:
+                    got = cache.path_to_id("/f0.txt")
+                    assert got in (None, "id-0"), f"unexpected id: {got!r}"
+                except Exception as e:  # noqa: BLE001
+                    errors.append(e)
+                    return
+
+        threads = [threading.Thread(target=reader) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for _ in range(20):
+            cache.populate_from_listing(listing)
+        stop.set()
+        for t in threads:
+            t.join()
+        assert errors == [], errors
 
 
 class TestInvariantsAfterMutations:
