@@ -456,6 +456,72 @@ def test_move_to_conflicting_path_is_not_emitted():
     assert cache.path_to_id("/report.pdf") == "id-A"  # original owner untouched
 
 
+# ==== move-out + same-path reuse (Task 4 review fix) ======================
+
+import logging
+
+import pytest
+
+
+@pytest.mark.parametrize("create_first", [True, False])
+def test_create_at_path_vacated_by_move_out_same_batch(caplog, create_first):
+    """File A is moved out of scope and file B is created at A's old path
+    in the same batch.  B's apply is rejected while A still occupies
+    ``/report.txt`` in the cache; it must be DEFERRED (not consumed with
+    a conflict warning) and applied after A's move-out delete vacates
+    the path.  Both intra-batch delivery orders must work."""
+    cache = _cache()
+    cache.set("/report.txt", "id-a", "ROOT", "report.txt", False)
+
+    create_b = {
+        "fileId": "id-b",
+        "file": {
+            "id": "id-b", "name": "report.txt", "parents": ["ROOT"],
+            "mimeType": "text/plain", "trashed": False,
+        },
+    }
+    move_out_a = {
+        "fileId": "id-a",
+        "file": {
+            "id": "id-a", "name": "report.txt", "parents": ["OUTSIDE"],
+            "mimeType": "text/plain", "trashed": False,
+        },
+    }
+    changes = [create_b, move_out_a] if create_first else [move_out_a, create_b]
+    pages = [{"changes": changes, "newStartPageToken": "t2"}]
+
+    class _Svc:
+        def changes(self):
+            return self
+
+        def list(self, **kw):
+            return self
+
+        def execute(self):
+            return pages.pop(0)
+
+    with caplog.at_level(logging.WARNING, logger="cumulus.changes"):
+        results = list(
+            iter_remote_changes(lambda: _Svc(), lambda fn: fn(), cache, "t1")
+        )
+
+    entries = [e for r in results for e in r.entries]
+    deletes = [e for e in entries if isinstance(e, DeletedMetadata)]
+    files = [e for e in entries if isinstance(e, FileMetadata)]
+    assert [d.path_display for d in deletes] == ["/report.txt"]
+    assert [f.path_display for f in files] == ["/report.txt"]
+    assert files[0].id == "id-b"
+    assert cache.path_to_id("/report.txt") == "id-b"
+    # The delete must precede the create so downstream applies in order.
+    assert entries.index(deletes[0]) < entries.index(files[0])
+    # B was deferred, not dropped — the change-feed conflict warning
+    # must not fire (path_cache's own internal warning is out of scope).
+    assert not [
+        r for r in caplog.records
+        if r.name == "cumulus.changes" and r.levelno >= logging.WARNING
+    ]
+
+
 # ==== cross-page parent/child resolution (review F6) =====================
 
 
