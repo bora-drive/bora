@@ -34,6 +34,7 @@ from typing import (
 )
 
 from google.auth.exceptions import RefreshError
+from oauthlib.oauth2.rfc6749.errors import OAuth2Error
 from google.auth.transport.requests import Request as _AuthRequest
 from google.oauth2.credentials import Credentials as _Credentials
 from googleapiclient.discovery import build
@@ -282,17 +283,33 @@ class GoogleDriveClient:
 
     @property
     def linked(self) -> bool:
-        """Whether the client is linked to a Google account."""
+        """Whether the client is linked to a Google account.
+
+        Returns True when:
+        - credentials are already in-process (in-memory); a token-only credential
+          is accepted because link(access_token=...) produces a short-lived but
+          usable session (review F13.1), OR
+        - credentials were loaded from storage AND have a refresh_token (the
+          storage path keeps the strict check: a persisted access-token-only blob
+          has no refresh_token and correctly returns False across restarts).
+        """
         if self._credentials is None:
+            # Try to load from storage. Only accept persisted blobs that have a
+            # refresh_token; access-token-only blobs cannot survive a restart.
             loaded = oauth.load_credentials(self._cred_storage)
             if loaded is not None and loaded.refresh_token is not None:
                 account_id = self._cred_storage.account_id or ""
                 self._credentials = oauth.wrap_persisting(
                     loaded, self._cred_storage, account_id
                 )
+            # If still None after load attempt, return False immediately.
+            if self._credentials is None:
+                return False
+        # Credentials are in-process: accept either refresh_token or a live
+        # access token (short-lived session from link(access_token=...)).
         return (
-            self._credentials is not None
-            and self._credentials.refresh_token is not None
+            self._credentials.refresh_token is not None
+            or self._credentials.token is not None
         )
 
     def get_auth_url(self) -> str:
@@ -350,6 +367,11 @@ class GoogleDriveClient:
             return 0
 
         except RefreshError:
+            return 1
+        except OAuth2Error:
+            # Bad / expired / already-used authorization code from the paste
+            # flow (InvalidGrantError etc.) — return 1 instead of surfacing
+            # a raw oauthlib traceback (review F13.2).
             return 1
         except CONNECTION_ERRORS:
             return 2
@@ -520,6 +542,16 @@ class GoogleDriveClient:
         compat with the Maestral interface but is ignored for Drive (the
         API only exposes the linked user, never arbitrary accounts)."""
         if self._cached_account_info is None:
+            # Guard: calling _fetch_account_info_for_creds with credentials=None
+            # would fall through to google.auth.default() / ambient ADC instead
+            # of failing cleanly (review F13.3). Check linked first so that
+            # the lazy-load in linked() can populate self._credentials from
+            # storage before we give up.
+            if not self.linked:
+                raise NotLinkedError(
+                    "Not linked",
+                    "Run 'cumulus auth link' to authorize Cumulus.",
+                )
             self._cached_account_info = self._fetch_account_info_for_creds(
                 self._credentials
             )
