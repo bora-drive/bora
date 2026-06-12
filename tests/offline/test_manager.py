@@ -1,10 +1,11 @@
 import os
 import os.path as osp
+from threading import Event
 
 import pytest
 
 from cumulus import oauth
-from cumulus.exceptions import NoSyncDirError
+from cumulus.exceptions import CursorResetError, NoSyncDirError
 from cumulus.main import Maestral
 from cumulus.utils.appdirs import get_home_dir
 from cumulus.utils.path import delete
@@ -73,3 +74,25 @@ def test_ensure_sync_folder_present_passes_when_dir_exists(
 
     # Should complete without raising.
     m.sync.ensure_sync_folder_present()
+
+
+def test_cursor_reset_triggers_reindex_and_autostart(m: Maestral, tmp_path) -> None:
+    """CursorResetError from the download worker must reset sync state and
+    schedule a restart, not stop permanently (review F5)."""
+    # Point sync_path at a real dir so stop() does not trip on missing folder.
+    local_dir = str(tmp_path / "SyncRoot")
+    os.makedirs(local_dir)
+    m.sync.sync_path = local_dir
+
+    # Pre-seed a non-empty cursor so we can observe it being cleared.
+    m.sync.remote_cursor = "some-token"
+
+    manager = m.manager
+    running = manager.running
+    autostart = manager.autostart
+
+    with manager._handle_sync_thread_errors(running, autostart):
+        raise CursorResetError("Sync cursor reset", "token expired")
+
+    assert m.sync.remote_cursor == ""        # full re-index scheduled
+    assert manager.autostart.is_set()       # sync will resume

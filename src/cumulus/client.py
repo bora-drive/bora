@@ -78,6 +78,7 @@ from .errorhandling import (
 from .exceptions import (
     CancelledError,
     CumulusApiError,
+    CursorResetError,
     DataCorruptionError,
     NotFoundError,
     NotLinkedError,
@@ -1217,16 +1218,26 @@ class GoogleDriveClient:
         if interrupted:
             return False
         with convert_api_errors():
-            resp = self._retry_transient(
-                lambda: self._get_service()
-                .changes()
-                .list(
-                    pageToken=last_cursor,
-                    pageSize=1,
-                    fields="changes(fileId)",
+            try:
+                resp = self._retry_transient(
+                    lambda: self._get_service()
+                    .changes()
+                    .list(
+                        pageToken=last_cursor,
+                        pageSize=1,
+                        fields="changes(fileId)",
+                    )
+                    .execute()
                 )
-                .execute()
-            )
+            except HttpError as exc:
+                if exc.resp.status == 400:
+                    raise CursorResetError(
+                        "Sync cursor reset",
+                        "The saved Google Drive change token is no longer "
+                        "valid (Cumulus was offline too long). The index "
+                        "will be rebuilt.",
+                    ) from exc
+                raise
         self._count_request()
         return len(resp.get("changes", [])) > 0
 
