@@ -27,6 +27,7 @@ from cumulus.exceptions import (
     BadInputError,
     CumulusApiError,
     DataChangedError,
+    FolderConflictError,
     NotFoundError,
 )
 from cumulus.keyring import CredentialStorage
@@ -58,10 +59,12 @@ _fake_id_counter = 0
 
 def fake_service() -> MagicMock:
     """Build a MagicMock Drive service pre-wired so that
-    ``files().generateIds(...).execute()`` returns a fresh pool of IDs.
+    ``files().generateIds(...).execute()`` returns a fresh pool of IDs and
+    ``files().list(...).execute()`` returns an empty file list (no conflict).
 
     This lets tests that use ``client.reserve_file_id()`` (called by all
-    create paths after Task 6) work without any extra setup.
+    create paths after Task 6) work without any extra setup, and the Task 7
+    conflict probe sees no existing folder by default.
     """
     global _fake_id_counter
     svc = MagicMock(name="drive-service")
@@ -77,6 +80,8 @@ def fake_service() -> MagicMock:
         return m
 
     svc.files.return_value.generateIds.side_effect = _gen_ids
+    # Default: conflict probe finds no existing same-name folder.
+    svc.files.return_value.list.return_value.execute.return_value = {"files": []}
     return svc
 
 
@@ -222,7 +227,9 @@ def test_make_dir_counts_request(client, cache):
 
     client._writes.make_dir("/foo")
 
-    client._count_request.assert_called_once()
+    # Task 7: make_dir now issues two requests — one files.list probe and one
+    # files.create — so _count_request is called twice.
+    assert client._count_request.call_count == 2
 
 
 # ==== remove ==============================================================
@@ -1322,7 +1329,7 @@ def test_upload_update_sets_modified_time_from_local_mtime(client, cache):
 # and assert state via fake.files[...] and via client.get_metadata.
 # ===========================================================================
 
-from tests.fake_drive import ROOT_ID, make_http_error as _make_http_error
+from tests.fake_drive import FOLDER_MIME, ROOT_ID, make_http_error as _make_http_error
 
 
 # ---- upload via fake -------------------------------------------------------
@@ -1495,6 +1502,75 @@ def test_fake_move_autorename_still_fires_on_cross_case_collision(client_on_fake
     assert result.name == "bar (1).txt"
     assert fake.files[fid]["name"] == "bar (1).txt"
     assert fake.files[other_id]["name"] == "BAR.TXT"
+
+
+# ---- make_dir conflict probe (Task 7 / review F11) -------------------------
+
+
+def test_fake_make_dir_existing_remote_folder_raises_conflict(client_on_fake):
+    """make_dir for a folder already on Drive (stale cache) raises
+    FolderConflictError so the engine can merge instead of duplicating (F11)."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    existing_id = fake.add_folder("/Docs")
+    # Do NOT populate the path cache — simulates a second device that hasn't
+    # polled the change feed yet (stale cache).
+
+    with pytest.raises(FolderConflictError):
+        client._writes.make_dir("/Docs")
+
+    # No duplicate folder must have been created.
+    folders = [
+        r for r in fake.files.values()
+        if r["name"] == "Docs" and not r["trashed"]
+    ]
+    assert len(folders) == 1, f"duplicate folder created; found {len(folders)}"
+    assert folders[0]["id"] == existing_id
+
+
+def test_fake_make_dir_conflict_adopts_existing_into_cache(client_on_fake):
+    """When FolderConflictError is raised, the existing folder is adopted into
+    the path cache so follow-up get_metadata calls resolve it."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    existing_id = fake.add_folder("/Docs")
+
+    with pytest.raises(FolderConflictError):
+        client._writes.make_dir("/Docs")
+
+    # The cache must now map /Docs to the existing id.
+    assert client._path_cache.path_to_id("/Docs") == existing_id
+
+
+def test_fake_make_dir_autorename_true_skips_probe_and_creates(client_on_fake):
+    """autorename=True must skip the conflict probe and create the folder
+    (possibly with a suffixed name); no FolderConflictError raised."""
+    client = client_on_fake.client
+    fake = client_on_fake.fake
+    client._ensure_root_id = Mock()
+
+    existing_id = fake.add_folder("/Docs")
+    client._path_cache.set(
+        "/Docs", existing_id, parent_id=ROOT_ID, name="Docs", is_folder=True
+    )
+
+    # With autorename=True this must NOT raise; it should create "Docs (1)".
+    result = client._writes.make_dir("/Docs", autorename=True)
+
+    assert result is not None
+    # A second folder should now exist alongside the original.
+    folder_names = [
+        r["name"] for r in fake.files.values()
+        if r["mimeType"] == FOLDER_MIME and not r["trashed"] and r["id"] != ROOT_ID
+    ]
+    assert "Docs" in folder_names
+    assert any("Docs" in n and n != "Docs" for n in folder_names), (
+        f"expected an autorename sibling but got: {folder_names}"
+    )
 
 
 # ---- remove via fake ------------------------------------------------------
