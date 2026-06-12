@@ -12,7 +12,7 @@
 | 1. Scoped recursive listing | F1 | ✅ COMPLETE | `a601b73`, `5c21354` | Spec ✅; quality found 1 Important (fold-conflict pass-through) → fixed in `5c21354`; re-review ✅ |
 | 2. Feed skips cache-rejected entries | F2 | ✅ COMPLETE | `25e8c43` | Combined spec+quality ✅ "Ready: Yes". 2 Minor polish notes (see carry-overs) |
 | 3. Remote moves by remote_id | F3 | ✅ COMPLETE | `a4edfb0`, `c4de428` | Spec ✅; quality found 1 Critical (occupied-target re-key → silent overwrite + resurrection) + 1 Important (remote_id unindexed) + 2 small minors → fixed in `c4de428`; re-review ✅ "Ready: Yes" |
-| 4. Cross-page fixpoint | F6 | ⬜ pending | — | depends on Task 2 (done) |
+| 4. Cross-page fixpoint | F6 | ✅ COMPLETE | `ade521c`, `4b71319` | Spec ✅; quality found 1 Important (plan-design gap: move-out + same-path reuse dropped replacement file) + minors → fixed in `4b71319` (deferred rejected applies, outer fixpoint/move-out loop, warn-once-at-final-drop); re-review ✅ "Ready: Yes" |
 | 5. TOCTOU revision audit | F4 | ⬜ pending | — | |
 | 6. Idempotent creates (generateIds) | F7 | ⬜ pending | — | must precede Task 7 |
 | 7. make_dir conflict probe | F11 | ⬜ pending | — | |
@@ -29,9 +29,9 @@ Session task list (TaskList tool) mirrors this table: #1-#2 completed, #3 in_pro
 
 ## Resume procedure
 
-1. `git branch --show-current` must be `google-drive-port`; `git status` clean; HEAD should be `c4de428` (or later if resumed mid-task).
-2. **Next action: Task 4** (cross-page fixpoint, plan line 437), then continue Tasks 5→15 in order, one implementer at a time, two-stage review each.
-3. Test discipline: targeted modules per task (full offline suite = ~18 min, run only at Task 15). NEVER run tests/linked (needs real account). ⚠️ Never run tests/offline while a real smoke-test account is linked (keyring collision). Targeted suite count after Task 3: 48 passed (test_sync.py + test_changes.py).
+1. `git branch --show-current` must be `google-drive-port`; `git status` clean; HEAD should be `4b71319` (or later if resumed mid-task).
+2. **Next action: Task 5** (TOCTOU revision audit, plan line 563 — judgment task, most-capable implementer), then continue Tasks 6→15 in order, one implementer at a time, two-stage review each.
+3. Test discipline: targeted modules per task (full offline suite = ~18 min, run only at Task 15). NEVER run tests/linked (needs real account). ⚠️ Never run tests/offline while a real smoke-test account is linked (keyring collision). Targeted suite count after Task 4: 51 passed (test_sync.py + test_changes.py).
 
 ## Task 3 — review resolution (2026-06-11)
 
@@ -43,6 +43,7 @@ Hardenings 1-2 (ensure_parent before move; abort re-key on failed move) confirme
 - Task 1 review: non-recursive list_folder branch still yields fold-conflicted entries (pre-existing, doesn't claim write-through; left as-is deliberately).
 - Task 3 review (deferred minors): `_seed_entry` near-duplicates `_seed_index_entry` in tests/offline/test_sync.py — consolidate when next touching. `_apply_remote_move` uses `osp.exists` not `lexists` (broken-symlink edge, speculative). `get_index_entry_by_remote_id` returns `rows[0]` nondeterministically if duplicate remote_id rows exist (possible after occupied-target/failed-move fallbacks) — docstring note or ORDER BY. Pre-existing ORM row-cache staleness: cache mutated before transaction commit → phantom cached row on rollback (same pattern in `_apply_case_change`).
 - Task 3 occupied-target residuals (accepted): stale old-path copy + its index row persist until next local scan; duplicate remote_id rows possible transiently. Optional follow-up: conflicted-copy the occupant inside `_apply_remote_move`.
+- Task 4 review (accepted notes): `raw` change buffer unbounded after months offline (~hundreds of MB at 1M changes) — cheap follow-up: cap + fall back to full reindex (cursor "" path). Crash mid-apply of a huge backlog redoes the whole batch (idempotent, slow) — inherent to cursor-after-classification. `PathIDCache.set/move` log their own "Case conflict" warning on every rejected attempt, so deferred conflicted applies now produce O(fixpoint passes) duplicate cache-level warnings (changes-level warning fires exactly once) — optional: suppress repeats. Cursor `""` when both tokens absent → full reindex (pre-existing, safe). Mid-file `import logging/pytest` in new test (cosmetic). 3-level reversed folder chain test would pin the multi-pass invariant (nice-to-have).
 
 ## Context for a fresh session
 
