@@ -570,8 +570,10 @@ class SyncManager:
                     level=notify.INFO,
                 )
             self.stop()
-            self.sync.reset_sync_state()
-            self.autostart.set()
+            try:
+                self.sync.reset_sync_state()
+            finally:
+                self.autostart.set()
         except (ConnectionError, ServerError):
             self._logger.debug("Connection error", exc_info=True)
             self._logger.info(DISCONNECTED)

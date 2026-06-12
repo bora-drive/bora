@@ -10,6 +10,7 @@ from cumulus.changes import (
     to_folder_metadata,
 )
 from cumulus.core import FileMetadata, FolderMetadata
+from cumulus.exceptions import CursorResetError
 
 SAMPLE_FILE = {
     "id": "F1",
@@ -578,9 +579,6 @@ def test_child_before_parent_across_pages_is_not_dropped():
 
 
 # ==== expired change token → CursorResetError (Task 8 / review F5) =======
-
-
-from cumulus.exceptions import CursorResetError
 
 
 def test_invalid_page_token_raises_cursor_reset(make_http_error):

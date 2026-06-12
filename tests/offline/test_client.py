@@ -758,6 +758,45 @@ def test_wait_returns_false_on_shutdown_without_polling(client):
     assert client.wait_for_remote_changes("CURSOR", timeout=1) is False
 
 
+def test_wait_400_raises_cursor_reset_not_bad_input(client, make_http_error):
+    """A 400 HttpError from changes.list must raise CursorResetError, not
+    BadInputError.  The mapping depends on try placement inside
+    convert_api_errors and outside _retry_transient; this test pins that.
+
+    Note: CursorResetError and BadInputError are both direct subclasses of
+    CumulusApiError with no parent-child relationship, so
+    pytest.raises(CursorResetError) already rules out BadInputError."""
+    from cumulus.exceptions import CursorResetError
+
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False  # timed out normally
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.side_effect = (
+        make_http_error(400, "badRequest")
+    )
+    client._get_service = Mock(return_value=service)
+
+    with pytest.raises(CursorResetError):
+        client.wait_for_remote_changes("STALE_CURSOR", timeout=1)
+
+
+def test_wait_403_raises_insufficient_permissions(client, make_http_error):
+    """A non-400 HttpError must propagate through convert_api_errors normally
+    and not be swallowed by the CursorResetError branch."""
+    from cumulus.exceptions import InsufficientPermissionsError
+
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.side_effect = (
+        make_http_error(403, "forbidden")
+    )
+    client._get_service = Mock(return_value=service)
+
+    with pytest.raises(InsufficientPermissionsError):
+        client.wait_for_remote_changes("CURSOR", timeout=1)
+
+
 # ==== list_remote_changes(_iterator) ======================================
 
 def test_list_remote_changes_iterator_delegates(client, cache):
