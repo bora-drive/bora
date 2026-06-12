@@ -797,6 +797,52 @@ def test_wait_403_raises_insufficient_permissions(client, make_http_error):
         client.wait_for_remote_changes("CURSOR", timeout=1)
 
 
+def test_wait_true_on_empty_page_with_next_token(client):
+    """Drive may return an empty changes page WITH a nextPageToken (elided
+    entries); that still means 'changes pending' (review F12).
+
+    The poll gate must not return False on such a response — it would
+    stall the download cycle indefinitely because the cursor only advances
+    inside download_sync_cycle, not inside wait_for_remote_changes."""
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False  # timed out normally
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "changes": [],
+        "nextPageToken": "t2",
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.wait_for_remote_changes("t1", timeout=0) is True
+
+
+def test_wait_true_on_non_empty_changes(client):
+    """Non-empty changes page always returns True (symmetric baseline)."""
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "changes": [{"fileId": "F1"}],
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.wait_for_remote_changes("t1", timeout=0) is True
+
+
+def test_wait_false_on_fully_empty_final_page(client):
+    """A final page ({newStartPageToken, no changes, no nextPageToken})
+    must return False — no changes are pending."""
+    client._poll_event = Mock()
+    client._poll_event.wait.return_value = False
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "newStartPageToken": "NEXT",
+    }
+    client._get_service = Mock(return_value=service)
+
+    assert client.wait_for_remote_changes("t1", timeout=0) is False
+
+
 # ==== list_remote_changes(_iterator) ======================================
 
 def test_list_remote_changes_iterator_delegates(client, cache):
