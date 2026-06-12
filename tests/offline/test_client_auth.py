@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient
+from cumulus.client import GoogleDriveClient, _PasteFlowState
 from cumulus.config import remove_configuration
 from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
@@ -211,6 +211,12 @@ def test_link_with_no_arguments_returns_1(client):
 
 
 def test_link_with_access_token_happy_path(client, cred_storage, monkeypatch):
+    """link(access_token=...) returning 0 must leave a client whose
+    `linked` is True for the session (short-lived, like upstream
+    maestral), not a 'linked but unusable' state (review F13.1).
+    The in-process credential (token-only) is sufficient for linked to be
+    True; on reload from storage linked will be False (no refresh_token
+    was persisted), which is the correct cross-restart behaviour."""
     monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
@@ -219,9 +225,34 @@ def test_link_with_access_token_happy_path(client, cred_storage, monkeypatch):
 
     assert res == 0
     assert client._cached_account_info is not None
-    # Note: access_token has no refresh_token, so linked() returns False on
-    # reload. Verify the in-process state was set correctly though.
     assert client._cached_account_info.account_id == "perm-12345"
+    # F13.1: in-process session must be usable (linked is True).
+    assert client.linked is True
+
+
+def test_link_with_bad_code_returns_1_not_traceback(client, monkeypatch):
+    """An invalid/expired pasted auth code must return 1 (review F13.2),
+    not surface a raw oauthlib traceback."""
+    from oauthlib.oauth2.rfc6749.errors import InvalidGrantError
+
+    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    flow = mock.Mock()
+    flow.fetch_token.side_effect = InvalidGrantError()
+    client._pending_paste_flow = _PasteFlowState(
+        flow=flow, created_at=datetime.utcnow()
+    )
+    assert client.link(code="bad-code") == 1
+
+
+def test_get_account_info_unlinked_raises_not_linked(client):
+    """No credentials must raise NotLinkedError instead of falling through
+    to google.auth.default() / ADC (review F13.3)."""
+    from cumulus.exceptions import NotLinkedError
+
+    client._credentials = None
+    client._cached_account_info = None
+    with pytest.raises(NotLinkedError):
+        client.get_account_info()
 
 
 from datetime import datetime, timedelta
