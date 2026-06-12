@@ -16,7 +16,9 @@ Key responsibilities:
   doesn't return a server-computed fold form (Dropbox did), so we
   compute it client-side.
 * **Concurrency** — every public method acquires ``self._lock`` (an
-  ``RLock``) before touching the database or shared state.
+  ``RLock``) before touching the database or shared state (exception:
+  the ``root_id`` property, which is a GIL-atomic attribute read set
+  once at link time and needs no lock).
   ``populate_from_listing`` holds the lock across the entire
   clear + insert transaction, so concurrent reads always see either
   the old or the new cache — never a half-built one.  RLock is used
@@ -349,6 +351,7 @@ class PathIDCache:
             raise RuntimeError(
                 "root_id must be set before calling populate_from_listing"
             )
+        root_id = self._root_id  # snapshot once; unlocked phases 1-2 are self-consistent
 
         # Phase 1: index by id and by parent.
         by_id: dict[str, dict[str, Any]] = {}
@@ -388,8 +391,8 @@ class PathIDCache:
 
         # BFS plan; build PathCacheEntry instances without writing yet.
         plan: list[PathCacheEntry] = []
-        queue: list[tuple[str, str]] = [(self._root_id, "/")]
-        visited: set[str] = {self._root_id}
+        queue: list[tuple[str, str]] = [(root_id, "/")]
+        visited: set[str] = {root_id}
 
         while queue:
             folder_id, parent_path = queue.pop(0)
@@ -426,7 +429,7 @@ class PathIDCache:
             if (
                 item_id in visited
                 or item_id in skip_ids
-                or item_id == self._root_id
+                or item_id == root_id
             ):
                 continue
             parents = item.get("parents", [])
