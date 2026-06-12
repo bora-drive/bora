@@ -13,7 +13,7 @@
 | 2. Feed skips cache-rejected entries | F2 | ✅ COMPLETE | `25e8c43` | Combined spec+quality ✅ "Ready: Yes". 2 Minor polish notes (see carry-overs) |
 | 3. Remote moves by remote_id | F3 | ✅ COMPLETE | `a4edfb0`, `c4de428` | Spec ✅; quality found 1 Critical (occupied-target re-key → silent overwrite + resurrection) + 1 Important (remote_id unindexed) + 2 small minors → fixed in `c4de428`; re-review ✅ "Ready: Yes" |
 | 4. Cross-page fixpoint | F6 | ✅ COMPLETE | `ade521c`, `4b71319` | Spec ✅; quality found 1 Important (plan-design gap: move-out + same-path reuse dropped replacement file) + minors → fixed in `4b71319` (deferred rejected applies, outer fixpoint/move-out loop, warn-once-at-final-drop); re-review ✅ "Ready: Yes" |
-| 5. TOCTOU revision audit | F4 | ⬜ pending | — | |
+| 5. TOCTOU revision audit | F4 | ✅ COMPLETE | `4eecc06`, `ea11a6f` | Spec ✅; quality found 2 Important (missing coalescing guard → spurious cc spam; non-canonical cc path behind false comment) → fixed in `ea11a6f`; re-review ✅ "Ready: Yes" |
 | 6. Idempotent creates (generateIds) | F7 | ⬜ pending | — | must precede Task 7 |
 | 7. make_dir conflict probe | F11 | ⬜ pending | — | |
 | 8. CursorResetError + auto-reindex | F5 | ⬜ pending | — | |
@@ -29,9 +29,9 @@ Session task list (TaskList tool) mirrors this table: #1-#2 completed, #3 in_pro
 
 ## Resume procedure
 
-1. `git branch --show-current` must be `google-drive-port`; `git status` clean; HEAD should be `4b71319` (or later if resumed mid-task).
-2. **Next action: Task 5** (TOCTOU revision audit, plan line 563 — judgment task, most-capable implementer), then continue Tasks 6→15 in order, one implementer at a time, two-stage review each.
-3. Test discipline: targeted modules per task (full offline suite = ~18 min, run only at Task 15). NEVER run tests/linked (needs real account). ⚠️ Never run tests/offline while a real smoke-test account is linked (keyring collision). Targeted suite count after Task 4: 51 passed (test_sync.py + test_changes.py).
+1. `git branch --show-current` must be `google-drive-port`; `git status` clean; HEAD should be `ea11a6f` (or later if resumed mid-task).
+2. **Next action: Task 6** (idempotent creates via generateIds, plan line 708; must precede Task 7), then continue Tasks 7→15 in order, one implementer at a time, two-stage review each.
+3. Test discipline: targeted modules per task (full offline suite = ~18 min, run only at Task 15). NEVER run tests/linked (needs real account). ⚠️ Never run tests/offline while a real smoke-test account is linked (keyring collision). Suite counts after Task 5: test_writes.py 74; test_sync.py + test_changes.py 51.
 
 ## Task 3 — review resolution (2026-06-11)
 
@@ -43,6 +43,7 @@ Hardenings 1-2 (ensure_parent before move; abort re-key on failed move) confirme
 - Task 1 review: non-recursive list_folder branch still yields fold-conflicted entries (pre-existing, doesn't claim write-through; left as-is deliberately).
 - Task 3 review (deferred minors): `_seed_entry` near-duplicates `_seed_index_entry` in tests/offline/test_sync.py — consolidate when next touching. `_apply_remote_move` uses `osp.exists` not `lexists` (broken-symlink edge, speculative). `get_index_entry_by_remote_id` returns `rows[0]` nondeterministically if duplicate remote_id rows exist (possible after occupied-target/failed-move fallbacks) — docstring note or ORDER BY. Pre-existing ORM row-cache staleness: cache mutated before transaction commit → phantom cached row on rollback (same pattern in `_apply_case_change`).
 - Task 3 occupied-target residuals (accepted): stale old-path copy + its index row persist until next local scan; duplicate remote_id rows possible transiently. Optional follow-up: conflicted-copy the occupant inside `_apply_remote_move`.
+- Task 5 review (accepted notes): residual lossless false positive if expected_prev is purged between commit and audit (spurious cc, implausible window). revisions.list oldest-first is observed-not-documented API behavior (no defensive sort practical). Only the newest pre-head foreign revision is rescued; full span `ids[idx_expected+1:head_idx]` rescuable if ever hardened. Untested: pagination path (>1000 revisions), get_media-404 mid-rescue swallow, multi-interleave. `_download_revision_to_tempfile` leaks its temp file on mid-download failure (pre-existing, shared with restore()). Drive server-side merging of rapid same-user revisions is undetectable by any history audit (inherent; note for Stage 7b fault injection). writes.py:519 exceeds black's 88-col width (cosmetic; lint gate at Task 15).
 - Task 4 review (accepted notes): `raw` change buffer unbounded after months offline (~hundreds of MB at 1M changes) — cheap follow-up: cap + fall back to full reindex (cursor "" path). Crash mid-apply of a huge backlog redoes the whole batch (idempotent, slow) — inherent to cursor-after-classification. `PathIDCache.set/move` log their own "Case conflict" warning on every rejected attempt, so deferred conflicted applies now produce O(fixpoint passes) duplicate cache-level warnings (changes-level warning fires exactly once) — optional: suppress repeats. Cursor `""` when both tokens absent → full reindex (pre-existing, safe). Mid-file `import logging/pytest` in new test (cosmetic). 3-level reversed folder chain test would pin the multi-pass invariant (nice-to-have).
 
 ## Context for a fresh session
