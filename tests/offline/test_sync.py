@@ -1483,6 +1483,27 @@ def test_mignore_matches_non_ascii_dir_name(sync_engine: SyncEngine) -> None:
     assert sync_engine._is_mignore_path(event.remote_path, is_dir=event.is_directory)
 
 
+def test_mignore_matching_is_case_sensitive(sync_engine: SyncEngine) -> None:
+    """mignore matching must be case-sensitive (upstream-maestral parity, deliberate).
+
+    A pattern 'Ördner/' must NOT match a folder whose name differs only in case
+    ('ördner'), and a pattern 'photos/' must NOT match 'Photos'.
+    """
+    # Pattern with uppercase Ö — should not match lowercase ö variant.
+    sync_engine._mignore_rules = PathSpec.from_lines(
+        "gitwildmatch", ["Ördner/", "photos/"]
+    )
+    lower_event = _make_dir_upload_event(sync_engine, "/ördner")
+    assert not sync_engine._is_mignore_path(
+        lower_event.remote_path, is_dir=lower_event.is_directory
+    ), "case-insensitive mismatch: 'Ördner/' pattern must not match '/ördner'"
+
+    upper_event = _make_dir_upload_event(sync_engine, "/Photos")
+    assert not sync_engine._is_mignore_path(
+        upper_event.remote_path, is_dir=upper_event.is_directory
+    ), "case-insensitive mismatch: 'photos/' pattern must not match '/Photos'"
+
+
 def test_mignore_matches_punctuation_in_name(sync_engine: SyncEngine) -> None:
     """Parentheses and other common punctuation must survive the mignore match."""
     sync_engine._mignore_rules = PathSpec.from_lines(
