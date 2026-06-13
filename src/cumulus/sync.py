@@ -3486,17 +3486,22 @@ class SyncEngine:
     def _clean_remote_changes(self, changes: ListFolderResult) -> ListFolderResult:
         """
         Takes remote file events since last sync and cleans them up so that there is
-        only a single event per path.
+        a single coherent sequence of events per path.
 
-        The server will sometimes report multiple changes per path. Once such instance is
-        when sharing a folder: ``files/list_folder/continue`` will report the shared
-        folder and its children as deleted and then created because the folder *is*
-        actually deleted from the user's account and recreated as a shared folder which
-        then gets mounted to the user's account. Ideally, we want to deal with this
-        without re-downloading all its contents.
+        Google Drive's change feed is id-keyed: it reports at most one change entry per
+        fileId per batch. The only way two entries land at the same ``path_lower`` in one
+        batch is therefore a **move-out + reuse**: one item leaves path P (emitted as a
+        ``DeletedMetadata`` by the change builder) and a *different* item is created or
+        moved onto P (emitted as a ``FileMetadata`` / ``FolderMetadata``) in the same
+        batch. The change builder already orders these delete-before-create. Both the
+        delete (so the departing item's subtree and index rows are removed) and the
+        create (so the new item is applied at P) must survive. This is unlike the
+        Dropbox share/unshare scenario — that does not occur in this port's feed — where
+        the same item churned at a path and only the last event mattered.
 
         :param changes: Result from the remote API call to retrieve remote changes.
-        :returns: Cleaned up changes with a single Metadata entry per path.
+        :returns: Cleaned up changes; a path with multiple entries collapses to a
+            delete (for the departing item) followed by the surviving create.
         """
         # Note: we won't have to deal with modified or moved events,
         # The server only reports DeletedMetadata or FileMetadata / FolderMetadata
@@ -3512,18 +3517,20 @@ class SyncEngine:
                 new_entries.extend(h)
             else:
                 last_event = h[-1]
-                local_entry = self.get_index_entry(last_event.path_lower)
-                was_dir = local_entry and local_entry.is_directory
 
-                # The server guarantees that applying events in the provided order will
-                # reproduce the state in the cloud. We therefore keep only the last
-                # event, unless there is a change in item type.
-                if (
-                    was_dir
-                    and isinstance(last_event, FileMetadata)
-                    or not was_dir
-                    and isinstance(last_event, FolderMetadata)
-                ):
+                if isinstance(last_event, DeletedMetadata):
+                    # The path ends deleted (the item that vacated it was not
+                    # replaced this batch). Keep the single delete.
+                    new_entries.append(last_event)
+                elif any(isinstance(e, DeletedMetadata) for e in h):
+                    # Move-out + reuse: a different item vacated this path (the
+                    # delete) and ``last_event`` is the new item created onto it.
+                    # Emit the delete BEFORE the create so the departing item's
+                    # subtree and index rows are removed before the new item is
+                    # applied. ``apply_remote_changes`` applies all deletes ahead
+                    # of creates regardless of list order, but we keep the order
+                    # explicit for clarity. The type-change case (folder<->file
+                    # reuse) is a subcase of this and is handled identically.
                     deleted_event = DeletedMetadata(
                         name=last_event.name,
                         path_lower=last_event.path_lower,
@@ -3532,6 +3539,8 @@ class SyncEngine:
                     new_entries.append(deleted_event)
                     new_entries.append(last_event)
                 else:
+                    # No delete in the history — the id-keyed feed should never
+                    # produce this, but fall back to keeping only the last event.
                     new_entries.append(last_event)
 
         changes.entries = new_entries

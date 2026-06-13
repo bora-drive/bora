@@ -11,7 +11,13 @@ from pathspec import PathSpec
 
 from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
-from cumulus.core import FileMetadata, FullAccount
+from cumulus.core import (
+    DeletedMetadata,
+    FileMetadata,
+    FolderMetadata,
+    FullAccount,
+    ListFolderResult,
+)
 from cumulus.database.core import Database
 from cumulus.exceptions import DataChangedError
 from cumulus.keyring import CredentialStorage
@@ -1611,3 +1617,186 @@ def test_apply_remote_changes_prunes_deleted_excluded_item(
     sync_engine.apply_remote_changes([event])
 
     assert sync_engine.excluded_items == set()
+
+
+# ==== Cluster E final review: _clean_remote_changes must preserve move-out deletes ====
+#
+# The change feed is id-keyed: at most one entry per fileId per batch. The only way
+# two entries reach the same path_lower in one batch is a move-out + reuse — a
+# DeletedMetadata for the item that vacated path P, then a create for a DIFFERENT
+# item placed onto P. The builder already orders these delete-before-create. The
+# old _clean_remote_changes dropped the delete unless the item type changed, so a
+# folder->folder reuse silently kept the departing folder's children and index rows
+# and never indexed the new folder. The delete must now always survive.
+
+
+def _modified_now() -> datetime:
+    return datetime.today()
+
+
+def _file_md(path: str, file_id: str, data: bytes) -> FileMetadata:
+    return FileMetadata(
+        name=osp.basename(path),
+        path_lower=path.lower(),
+        path_display=path,
+        id=file_id,
+        modified=_modified_now(),
+        rev="rev-1",
+        size=len(data),
+        symlink_target=None,
+        shared=False,
+        modified_by=None,
+        is_downloadable=True,
+        content_hash=_md5(data),
+    )
+
+
+def _folder_md(path: str, folder_id: str) -> FolderMetadata:
+    return FolderMetadata(
+        name=osp.basename(path),
+        path_lower=path.lower(),
+        path_display=path,
+        id=folder_id,
+        shared=False,
+    )
+
+
+def _deleted_md(path: str) -> DeletedMetadata:
+    return DeletedMetadata(
+        name=osp.basename(path),
+        path_lower=path.lower(),
+        path_display=path,
+    )
+
+
+def test_clean_remote_changes_folder_reuse_preserves_delete(sync_engine: SyncEngine):
+    """Folder F at /p (with child /p/kid.txt) is replaced in one batch by a
+    DIFFERENT folder G at /p. The feed is [DeletedMetadata(/p), FolderMetadata(/p,
+    id=G)]. _clean_remote_changes must keep the delete (so F's subtree is removed)
+    BEFORE the surviving FolderMetadata — the old code dropped it (no type change)."""
+    # Index + disk for the departing folder F and its child.
+    _seed_entry(
+        sync_engine, "/p", "id-F", ItemType.Folder, rev="folder", content_hash="folder"
+    )
+    _seed_entry(
+        sync_engine,
+        "/p/kid.txt",
+        "id-kid",
+        ItemType.File,
+        rev="rev-kid",
+        content_hash=_md5(b"kid"),
+    )
+    _write_local_file(sync_engine, "/p/kid.txt", b"kid")
+
+    res = ListFolderResult(
+        entries=[_deleted_md("/p"), _folder_md("/p", "id-G")],
+        has_more=False,
+        cursor="c",
+    )
+
+    cleaned = sync_engine._clean_remote_changes(res)
+
+    # The delete for the departing folder must survive, ahead of the create.
+    types = [type(e) for e in cleaned.entries]
+    assert DeletedMetadata in types, (
+        "move-out delete for the reused folder path was dropped"
+    )
+    del_idx = next(
+        i for i, e in enumerate(cleaned.entries) if isinstance(e, DeletedMetadata)
+    )
+    fol_idx = next(
+        i for i, e in enumerate(cleaned.entries) if isinstance(e, FolderMetadata)
+    )
+    assert del_idx < fol_idx, "delete must be emitted before the create"
+    # The surviving create is the NEW folder G.
+    assert cleaned.entries[fol_idx].id == "id-G"
+
+
+def test_clean_remote_changes_file_reuse_keeps_delete_then_file(sync_engine: SyncEngine):
+    """File reuse regression guard: [DeletedMetadata(/p), FileMetadata(/p, id=G)]
+    must keep the delete then the new file (file->file converged before, but the
+    delete is now preserved consistently — no regression)."""
+    _seed_entry(
+        sync_engine, "/p", "id-F", ItemType.File, rev="rev-f", content_hash=_md5(b"old")
+    )
+
+    res = ListFolderResult(
+        entries=[_deleted_md("/p"), _file_md("/p", "id-G", b"new")],
+        has_more=False,
+        cursor="c",
+    )
+
+    cleaned = sync_engine._clean_remote_changes(res)
+
+    types = [type(e) for e in cleaned.entries]
+    assert DeletedMetadata in types
+    del_idx = next(
+        i for i, e in enumerate(cleaned.entries) if isinstance(e, DeletedMetadata)
+    )
+    file_idx = next(
+        i for i, e in enumerate(cleaned.entries) if isinstance(e, FileMetadata)
+    )
+    assert del_idx < file_idx
+    assert cleaned.entries[file_idx].id == "id-G"
+
+
+def test_clean_remote_changes_single_event_unchanged(sync_engine: SyncEngine):
+    """A path with a single event passes through untouched."""
+    res = ListFolderResult(
+        entries=[_file_md("/solo.txt", "id-1", b"data")],
+        has_more=False,
+        cursor="c",
+    )
+
+    cleaned = sync_engine._clean_remote_changes(res)
+
+    assert len(cleaned.entries) == 1
+    assert isinstance(cleaned.entries[0], FileMetadata)
+    assert cleaned.entries[0].id == "id-1"
+
+
+def test_clean_remote_changes_type_change_still_splits(sync_engine: SyncEngine):
+    """The existing type-change case (folder vacated, file created at /p) still
+    yields delete-then-create — now a subcase of the delete-preserving branch."""
+    _seed_entry(
+        sync_engine, "/p", "id-F", ItemType.Folder, rev="folder", content_hash="folder"
+    )
+
+    res = ListFolderResult(
+        entries=[_deleted_md("/p"), _file_md("/p", "id-G", b"data")],
+        has_more=False,
+        cursor="c",
+    )
+
+    cleaned = sync_engine._clean_remote_changes(res)
+
+    types = [type(e) for e in cleaned.entries]
+    assert DeletedMetadata in types
+    del_idx = next(
+        i for i, e in enumerate(cleaned.entries) if isinstance(e, DeletedMetadata)
+    )
+    file_idx = next(
+        i for i, e in enumerate(cleaned.entries) if isinstance(e, FileMetadata)
+    )
+    assert del_idx < file_idx
+
+
+def test_clean_remote_changes_path_ends_deleted_keeps_single_delete(
+    sync_engine: SyncEngine,
+):
+    """If the path ends deleted (last_event is a DeletedMetadata), keep a single
+    delete — no spurious create."""
+    _seed_entry(
+        sync_engine, "/p", "id-F", ItemType.File, rev="rev-f", content_hash=_md5(b"old")
+    )
+
+    res = ListFolderResult(
+        entries=[_file_md("/p", "id-F", b"old"), _deleted_md("/p")],
+        has_more=False,
+        cursor="c",
+    )
+
+    cleaned = sync_engine._clean_remote_changes(res)
+
+    assert len(cleaned.entries) == 1
+    assert isinstance(cleaned.entries[0], DeletedMetadata)
