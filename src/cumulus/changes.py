@@ -268,9 +268,22 @@ def iter_remote_changes(
     before classification begins. The fixpoint then runs over the whole
     batch so a parent resolved on any page unblocks its children.
 
-    The cursor is only persisted after the entire batch is classified.
-    A crash mid-batch causes the batch to be re-fetched on next startup;
-    downloads are idempotent so this is safe.
+    The cursor is only persisted after the entire batch is classified
+    and applied, so a crash mid-batch re-fetches the batch on next
+    startup. Re-applied *creates* and *moves* are idempotent (a create
+    re-resolves to the same path; a move is recovered by remote_id via
+    :meth:`SyncEngine._apply_remote_move`). Re-applied *deletes* are
+    NOT: this function mutates ``path_cache`` durably as it classifies
+    (a separate database from the engine's cursor), so on replay
+    :func:`_emit_delete` finds the fileId already gone from the cache
+    and silently no-ops — the ``DeletedMetadata`` is never re-emitted
+    and the cursor can advance past an unapplied deletion, stranding a
+    local file plus its index row until a manual rebuild. This is a
+    known crash-window limitation (cluster-E final-review finding 2,
+    recorded in the remediation deviations file) to close before the
+    Stage 7b fault-injection work, e.g. by resolving replayed deletes
+    against the index by remote_id or deferring cache mutations into
+    the apply phase.
 
     :param service_factory: zero-arg callable returning a Drive service.
     :param retry: the client's ``_retry_transient`` helper.

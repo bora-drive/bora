@@ -117,9 +117,11 @@ residuals.
   `_apply_case_change`).
 - **Task 4:** the drained `raw` change buffer is unbounded — months-offline
   batches can reach hundreds of MB (cheap follow-up: cap + fall back to the
-  full-reindex path). Crash mid-apply of a huge backlog redoes the whole
-  batch (idempotent, slow) — inherent to cursor-after-classification.
-  `PathIDCache.set/move` log their own "Case conflict" warning on every
+  full-reindex path). Crash mid-apply re-fetches the whole batch on next
+  startup; re-applied creates/moves are idempotent, but **re-applied deletes
+  are NOT** — see final-review finding 2 below (this corrects an earlier
+  "redoes the whole batch (idempotent, slow)" claim that was wrong for
+  deletes). `PathIDCache.set/move` log their own "Case conflict" warning on every
   rejected attempt, so deferred conflicted applies produce O(fixpoint passes)
   duplicate cache-level warnings (the changes-level warning fires exactly
   once). Cursor `""` when both tokens are absent → full reindex
@@ -191,6 +193,75 @@ residuals.
   changes — cursor already consumed). Non-recursive `list_folder` branch
   still yields fold-conflicted entries (pre-existing; doesn't claim
   write-through; deliberate).
+
+## Whole-branch final review — cross-task composition findings
+
+A read-only interaction review of the whole cluster (commits
+`a601b73~1..a5e2037`) probed cross-task seams the per-task reviews could not
+see (feed pipeline T2+T4+T8+T12, move machinery T3+T9, id-pool/probe T6+T7,
+path-form discipline vs T10, error-boundary ordering). The composition was
+sound along every path the plan anticipated; clean probes are listed at the
+end. Four findings:
+
+- **Finding 1 (Important) — FIXED in `46de6bc`.** `_clean_remote_changes`
+  dropped a move-out DELETE when a path was reused by a different item in the
+  same batch (folder→folder silent divergence: the departing folder's local
+  children and index rows persisted forever, the new folder was never indexed,
+  later edits to the stale children died silently). The Dropbox-era coalescer
+  kept only the last event for a multi-entry path unless the item type
+  changed; in the port's id-keyed feed a multi-entry path is always a
+  move-out + reuse by a different id, so the delete is now preserved
+  (delete-then-create) whenever the history contains one. TDD-pinned with 5
+  tests in test_sync.py.
+
+- **Finding 2 (Important) — DEFERRED to Stage 7b (documented).** Crash-window
+  delete loss: `iter_remote_changes` mutates `path_cache` durably as it
+  classifies (a separate database from the engine's cursor, which advances
+  only after the batch is applied). On a hard crash mid-batch the batch is
+  re-fetched, but `_emit_delete` then finds the fileId already gone from the
+  cache and silently no-ops, so the `DeletedMetadata` is never re-emitted and
+  the cursor can advance past an unapplied deletion — a stranded local file +
+  live index row until a manual rebuild. Creates and moves replay correctly
+  (moves via T3's by-remote-id recovery); deletes are the one un-idempotent
+  leg. The window predates this cluster (per-page, ≤100 changes) but T4
+  widened it to the whole offline backlog. **Not fixed here:** the correct fix
+  is architectural (resolve replayed deletes against the index by remote_id —
+  T3's new `remote_id` index makes this cheap — or make the cache mutations
+  transactional with cursor advancement) and warrants its own TDD + review
+  cycle rather than a gate patch. The misleading "downloads are idempotent so
+  this is safe" docstring in `iter_remote_changes` has been corrected to
+  describe the limitation accurately.
+
+- **Finding 3 (Minor) — documented residual.** `_update_index_recursive`
+  passes `md.path_lower` (folded) into the prefix-echoing `_scoped_recursive`,
+  which write-through upserts fold-cased `remote_path` values into the
+  PathIDCache for a whole subtree after a local folder move — same
+  fabricated-path-display class as the documented `get_metadata` residual
+  (Task 10), via a different entry point. Confined to cosmetic mis-cased cache
+  paths that self-heal per item (the sqlite index, which the move machinery
+  actually reads, stays correct because `update_index_from_remote_metadata`
+  routes through `correct_case`). One-line follow-up: pass `md.path_display`.
+
+- **Finding 4 (Minor) — documented residual.** T3's local disk move can
+  strand a concurrently pending local edit: if a watchdog `Modified(A)` is
+  queued and the download cycle applies a remote move A→B, `_apply_remote_move`
+  moves the edited file on disk (equal revs → Skipped, no download) and the
+  upload cycle's `Modified(A)` then dies as Skipped (file gone at A). The edit
+  sits at B with a stale index hash/rev, unsynced until daemon restart
+  (`upload_local_changes_while_inactive`) or the next remote rev bump (which
+  then correctly conflicts). One-poll-cycle window; no on-disk data loss.
+
+**Clean probes (verified sound):** T8's 400→CursorReset wraps every page
+fetch including continuations and fires before any cache mutation/yield (old
+cursor retained); pooled create-ids are site-fresh so a 409 always means our
+own committed retry, and same-name siblings are correctly understood as
+feed-side fold-conflict territory; the rev-audit rescue upload is
+Add-without-update_rev (no audit recursion), gets its own pooled id, and a
+double rescue autorenames; manager error-branch order is Cancelled →
+CursorReset → (Connection, Server) → generic with `notify.INFO=20` defined and
+TokenRevoked landing in the stop-without-autostart branch as intended; the
+T12 nextPageToken-only gate leads to a cycle that persists `newStartPageToken`
+even on zero entries (no busy loop).
 
 ## Lint/type gate
 
