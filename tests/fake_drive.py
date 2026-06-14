@@ -59,6 +59,10 @@ class FakeDrive:
         self._seq = 100  # opaque change cursor; ints rendered as str
         self._change_log: list[tuple[int, str]] = []  # (seq, fileId)
         self._fail_rules: list[dict] = []
+        # Per-file-id download corruption directives (Task 6).
+        # Maps file_id -> mode, where mode in {"truncate", "flip", "wrong_md5"}.
+        # Consumed by get_media when building the _MediaRequest.
+        self._corruption: dict[str, str] = {}
         # One-shot hook fired at the start of the next files.update finalize,
         # before the update is applied. Used to deterministically interleave a
         # "collaborator" write inside the check-then-write race window
@@ -156,6 +160,33 @@ class FakeDrive:
 
     def _maybe_fail_after(self, key: str, kwargs: dict | None = None) -> None:
         self._consume_fail(key, kwargs or {}, after=True)
+
+    def corrupt_download(self, file_id: str, *, mode: str) -> None:
+        """Arm a single-use download corruption for *file_id*.
+
+        ``mode`` must be one of:
+
+        ``"truncate"``
+            ``get_media`` serves one fewer byte than the original content.
+            The file record's ``md5Checksum`` remains the original (correct)
+            checksum, so the integrity check detects the mismatch.
+
+        ``"flip"``
+            ``get_media`` serves the original length but with the first byte
+            flipped (XOR 0xFF).  The advertised ``md5Checksum`` is unchanged,
+            so the integrity check detects the mismatch.
+
+        ``"wrong_md5"``
+            The bytes served are correct, but the file record's
+            ``md5Checksum`` is replaced with a known-wrong value.  Models a
+            server returning an inconsistent checksum while the bytes are fine.
+        """
+        if mode not in ("truncate", "flip", "wrong_md5"):
+            raise ValueError(f"Unknown corruption mode: {mode!r}")
+        self._corruption[file_id] = mode
+        if mode == "wrong_md5":
+            # Corrupt the advertised checksum; leave served bytes intact.
+            self.files[file_id]["md5Checksum"] = "deadbeef" * 4
 
     def service(self) -> "_Service":
         return _Service(self)
@@ -551,8 +582,20 @@ class _FilesResource:
 
     def get_media(self, fileId, **_):
         rec = self._d.files[fileId]
+        content = rec["content"]
+        mode = self._d._corruption.pop(fileId, None)
+        if mode == "truncate":
+            # Serve one fewer byte; the record's md5Checksum is unchanged (correct
+            # for the original bytes), so the integrity check detects the mismatch.
+            content = content[:-1] if content else content
+        elif mode == "flip":
+            # Flip the first byte; same length, different bytes.
+            if content:
+                content = bytes([content[0] ^ 0xFF]) + content[1:]
+        # "wrong_md5" leaves bytes intact; corruption is in the record md5Checksum
+        # (already applied by corrupt_download).
         return _MediaRequest(
-            rec["content"],
+            content,
             fail_check=self._d._maybe_fail,
             fail_key="files.get_media",
             fail_kwargs={"fileId": fileId},
