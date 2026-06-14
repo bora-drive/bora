@@ -181,7 +181,12 @@ def _start(fake: FakeDrive) -> str:
     return fake.service().changes().getStartPageToken().execute()["startPageToken"]
 
 
-def _drain(fake: FakeDrive, cache: PathIDCache, start: str) -> list:
+def _drain(
+    fake: FakeDrive,
+    cache: PathIDCache,
+    start: str,
+    resolve_deleted_path=None,
+) -> list:
     """Run iter_remote_changes to exhaustion; return all applied entries."""
     def factory():
         return fake.service()
@@ -189,7 +194,11 @@ def _drain(fake: FakeDrive, cache: PathIDCache, start: str) -> list:
     def retry(fn):
         return fn()
 
-    pages = list(iter_remote_changes(factory, retry, cache, start))
+    pages = list(
+        iter_remote_changes(
+            factory, retry, cache, start, resolve_deleted_path=resolve_deleted_path
+        )
+    )
     return [e for page in pages for e in page.entries], pages
 
 
@@ -351,6 +360,53 @@ def test_iter_changes_drops_unknown_delete():
     # Delete it — the delete change IS in the feed, but cache doesn't know it.
     fake.service().files().delete(fileId=fid).execute()
     entries, pages = _drain(fake, cache, start)
+    assert entries == []
+
+
+def test_iter_changes_replayed_delete_resolves_via_index_when_cache_evicted():
+    """Crash-window replay (cluster-E finding 2): a delete whose fileId was
+    already evicted from the path cache by the crashed run must still re-emit
+    DeletedMetadata, resolved against the surviving index by remote_id, so the
+    engine can remove the stranded local file + index row. Without the index
+    fallback the replayed delete is silently lost and the cursor advances past
+    it (the file strands until a manual rebuild)."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    fid = fake.add_file("/gone.txt", content=b"x")
+    start = _start(fake)
+    # The crashed run already removed /gone.txt from the path cache (durable),
+    # so the cache does NOT know it now. The engine's index row, however,
+    # survives because the apply never completed and the cursor never advanced.
+    fake.service().files().delete(fileId=fid).execute()
+
+    # Stand-in for SyncEngine.get_index_entry_by_remote_id -> cased path.
+    surviving_index = {fid: "/gone.txt"}
+
+    def resolve_deleted_path(file_id):
+        return surviving_index.get(file_id)
+
+    entries, pages = _drain(
+        fake, cache, start, resolve_deleted_path=resolve_deleted_path
+    )
+
+    deletes = [e for e in entries if isinstance(e, DeletedMetadata)]
+    assert len(deletes) == 1, "replayed delete must be re-emitted from the index"
+    assert deletes[0].path_display == "/gone.txt"
+
+
+def test_iter_changes_replayed_delete_unknown_to_index_is_still_dropped():
+    """The index fallback must not invent deletes: if neither the cache nor the
+    index knows the fileId, the delete stays a silent no-op (nothing to
+    remove)."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    fid = fake.add_file("/ghost.txt", content=b"x")
+    start = _start(fake)
+    fake.service().files().delete(fileId=fid).execute()
+
+    entries, pages = _drain(
+        fake, cache, start, resolve_deleted_path=lambda file_id: None
+    )
     assert entries == []
 
 

@@ -118,10 +118,10 @@ residuals.
 - **Task 4:** the drained `raw` change buffer is unbounded — months-offline
   batches can reach hundreds of MB (cheap follow-up: cap + fall back to the
   full-reindex path). Crash mid-apply re-fetches the whole batch on next
-  startup; re-applied creates/moves are idempotent, but **re-applied deletes
-  are NOT** — see final-review finding 2 below (this corrects an earlier
-  "redoes the whole batch (idempotent, slow)" claim that was wrong for
-  deletes). `PathIDCache.set/move` log their own "Case conflict" warning on every
+  startup; re-applied creates/moves are idempotent, and **re-applied deletes
+  are now idempotent too** via the index-by-remote_id resolver — see
+  final-review finding 2 below (this corrected an earlier "redoes the whole
+  batch (idempotent, slow)" claim that was wrong for deletes, since fixed). `PathIDCache.set/move` log their own "Case conflict" warning on every
   rejected attempt, so deferred conflicted applies produce O(fixpoint passes)
   duplicate cache-level warnings (the changes-level warning fires exactly
   once). Cursor `""` when both tokens are absent → full reindex
@@ -215,23 +215,34 @@ by the live linked-suite spot-checks (Task 15 step 3):
   (delete-then-create) whenever the history contains one. TDD-pinned with 5
   tests in test_sync.py.
 
-- **Finding 2 (Important) — DEFERRED to Stage 7b (documented).** Crash-window
+- **Finding 2 (Important) — FIXED (own TDD + review cycle).** Crash-window
   delete loss: `iter_remote_changes` mutates `path_cache` durably as it
   classifies (a separate database from the engine's cursor, which advances
   only after the batch is applied). On a hard crash mid-batch the batch is
-  re-fetched, but `_emit_delete` then finds the fileId already gone from the
-  cache and silently no-ops, so the `DeletedMetadata` is never re-emitted and
-  the cursor can advance past an unapplied deletion — a stranded local file +
+  re-fetched, but `_emit_delete` then found the fileId already gone from the
+  cache and silently no-op'd, so the `DeletedMetadata` was never re-emitted and
+  the cursor could advance past an unapplied deletion — a stranded local file +
   live index row until a manual rebuild. Creates and moves replay correctly
-  (moves via T3's by-remote-id recovery); deletes are the one un-idempotent
+  (moves via T3's by-remote-id recovery); deletes were the one un-idempotent
   leg. The window predates this cluster (per-page, ≤100 changes) but T4
-  widened it to the whole offline backlog. **Not fixed here:** the correct fix
-  is architectural (resolve replayed deletes against the index by remote_id —
-  T3's new `remote_id` index makes this cheap — or make the cache mutations
-  transactional with cursor advancement) and warrants its own TDD + review
-  cycle rather than a gate patch. The misleading "downloads are idempotent so
-  this is safe" docstring in `iter_remote_changes` has been corrected to
-  describe the limitation accurately.
+  widened it to the whole offline backlog. **Fix (the architectural option
+  flagged earlier):** resolve replayed deletes against the index by remote_id —
+  T3's new `remote_id` index makes this cheap. `_emit_delete` /
+  `iter_remote_changes` take an optional `resolve_deleted_path` fileId→cased
+  path callback; the client threads it through `list_remote_changes_iterator`
+  and the engine passes `SyncEngine._index_path_for_remote_id`
+  (`get_index_entry_by_remote_id().remote_path_cased`, URL-encoded to match the
+  cache's form). On a cache miss the fallback re-emits the `DeletedMetadata`
+  from the surviving index row; when neither cache nor index knows the id the
+  delete stays a silent no-op (no invented deletes). TDD-pinned: two
+  `iter_remote_changes` unit tests (`test_changes.py` — cache-evicted resolves
+  via index; unknown-to-index still dropped) plus an end-to-end engine
+  crash-replay test (`test_sync.py::
+  test_crash_replayed_delete_with_evicted_cache_removes_stranded_item`) that
+  drives the real client iterator → resolver → apply and asserts the stranded
+  local file and index row are removed; verified RED (file stranded) with the
+  resolver disabled. The `iter_remote_changes` docstring now documents the
+  resolver as the crash-window closure rather than an open limitation.
 
 - **Finding 3 (Minor) — documented residual.** `_update_index_recursive`
   passes `md.path_lower` (folded) into the prefix-echoing `_scoped_recursive`,
@@ -272,14 +283,28 @@ by the live linked-suite spot-checks (Task 15 step 3):
   interval makes the coincidence rarer but not impossible, and varied-timing
   fault injection in Stage 7b will hit it. The offline T3 tests apply the
   rename as a lone event, so they never exercised this parent-rename +
-  stale-child-echo interaction. **Not fixed here:** the fix needs an offline
-  reproduction (a batch with a folder-move event plus a same-id-subtree child
-  event at the pre-move path) and a guard so `_apply_remote_move` does not undo
-  a subtree re-key applied earlier in the same batch (e.g. ignore an event
-  whose path is stale relative to the index, or apply parent moves after child
-  events / dedupe by remote_id within the batch) — its own TDD + review cycle,
-  not a gate patch. T8 (stale-cursor auto-reindex) and T10 (mignore
-  exclusion/inclusion) live spot-checks both PASSED.
+  stale-child-echo interaction. **FIXED (own TDD + review cycle, `f83267c` +
+  review follow-up `f51168b`).** The mechanism was narrowed during the fix: the
+  index corruption is not `_apply_remote_move` re-keying the child BACK (the
+  tmp→stale-path `move()` no-ops because the stale parent is gone from disk) —
+  it is the download/index-update that runs *after* `_apply_remote_move`
+  correctly bails, writing a phantom row at the stale path. The guard makes
+  `_apply_remote_move` return `bool`: it returns `True` (a stale-echo skip
+  signal) when the event is a stale echo — its target is absent on disk, its
+  parent is non-root AND not in the index (so a genuine reparent into an
+  indexed-but-missing parent is *not* misclassified) — and the file/folder
+  handlers then return `SyncStatus.Skipped` without downloading or re-indexing,
+  leaving the already-correct re-keyed index untouched. Verified against the
+  receiving-code-review finding that this might misclassify a genuine reparent:
+  empirically both old and new code stranded that case identically (`move()`
+  swallows `FileNotFoundError` even with `raise_error=True`, so the claimed
+  old-code self-heal never existed), so the guard is provably no worse and the
+  added parent-not-in-index condition makes it provably not over-fire.
+  TDD-pinned: an offline reproduction (`test_sync.py::
+  test_remote_folder_rename_with_same_batch_stale_child_echo`) plus a boundary
+  regression (`test_apply_remote_move_does_not_skip_when_dest_parent_is_indexed`).
+  T8 (stale-cursor auto-reindex) and T10 (mignore exclusion/inclusion) live
+  spot-checks both PASSED.
 
 **Clean probes (verified sound):** T8's 400→CursorReset wraps every page
 fetch including continuations and fires before any cache mutation/yield (old
