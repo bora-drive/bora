@@ -1358,6 +1358,58 @@ def test_remote_folder_rename_with_same_batch_stale_child_echo(sync_engine: Sync
     assert sync_engine.sync_errors == []
 
 
+def test_apply_remote_move_does_not_skip_when_dest_parent_is_indexed(
+    sync_engine: SyncEngine,
+):
+    """The finding-5 stale-skip must NOT over-fire: a move whose destination
+    parent is a live remote location (present in the index) is a genuine move,
+    even if that parent dir is merely missing on disk. Only a destination whose
+    parent has left the namespace counts as a stale echo. _apply_remote_move
+    must return False (fall through) here, not True (skip)."""
+    data = b"reparented content"
+    fake = FakeDrive()
+    dir_id = fake.add_folder("/dir")
+    file_id = fake.add_file("/dir/b.txt", data)
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Local /a.txt on disk; parent /dir is INDEXED but never created on disk,
+    # so the on-disk move to /dir/b.txt silently no-ops (missing dest parent).
+    _write_local_file(sync_engine, "/a.txt", data)
+    _seed_entry(
+        sync_engine, "/dir", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
+    )
+    _seed_entry(
+        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+    )
+
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/dir/b.txt",
+        remote_path_lower="/dir/b.txt",
+        remote_id=file_id,
+        local_path=sync_engine.to_local_path_from_cased("/dir/b.txt"),
+        rev="rev-1",
+        content_hash=_md5(data),
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=len(data),
+        completed=0,
+    )
+
+    # Indexed dest parent => genuine move, not a stale echo: do not skip.
+    assert sync_engine._apply_remote_move(event) is False
+
+
 # ==== Cluster E (F9): dead Dropbox-era except clauses in local-event handlers ==========
 #
 # client.remove raises DataChangedError on a rev mismatch (writes.py).
@@ -1898,3 +1950,4 @@ def test_clean_remote_changes_path_ends_deleted_keeps_single_delete(
 
     assert len(cleaned.entries) == 1
     assert isinstance(cleaned.entries[0], DeletedMetadata)
+
