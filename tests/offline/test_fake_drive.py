@@ -536,3 +536,96 @@ def test_fail_after_changes_list_redelivers_on_next_poll():
                               fields="changes(fileId), newStartPageToken",
                               includeRemoved=True).execute()
     assert len(resp["changes"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — corrupt_download hook
+# ---------------------------------------------------------------------------
+
+
+def _download_all(request) -> bytes:
+    """Drive a MediaIoBaseDownload to completion and return all bytes."""
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request, chunksize=1024 * 1024)
+    done = False
+    while not done:
+        _status, done = downloader.next_chunk()
+    return buf.getvalue()
+
+
+def test_corrupt_download_truncate_serves_fewer_bytes():
+    """truncate mode: served bytes are shorter than original; advertised md5 unchanged."""
+    fake = FakeDrive()
+    content = b"A" * 4096
+    fid = fake.add_file("/f.bin", content=content)
+    original_md5 = fake.files[fid]["md5Checksum"]
+
+    fake.corrupt_download(fid, mode="truncate")
+
+    svc = fake.service()
+    served = _download_all(svc.files().get_media(fileId=fid))
+
+    # Served bytes are shorter.
+    assert len(served) < len(content)
+    # Advertised md5 is still the original (correct) checksum.
+    assert fake.files[fid]["md5Checksum"] == original_md5
+    # The served bytes do NOT match the advertised md5.
+    assert hashlib.md5(served).hexdigest() != original_md5
+
+
+def test_corrupt_download_flip_serves_same_length_wrong_bytes():
+    """flip mode: served bytes have same length but first byte is flipped; md5 unchanged."""
+    fake = FakeDrive()
+    content = b"B" * 4096
+    fid = fake.add_file("/f.bin", content=content)
+    original_md5 = fake.files[fid]["md5Checksum"]
+
+    fake.corrupt_download(fid, mode="flip")
+
+    svc = fake.service()
+    served = _download_all(svc.files().get_media(fileId=fid))
+
+    # Same length, different first byte.
+    assert len(served) == len(content)
+    assert served[0] == (content[0] ^ 0xFF)
+    assert served[1:] == content[1:]
+    # Advertised md5 unchanged.
+    assert fake.files[fid]["md5Checksum"] == original_md5
+    # Served bytes hash does NOT match advertised md5.
+    assert hashlib.md5(served).hexdigest() != original_md5
+
+
+def test_corrupt_download_wrong_md5_serves_correct_bytes_wrong_checksum():
+    """wrong_md5 mode: bytes are intact but file record advertises a wrong md5."""
+    fake = FakeDrive()
+    content = b"C" * 4096
+    fid = fake.add_file("/f.bin", content=content)
+
+    fake.corrupt_download(fid, mode="wrong_md5")
+
+    svc = fake.service()
+    served = _download_all(svc.files().get_media(fileId=fid))
+
+    # Bytes are identical to the original.
+    assert served == content
+    # But the advertised md5 is now wrong.
+    assert fake.files[fid]["md5Checksum"] != hashlib.md5(content).hexdigest()
+
+
+def test_corrupt_download_is_single_use():
+    """Corruption fires exactly once; subsequent get_media returns clean content."""
+    fake = FakeDrive()
+    content = b"D" * 512
+    fid = fake.add_file("/f.bin", content=content)
+    original_md5 = fake.files[fid]["md5Checksum"]
+
+    fake.corrupt_download(fid, mode="flip")
+
+    svc = fake.service()
+    # First download: corrupted.
+    first = _download_all(svc.files().get_media(fileId=fid))
+    assert hashlib.md5(first).hexdigest() != original_md5
+
+    # Second download: clean (directive was consumed).
+    second = _download_all(svc.files().get_media(fileId=fid))
+    assert second == content
