@@ -243,6 +243,21 @@ by the live linked-suite spot-checks (Task 15 step 3):
   local file and index row are removed; verified RED (file stranded) with the
   resolver disabled. The `iter_remote_changes` docstring now documents the
   resolver as the crash-window closure rather than an open limitation.
+  *Honest residual (by design, not a defect):* the replayed delete applies
+  only when the engine classifies it `RemoteNewer` — the local file's ctime is
+  ≤ the index `last_sync`. A normally-synced, untouched file satisfies this
+  (`last_sync == ctime` already yields `RemoteNewer`), but if the local ctime
+  was bumped after the last sync (a real local edit, or a metadata/permission
+  change), the replayed delete is suppressed as `LocalNewerOrIdentical` — the
+  correct conflict outcome (don't destroy unsynced local data), not a lost
+  deletion. An independent adversarial review of the fix returned no
+  Critical/Important defects: it confirmed the encoding-consistency,
+  `_emit_delete` reordering, all-three-fixpoint-site, thread-safety
+  (separate-connection / reentrant-lock) and no-invented-deletes properties in
+  code, and re-verified the end-to-end test goes RED with the resolver
+  disabled. A pre-existing `id_to_path(None)` latent crash on a malformed
+  (id-less) change — surfaced by the review, not introduced here — was tidied
+  into an explicit up-front guard while in the function.
 
 - **Finding 3 (Minor) — documented residual.** `_update_index_recursive`
   passes `md.path_lower` (folded) into the prefix-echoing `_scoped_recursive`,
