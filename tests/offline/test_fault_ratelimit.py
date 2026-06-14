@@ -28,6 +28,7 @@ import pytest
 
 from cumulus.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
 from cumulus.config import remove_configuration
+from cumulus.errorhandling import RETRYABLE_403_REASONS
 from cumulus.database.core import Database
 from cumulus.exceptions import ConnectionError as CumulusConnectionError
 from cumulus.exceptions import InsufficientSpaceError
@@ -175,6 +176,7 @@ def test_403_user_rate_limit_exceeded_retries_and_converges(cof):
 
     Arm 3 × 403/userRateLimitExceeded on files.update; the move converges.
     """
+    assert "userRateLimitExceeded" in RETRYABLE_403_REASONS
     client, fake = cof
 
     fid = fake.add_file("/rate-limited.txt", b"data")
@@ -237,6 +239,7 @@ def test_daily_limit_exceeded_surfaces_immediately_not_retried(cof):
     - _poll_event.wait is NOT called (no retry backoff sleep), confirming
       there was exactly zero retry attempts.
     """
+    assert "dailyLimitExceeded" not in RETRYABLE_403_REASONS
     client, fake = cof
 
     fid = fake.add_file("/daily.txt", b"data")
@@ -267,6 +270,7 @@ def test_daily_limit_exceeded_teeth(cof):
     the file name is unchanged and the rule was consumed (confirming the
     fault fired exactly once and was not bypassed).
     """
+    assert "dailyLimitExceeded" not in RETRYABLE_403_REASONS
     client, fake = cof
 
     fid = fake.add_file("/daily-teeth.txt", b"data")
@@ -299,6 +303,7 @@ def test_storage_quota_exceeded_raises_insufficient_space(cof):
     _is_retryable_http_error returning True, or CONNECTION_ERRORS).
     Assert: InsufficientSpaceError is raised immediately, no retry sleeps.
     """
+    assert "storageQuotaExceeded" not in RETRYABLE_403_REASONS
     client, fake = cof
 
     fid = fake.add_file("/quota.txt", b"data")
@@ -327,6 +332,8 @@ def test_storage_quota_exceeded_teeth(cof):
     With storageQuotaExceeded, count=1 → exception on first failure.
     This contrast proves the storageQuotaExceeded mapping is load-bearing.
     """
+    assert "rateLimitExceeded" in RETRYABLE_403_REASONS
+    assert "storageQuotaExceeded" not in RETRYABLE_403_REASONS
     client, fake = cof
 
     fid_a = fake.add_file("/contrast-a.txt", b"data")
@@ -365,6 +372,7 @@ def test_request_count_increments_per_request(cof):
     client, fake = cof
 
     assert client._request_count == 0, "counter must start at zero"
+    # These are the specific client-side budget attrs F14 removed; not an exhaustive guard.
     assert not hasattr(client, "quota_budget"), (
         "no client-side quota_budget attribute should exist (F14 fix)"
     )
@@ -403,7 +411,7 @@ def test_no_preemptive_client_side_quota_rejection(cof):
         fid = fake.add_file(f"/nobulk-{i}.txt", b"data")
         client._path_cache.set(
             f"/nobulk-{i}.txt", fid, parent_id=ROOT_ID,
-            name=f"/nobulk-{i}.txt", is_folder=False,
+            name=f"nobulk-{i}.txt", is_folder=False,
         )
         # No fault armed — must succeed every time.
         client._writes.move(f"/nobulk-{i}.txt", f"/nobulk-{i}-done.txt")
