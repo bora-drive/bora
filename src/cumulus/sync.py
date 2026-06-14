@@ -3911,30 +3911,40 @@ class SyncEngine:
             with self.fs_events.ignore(event_cls(local_path_old, event.local_path)):
                 exc = move(local_path_old, event.local_path)
 
-            if exc is None and not osp.exists(event.local_path):
+            event_parent_lower = osp.dirname(event.remote_path_lower)
+            if (
+                exc is None
+                and not osp.exists(event.local_path)
+                and event_parent_lower != "/"
+                and self.get_index_entry(event_parent_lower) is None
+            ):
                 # The move silently no-oped: os.rename hit a missing source or
                 # destination parent (move() swallows FileNotFoundError). The
                 # source exists (checked above), so the *destination* parent is
-                # absent — and _ensure_parent could not materialise it, meaning
-                # the event's path is no longer a live location on the remote.
-                # This is a STALE event: a change for this id whose path was
-                # resolved before a same-batch parent rename moved the item.
-                # The index already holds the item at its real (post-rename)
+                # absent. We also require that parent to be absent from the
+                # index, which distinguishes a STALE event — whose parent left
+                # the namespace, e.g. a same-batch folder rename re-keyed it
+                # away — from a genuine reparent into a parent that is indexed
+                # but merely not yet on disk (which must fall through to the
+                # normal download path below, not be skipped). For a stale event
+                # the index already holds this id at its real (post-rename)
                 # path, so re-creating it at the stale path would resurrect a
                 # phantom row (cluster-E finding 5). Tell the caller to skip.
                 self._logger.info(
                     'Stale remote move "%s" -> "%s" (id=%s): destination parent '
-                    "is gone; item already indexed at its current path, skipping",
+                    "left the namespace; item already indexed at its current "
+                    "path, skipping",
                     old_cased,
                     event.remote_path,
                     event.remote_id,
                 )
                 return True
 
-            if exc is not None:
-                # A real OSError moving the local item. Leave the index keyed at
-                # the old path so it stays consistent with on-disk state; the
-                # download proceeds at the new path as for a newly created item.
+            if exc is not None or not osp.exists(event.local_path):
+                # The move failed (a real OSError) or silently no-oped without
+                # meeting the stale test above. Leave the index keyed at the old
+                # path so it stays consistent with on-disk state; the download
+                # proceeds at the new path as for a newly created item.
                 self._logger.info(
                     'Could not move local item "%s" -> "%s" (remote move, '
                     "id=%s): %s",
