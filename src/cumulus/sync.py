@@ -3638,7 +3638,10 @@ class SyncEngine:
         :returns: SyncEvent corresponding to local item or None if no local changes
             are made.
         """
-        self._apply_remote_move(event)
+        if self._apply_remote_move(event):
+            # Stale echo of an item that already moved this batch; the index is
+            # already correct. Skip without downloading or re-indexing.
+            return SyncStatus.Skipped
         self._apply_case_change(event)
 
         # Store the new entry at the given path in your local state. If the required
@@ -3750,7 +3753,10 @@ class SyncEngine:
         :returns: SyncEvent corresponding to local item or None if no local changes
             are made.
         """
-        self._apply_remote_move(event)
+        if self._apply_remote_move(event):
+            # Stale echo of an item that already moved this batch; the index is
+            # already correct. Skip without downloading or re-indexing.
+            return SyncStatus.Skipped
         self._apply_case_change(event)
 
         # Store the new entry at the given path in your local state. If the required
@@ -3849,7 +3855,7 @@ class SyncEngine:
         else:
             raise os_to_cumulus_error(exc, remote_path=event.remote_path)
 
-    def _apply_remote_move(self, event: SyncEvent) -> None:
+    def _apply_remote_move(self, event: SyncEvent) -> bool:
         """
         Applies a remote rename / reparent locally before downloading.
 
@@ -3861,14 +3867,18 @@ class SyncEngine:
         by :meth:`_apply_case_change` instead.
 
         :param event: Download SyncEvent.
+        :returns: ``True`` if the event is a STALE echo that the caller must
+            skip entirely (the item already lives at its current index path and
+            the event's path is no longer a live remote location), ``False``
+            otherwise.
         """
         if not event.remote_id:
-            return
+            return False
 
         entry = self.get_index_entry_by_remote_id(event.remote_id)
 
         if entry is None or entry.remote_path_lower == event.remote_path_lower:
-            return
+            return False
 
         local_path_old = self.to_local_path_from_cased(entry.remote_path_cased)
         old_lower = entry.remote_path_lower
@@ -3891,7 +3901,7 @@ class SyncEngine:
                     event.remote_path,
                     event.remote_id,
                 )
-                return
+                return False
 
             # A reparent may be delivered before its new parent folder has
             # been synced. Create the parent first so the move cannot fail.
@@ -3901,12 +3911,30 @@ class SyncEngine:
             with self.fs_events.ignore(event_cls(local_path_old, event.local_path)):
                 exc = move(local_path_old, event.local_path)
 
-            if exc is not None or not osp.exists(event.local_path):
-                # The move failed or silently no-oped (move() swallows
-                # FileNotFoundError, e.g. for a still-missing parent dir).
-                # Leave the index keyed at the old path so that it stays
-                # consistent with the on-disk state. The download will then
-                # proceed at the new path as for a newly created item.
+            if exc is None and not osp.exists(event.local_path):
+                # The move silently no-oped: os.rename hit a missing source or
+                # destination parent (move() swallows FileNotFoundError). The
+                # source exists (checked above), so the *destination* parent is
+                # absent — and _ensure_parent could not materialise it, meaning
+                # the event's path is no longer a live location on the remote.
+                # This is a STALE event: a change for this id whose path was
+                # resolved before a same-batch parent rename moved the item.
+                # The index already holds the item at its real (post-rename)
+                # path, so re-creating it at the stale path would resurrect a
+                # phantom row (cluster-E finding 5). Tell the caller to skip.
+                self._logger.info(
+                    'Stale remote move "%s" -> "%s" (id=%s): destination parent '
+                    "is gone; item already indexed at its current path, skipping",
+                    old_cased,
+                    event.remote_path,
+                    event.remote_id,
+                )
+                return True
+
+            if exc is not None:
+                # A real OSError moving the local item. Leave the index keyed at
+                # the old path so it stays consistent with on-disk state; the
+                # download proceeds at the new path as for a newly created item.
                 self._logger.info(
                     'Could not move local item "%s" -> "%s" (remote move, '
                     "id=%s): %s",
@@ -3915,7 +3943,7 @@ class SyncEngine:
                     event.remote_id,
                     exc,
                 )
-                return
+                return False
 
             self._logger.debug(
                 'Moved local item "%s" -> "%s" (remote move, id=%s)',
@@ -3969,6 +3997,8 @@ class SyncEngine:
                 self._index_table.update(row)
 
             self._case_conversion_cache.clear()
+
+        return False
 
     def _apply_case_change(self, event: SyncEvent) -> None:
         """
