@@ -23,7 +23,7 @@
 | 12. Longpoll gate nextPageToken | F12 | ✅ COMPLETE | `108dd6f` | Combined spec+quality ✅ "Ready: Yes" (busy-loop impossibility traced: cursor persists per cycle even on zero applied events) |
 | 13. Auth edges | F13 | ✅ COMPLETE | `61da1e6`, `153a864` | Spec ✅ after docs note `153a864` (Stage-2 §5.1 supersession recorded); quality ✅ "Ready: Yes" (cross-restart safety double-layered + pre-pinned; no expiry loop; paste-flow retry safe) |
 | 14. Quota model correction | F14 | ✅ COMPLETE | `92bde7d` | Combined spec+quality ✅ "Ready: Yes" (errorhandling dailyLimitExceeded keep-decision verified correct; counter now session-cumulative, docstring updated) |
-| 15. Final gate | — | ⬜ pending | — | full offline suite + lint + deviations file + whole-branch review |
+| 15. Final gate | — | ✅ DONE (offline) / ⏳ linked pending | `46de6bc`, `5e6f55d` | Offline suite **549 passed / 1 skipped (benchmark) / 0 fail** on `46de6bc` (49.6s, `--benchmark-skip`; the lone benchmark `test_clean_local_events::test_performance` is ~3.5 min on 30k events and was the apparent "hang" in the original `-q` run). flake8/mypy at baseline parity (`a5e2037`). Deviations file + whole-branch interaction review done (4 findings: F1 fixed+verified `46de6bc`, F2 deferred-to-7b w/ corrected docstring, F3/F4 minor residuals). **Remaining:** linked-suite spot-checks (need a live account — token expired 2026-06-03). |
 
 Session task list (TaskList tool) mirrors this table: all tasks completed (Task 15 final gate in its closing steps — see Status line above).
 
