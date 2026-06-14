@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import socket
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -484,7 +483,8 @@ class _FilesResource:
             return resp
         return _Request("files.list", self._d._maybe_fail, run,
                         fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"q": q, "pageToken": pageToken})
+                        fail_kwargs={"q": q, "pageToken": pageToken,
+                                     "pageSize": pageSize, "fields": fields})
 
     def create(self, body=None, media_body=None, fields="", **_):
         def finalize():
@@ -520,16 +520,17 @@ class _FilesResource:
             return _project(rec, fields)
 
         _resumable = callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        _create_kwargs = {"body": body, "media_body": media_body}
         if media_body is not None and _resumable:
             return _ResumableRequest(
                 "files.create", self._d._maybe_fail, _read_media(media_body), finalize,
                 fail_after_check=self._d._maybe_fail_after,
-                fail_kwargs={"body": body},
+                fail_kwargs=_create_kwargs,
             )
         return _Request(
             "files.create", self._d._maybe_fail, finalize,
             fail_after_check=self._d._maybe_fail_after,
-            fail_kwargs={"body": body},
+            fail_kwargs=_create_kwargs,
         )
 
     def delete(self, fileId, **_):
@@ -546,7 +547,7 @@ class _FilesResource:
             return {"ids": [self._d._new_id() for _ in range(count)]}
         return _Request("files.generateIds", self._d._maybe_fail, run,
                         fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={})
+                        fail_kwargs={"count": count})
 
     def get_media(self, fileId, **_):
         rec = self._d.files[fileId]
@@ -650,7 +651,8 @@ class _ChangesResource:
             return resp
         return _Request("changes.list", self._d._maybe_fail, run,
                         fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"pageToken": pageToken})
+                        fail_kwargs={"pageToken": pageToken, "pageSize": pageSize,
+                                     "includeRemoved": includeRemoved})
 
 
 class _AboutResource:
