@@ -7,7 +7,7 @@ Covers:
       items are trashed correctly; result list has exactly one error slot for
       the failing id.
   C — move / make_dir: injected 503s (count=2) → _retry_transient converges;
-      retry is bounded (count=6 > max → raises).
+      retry is bounded (count=_MAX_RETRY_ATTEMPTS+1 > max → raises).
 
 Sleep neutralisation
 --------------------
@@ -24,9 +24,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient
+from cumulus.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
 from cumulus.config import remove_configuration
 from cumulus.core import WriteMode
+from cumulus.writes import _SIMPLE_UPLOAD_THRESHOLD
 from cumulus.database.core import Database
 from cumulus.exceptions import CumulusApiError
 from cumulus.keyring import CredentialStorage
@@ -97,7 +98,7 @@ def test_resumable_fault_first_chunk_retries_to_single_correct_file(
     """
     client, fake = cof
 
-    size = 5 * 1024 * 1024 + 1  # just over 5 MB → resumable path
+    size = _SIMPLE_UPLOAD_THRESHOLD + 1  # just over threshold -> resumable path
     data = b"x" * size
     local = tmp_path / "big.bin"
     local.write_bytes(data)
@@ -126,7 +127,7 @@ def test_resumable_fault_first_chunk_retries_to_single_correct_file(
 
 
 def test_resumable_fault_first_chunk_teeth(cof, tmp_path):
-    """Teeth: arm count=5 (>= _MAX_RETRY_ATTEMPTS=5) so every attempt faults.
+    """Teeth: arm count=_MAX_RETRY_ATTEMPTS so every attempt faults.
 
     After exhausting retries _retry_transient re-raises; the upload must fail
     and no file must be created in fake.files.  This confirms that the success
@@ -135,13 +136,13 @@ def test_resumable_fault_first_chunk_teeth(cof, tmp_path):
     """
     client, fake = cof
 
-    size = 5 * 1024 * 1024 + 1
+    size = _SIMPLE_UPLOAD_THRESHOLD + 1  # just over threshold -> resumable path
     data = b"z" * size
     local = tmp_path / "big2.bin"
     local.write_bytes(data)
 
-    # Arm all 5 attempts — every next_chunk call at step 0 faults.
-    fake.fail_next("files.create", make_conn_reset(), count=5)
+    # Arm all attempts — every next_chunk call at step 0 faults.
+    fake.fail_next("files.create", make_conn_reset(), count=_MAX_RETRY_ATTEMPTS)
 
     # After exhausting retries, _retry_transient re-raises the CONNECTION_ERROR;
     # convert_api_errors then wraps it as cumulus.exceptions.ConnectionError.
@@ -290,8 +291,8 @@ def test_move_503_count2_converges(cof):
     assert result.id == fid
 
 
-def test_move_503_count6_exceeds_max_retries_raises(cof):
-    """Teeth: arm 6 × 503s (> _MAX_RETRY_ATTEMPTS=5) → _retry_transient
+def test_move_503_exceeds_max_retries_raises_teeth(cof):
+    """Teeth: arm _MAX_RETRY_ATTEMPTS+1 × 503s → _retry_transient
     exhausts all attempts and raises; confirms retries are bounded.
     """
     from googleapiclient.errors import HttpError as _HttpError
@@ -303,7 +304,7 @@ def test_move_503_count6_exceeds_max_retries_raises(cof):
         "/foo.txt", fid, parent_id=ROOT_ID, name="foo.txt", is_folder=False
     )
 
-    fake.fail_next("files.update", make_http_error(503), count=6)
+    fake.fail_next("files.update", make_http_error(503), count=_MAX_RETRY_ATTEMPTS + 1)
 
     with pytest.raises((CumulusApiError, _HttpError)):
         client._writes.move("/foo.txt", "/bar.txt")
@@ -338,15 +339,15 @@ def test_make_dir_503_count2_converges(cof):
     assert client._path_cache.path_to_id("/newdir") == result.id
 
 
-def test_make_dir_503_count6_exceeds_max_retries_raises(cof):
-    """Teeth: arm 6 × 503s on files.create → make_dir raises after exhausting
-    retries, proving the retry loop is bounded and not infinite.
+def test_make_dir_503_exceeds_max_retries_raises_teeth(cof):
+    """Teeth: arm _MAX_RETRY_ATTEMPTS+1 × 503s on files.create → make_dir raises
+    after exhausting retries, proving the retry loop is bounded and not infinite.
     """
     from googleapiclient.errors import HttpError as _HttpError
 
     client, fake = cof
 
-    fake.fail_next("files.create", make_http_error(503), count=6)
+    fake.fail_next("files.create", make_http_error(503), count=_MAX_RETRY_ATTEMPTS + 1)
 
     with pytest.raises((CumulusApiError, _HttpError)):
         client._writes.make_dir("/newdir")
