@@ -433,8 +433,18 @@ def test_occupied_target_folder_move_no_rekey_teeth(sync_engine: SyncEngine):
     assert bad_entry is not None and bad_entry.remote_id == dir_id
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "finding B: folder-vs-folder occupied-target move creates duplicate remote_id rows"
+        " — _check_download_conflict returns Identical for an untracked folder"
+        " (content_hash 'folder' == 'folder'), so update_index_from_sync_event inserts a"
+        " second row at the new path while the stale orphan at the old path survives;"
+        " occupant never conflict-copied. Architectural fix needed (escalated)."
+    ),
+)
 def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncEngine):
-    """FINDING: folder-vs-folder occupied-target move creates duplicate remote_id rows.
+    """FINDING B: folder-vs-folder occupied-target move creates duplicate remote_id rows.
 
     When a remote folder (dir_id) is moved onto a path occupied by a different
     local folder (no index row), _apply_remote_move correctly returns False.
@@ -451,7 +461,11 @@ def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncE
     architectural: _check_download_conflict must treat a locally-existing folder
     with NO index row as "untracked / newly appeared" (not Identical), so the
     conflict-copy branch fires and the occupant is renamed before the moved
-    folder is downloaded.  Marking xfail to record the finding.
+    folder is downloaded.
+
+    Desired (currently-failing) outcome: exactly one row at /dst_b3 (occupant
+    conflict-copied).  Marked strict xfail so CI fails the moment this is fixed,
+    forcing explicit triage before the mark is removed.
     """
     fake = FakeDrive()
     dir_id = fake.add_folder("/dst_b3")
@@ -478,27 +492,9 @@ def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncE
     )
     sync_engine._create_local_entry(move_event)
 
-    # Document what actually happened: two rows with the same remote_id.
+    # Desired correct post-condition: exactly one row (at /dst_b3), occupant conflict-copied.
     with sync_engine._database_access():
         rows = sync_engine._index_table.select_sql("WHERE remote_id = ?", dir_id)
-
-    # The EXPECTED correct post-condition: exactly one row (at /dst_b3),
-    # occupant conflict-copied.  What ACTUALLY happens: two rows — a real defect.
-    if len(rows) != 1:
-        pytest.xfail(
-            reason=(
-                "finding: folder-vs-folder occupied-target move creates duplicate "
-                "remote_id rows — _check_download_conflict returns Identical for "
-                "an untracked folder (content_hash 'folder' == 'folder'), so "
-                "update_index_from_sync_event inserts a second row at the new path "
-                "while the stale orphan at the old path survives. Fix: treat a "
-                "locally-existing folder with no index row as 'untracked' (not "
-                "Identical) so the conflict-copy fires, consistent with file "
-                "occupied-target behavior.  Architectural fix needed before Stage 7b."
-            )
-        )
-
-    # If we somehow land here with one row it should be at /dst_b3.
     assert len(rows) == 1
     assert rows[0].remote_path_lower == "/dst_b3"
 
@@ -561,7 +557,7 @@ def test_duplicate_remote_id_rows_no_crash(sync_engine: SyncEngine):
         content_hash=_md5(data),
         size=len(data),
     )
-    _write_local_file(sync_engine, "/path_c.txt", data)  # give target disk existence
+    _write_local_file(sync_engine, "/path_c.txt", data)  # occupied target forces early-exit in _apply_remote_move; the no-crash claim still covers the sqlite dup-id query
 
     # Must not raise.
     try:
@@ -570,25 +566,32 @@ def test_duplicate_remote_id_rows_no_crash(sync_engine: SyncEngine):
         pytest.fail(f"_apply_remote_move raised with duplicate remote_id rows: {exc}")
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "finding C: get_index_entry_by_remote_id has no uniqueness guard (no UNIQUE"
+        " constraint on remote_id, models.py); duplicate rows -> first-wins resolution"
+        " and the non-selected duplicate survives as a stale orphan after"
+        " _apply_remote_move re-keys only the selected row. Reachable in production via"
+        " finding B. Fix needs schema UNIQUE + _check_download_conflict semantic fix"
+        " (escalated)."
+    ),
+)
 def test_duplicate_remote_id_rows_no_dangling_stale_row(sync_engine: SyncEngine):
-    """After _apply_remote_move with duplicate remote_id rows, no stale dangling
-    row must remain at the OLD path that was moved.
+    """FINDING C: duplicate remote_id rows leave a dangling stale orphan after move.
 
-    'Correct' means: the row that was selected (first-wins) was moved to /path_c.
-    The OTHER duplicate row (at the non-selected old path) is an orphan — it
-    still has the same remote_id but now points to a path that is NOT the current
-    remote location.  The engine does NOT clean it up (single-row "first wins"
-    logic).
+    'Correct' means: the row that was selected (first-wins) was moved to /dup_c.txt
+    and the OTHER duplicate row (at the non-selected old path) is cleaned up.
+    The engine does NOT clean it up (single-row "first wins" logic with no
+    uniqueness guard).
 
-    If the selected row is the one at /path_a.txt (or /path_b.txt), the move
-    re-keys it to /path_c.txt.  The other row is left as a DANGLING STALE ROW
-    with the same remote_id pointing to a path that no longer reflects remote
-    truth.  This is a REAL DEFECT: get_index_entry_by_remote_id can now return
-    the WRONG (stale) row depending on SQLite's ordering, breaking future moves
-    for that id.
+    The surviving stale row is a REAL DEFECT: get_index_entry_by_remote_id can
+    return the WRONG (stale) row depending on SQLite's ordering, breaking future
+    moves for that id.  Reachable in production via finding B.
 
-    We capture the post-condition and use strict=True xfail to document the
-    finding so it requires explicit triage, not a vacuous "no-crash" pass.
+    Desired (currently-failing) outcome: exactly one row for the id, at /dup_c.txt,
+    with no dangling orphan.  Marked strict xfail so CI fails the moment this is
+    fixed, forcing explicit triage before the mark is removed.
     """
     file_id = "dup-id-2"
     data = b"duplicate id dangling row"
@@ -626,30 +629,12 @@ def test_duplicate_remote_id_rows_no_dangling_stale_row(sync_engine: SyncEngine)
 
     sync_engine._apply_remote_move(event)
 
-    # After the move there must be EXACTLY ONE row holding file_id (at /dup_c.txt).
-    # If a dangling stale row survives the engine is in a broken state.
+    # Desired correct post-condition: exactly one row for this id, at /dup_c.txt,
+    # with no dangling orphan surviving from the non-selected duplicate.
     with sync_engine._database_access():
         rows_after = sync_engine._index_table.select_sql("WHERE remote_id = ?", file_id)
-
-    # Determine what the engine chose to move: one of the two old paths was selected.
     moved_to_c = sync_engine.get_index_entry("/dup_c.txt")
 
-    # FINDING: the engine leaves a stale orphan row when duplicate ids exist.
-    # The correct post-condition is: exactly 1 row for this id, at /dup_c.txt.
-    # Mark strict xfail to document and enforce the finding.
-    if len(rows_after) != 1 or moved_to_c is None or moved_to_c.remote_id != file_id:
-        pytest.xfail(
-            reason=(
-                "finding: duplicate remote_id rows leave a dangling stale orphan after "
-                "_apply_remote_move — get_index_entry_by_remote_id 'first wins' with no "
-                "uniqueness guard causes nondeterministic resolution and a surviving "
-                "stale row. Fix requires either a schema UNIQUE constraint + repair pass "
-                "(architectural) or a defensive cleanup inside _apply_remote_move. "
-                "Needs explicit triage before Stage 7b."
-            )
-        )
-
-    # If we reach here the engine correctly left exactly one row at /dup_c.txt.
     assert len(rows_after) == 1, (
         f"Expected 1 row after move, got {len(rows_after)}: "
         f"{[r.remote_path_lower for r in rows_after]}"
