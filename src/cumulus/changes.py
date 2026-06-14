@@ -175,17 +175,20 @@ def _emit_delete(
     (debug log only) — there is nothing in the local mirror to remove.
     """
     file_id = change.get("fileId")
+    if file_id is None:
+        # Malformed change with no id; nothing to resolve or remove.
+        # (id_to_path would reject None — guard once up front.)
+        logger.debug("Delete change without a fileId; nothing to remove")
+        return
     path = path_cache.id_to_path(file_id)
     if path is not None:
         path_cache.remove(path)
-    elif resolve_deleted_path is not None and file_id is not None:
+    elif resolve_deleted_path is not None:
         # Cache miss: fall back to the engine index by remote_id. The id is
         # not in the cache, so there is nothing to remove there.
         path = resolve_deleted_path(file_id)
     if path is None:
-        logger.debug(
-            "Delete for unknown fileId %s; nothing to remove", file_id
-        )
+        logger.debug("Delete for unknown fileId %s; nothing to remove", file_id)
         return
     out_entries.append(
         DeletedMetadata(
