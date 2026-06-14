@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 import httplib2
+import requests
 from googleapiclient.errors import HttpError
 
 ROOT_ID = "ROOT"
@@ -29,6 +31,21 @@ def make_http_error(status: int, reason: str = "", message: str = "error") -> Ht
     return HttpError(resp, json.dumps(body).encode("utf-8"))
 
 
+def make_timeout(message: str = "fake timeout") -> Exception:
+    """A transport-level timeout, shaped like the production retry path catches.
+
+    Returns ``requests.exceptions.Timeout`` because ``CONNECTION_ERRORS`` in
+    ``src/cumulus/errorhandling.py`` includes that type (not ``socket.timeout``),
+    so downstream retry tests will exercise the real retry path.
+    """
+    return requests.exceptions.Timeout(message)
+
+
+def make_conn_reset(message: str = "connection reset by peer") -> Exception:
+    """A connection-reset, shaped like requests surfaces one."""
+    return requests.exceptions.ConnectionError(message)
+
+
 def _now_rfc3339() -> str:
     return datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -42,7 +59,7 @@ class FakeDrive:
         self._rev_counter = 0
         self._seq = 100  # opaque change cursor; ints rendered as str
         self._change_log: list[tuple[int, str]] = []  # (seq, fileId)
-        self._fail: dict[str, list[Exception]] = {}
+        self._fail_rules: list[dict] = []
         # One-shot hook fired at the start of the next files.update finalize,
         # before the update is applied. Used to deterministically interleave a
         # "collaborator" write inside the check-then-write race window
@@ -86,31 +103,60 @@ class FakeDrive:
         self._change_log.append((self._seq, file_id))
         self._seq += 1
 
-    def fail_next(self, key: str, exc: Exception) -> None:
-        """Queue *exc* to be raised on the next ``.execute()`` of *key*
-        (e.g. ``"files.list"``). Used by Stage 7b fault-injection."""
-        self._fail.setdefault(key, []).append(exc)
+    def fail_next(self, key: str, exc: Exception, *, count: int = 1,
+                  when: Callable[..., bool] | None = None) -> None:
+        """Raise *exc* BEFORE each of the next *count* ``.execute()`` calls of
+        *key* (optionally only when ``when(**call_kwargs)`` is true)."""
+        self._fail_rules.append(
+            {"key": key, "exc": exc, "skip": 0, "remaining": count,
+             "when": when, "after": False})
 
-    def fail_after(self, key: str, exc: Exception) -> None:
-        """Queue *exc* to be raised AFTER the next ``.execute()`` of *key*
-        commits (i.e. finalize() runs first, then the exception is raised).
+    def fail_after(self, key: str, exc: Exception, *, count: int = 1,
+                   when: Callable[..., bool] | None = None) -> None:
+        """Raise *exc* AFTER each of the next *count* ``.execute()`` calls of
+        *key* commit (finalize runs first). Models "committed but response lost"."""
+        self._fail_rules.append(
+            {"key": key, "exc": exc, "skip": 0, "remaining": count,
+             "when": when, "after": True})
 
-        Models a "committed but response lost" scenario: the server-side
-        create succeeded and the record is in fake.files, but the response
-        is never delivered to the caller because the transport faults out.
-        See Task 6 / review F7.
-        """
-        self._fail.setdefault(f"__after__{key}", []).append(exc)
+    def fail_on_call(self, key: str, n: int, exc: Exception, *,
+                     when: Callable[..., bool] | None = None) -> None:
+        """Raise *exc* on the *n*-th (1-based) matching ``.execute()`` of *key*,
+        letting the first n-1 pass."""
+        self._fail_rules.append(
+            {"key": key, "exc": exc, "skip": n - 1, "remaining": 1,
+             "when": when, "after": False})
 
-    def _maybe_fail(self, key: str) -> None:
-        queue = self._fail.get(key)
-        if queue:
-            raise queue.pop(0)
+    def fail_when(self, key: str, predicate: Callable[..., bool],
+                  exc: Exception) -> None:
+        """Raise *exc* on the next ``.execute()`` of *key* whose call kwargs
+        satisfy ``predicate(**call_kwargs)``."""
+        self._fail_rules.append(
+            {"key": key, "exc": exc, "skip": 0, "remaining": 1,
+             "when": predicate, "after": False})
 
-    def _maybe_fail_after(self, key: str) -> None:
-        queue = self._fail.get(f"__after__{key}")
-        if queue:
-            raise queue.pop(0)
+    def _consume_fail(self, key: str, kwargs: dict, *, after: bool) -> None:
+        """Fire the first matching, ready rule for (key, after-phase). At most
+        one rule fires per call. A rule with a remaining ``skip`` count consumes
+        the call toward its skip without firing."""
+        for rule in self._fail_rules:
+            if rule["key"] != key or rule["after"] != after:
+                continue
+            if rule["when"] is not None and not rule["when"](**kwargs):
+                continue
+            if rule["skip"] > 0:
+                rule["skip"] -= 1
+                return
+            rule["remaining"] -= 1
+            if rule["remaining"] <= 0:
+                self._fail_rules.remove(rule)
+            raise rule["exc"]
+
+    def _maybe_fail(self, key: str, kwargs: dict | None = None) -> None:
+        self._consume_fail(key, kwargs or {}, after=False)
+
+    def _maybe_fail_after(self, key: str, kwargs: dict | None = None) -> None:
+        self._consume_fail(key, kwargs or {}, after=True)
 
     def service(self) -> "_Service":
         return _Service(self)
@@ -191,10 +237,21 @@ class _FakeHttp:
     ``content-range`` / ``content-length`` off the response.
     """
 
-    def __init__(self, content: bytes):
+    def __init__(
+        self,
+        content: bytes,
+        fail_check: Callable[[str, dict], None] | None = None,
+        fail_key: str = "files.get_media",
+        fail_kwargs: dict | None = None,
+    ):
         self._content = content
+        self._fail_check = fail_check
+        self._fail_key = fail_key
+        self._fail_kwargs = fail_kwargs or {}
 
     def request(self, uri, method="GET", body=None, headers=None):
+        if self._fail_check is not None:
+            self._fail_check(self._fail_key, self._fail_kwargs)
         total = len(self._content)
         rng = (headers or {}).get("range") or (headers or {}).get("Range")
         if rng:
@@ -222,9 +279,20 @@ class _MediaRequest:
     ``.headers``; ``next_chunk`` passes the range header to ``http.request``.
     """
 
-    def __init__(self, content: bytes):
+    def __init__(
+        self,
+        content: bytes,
+        fail_check: Callable[[str, dict], None] | None = None,
+        fail_key: str = "files.get_media",
+        fail_kwargs: dict | None = None,
+    ):
         self.uri = "https://fake.drive/get_media"
-        self.http = _FakeHttp(content)
+        self.http = _FakeHttp(
+            content,
+            fail_check=fail_check,
+            fail_key=fail_key,
+            fail_kwargs=fail_kwargs,
+        )
         self.headers: dict = {}
         self.postproc = lambda resp, content: content
 
@@ -257,16 +325,18 @@ class _ResumableRequest:
         content: bytes,
         finalize,
         fail_after_check=None,
+        fail_kwargs=None,
     ):
         self._fail_key = fail_key
         self._fail_check = fail_check
         self._content = content
         self._finalize = finalize
         self._fail_after_check = fail_after_check
+        self._fail_kwargs = fail_kwargs or {}
         self._step = 0
 
     def next_chunk(self, num_retries: int = 0):
-        self._fail_check(self._fail_key)
+        self._fail_check(self._fail_key, self._fail_kwargs)
         total = len(self._content)
         if self._step == 0 and total > 0:
             self._step = 1
@@ -274,7 +344,7 @@ class _ResumableRequest:
             return _MediaUploadProgress(half, total), None
         response = self._finalize()
         if self._fail_after_check is not None:
-            self._fail_after_check(self._fail_key)
+            self._fail_after_check(self._fail_key, self._fail_kwargs)
         return _MediaUploadProgress(total, total), response
 
 
@@ -284,20 +354,22 @@ class _Request:
     def __init__(
         self,
         fail_key: str,
-        fail_check: Callable[[str], None],
+        fail_check: Callable[[str, dict], None],
         fn: Callable[[], Any],
-        fail_after_check: Callable[[str], None] | None = None,
+        fail_after_check: Callable[[str, dict], None] | None = None,
+        fail_kwargs: dict | None = None,
     ):
         self._fail_key = fail_key
         self._fail_check = fail_check
         self._fn = fn
         self._fail_after_check = fail_after_check
+        self._fail_kwargs = fail_kwargs or {}
 
     def execute(self, num_retries: int = 0, http: Any = None) -> Any:
-        self._fail_check(self._fail_key)
+        self._fail_check(self._fail_key, self._fail_kwargs)
         result = self._fn()
         if self._fail_after_check is not None:
-            self._fail_after_check(self._fail_key)
+            self._fail_after_check(self._fail_key, self._fail_kwargs)
         return result
 
 
@@ -388,7 +460,8 @@ class _FilesResource:
             if rec is None:
                 raise make_http_error(404, "notFound", "File not found")
             return _project(rec, fields)
-        return _Request("files.get", self._d._maybe_fail, run)
+        return _Request("files.get", self._d._maybe_fail, run,
+                        fail_kwargs={"fileId": fileId, "fields": fields})
 
     def list(self, q="", fields="", pageSize=100, pageToken=None, **_):
         def run():
@@ -408,7 +481,8 @@ class _FilesResource:
             if start + pageSize < len(matched):
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
-        return _Request("files.list", self._d._maybe_fail, run)
+        return _Request("files.list", self._d._maybe_fail, run,
+                        fail_kwargs={"q": q, "pageToken": pageToken})
 
     def create(self, body=None, media_body=None, fields="", **_):
         def finalize():
@@ -448,10 +522,12 @@ class _FilesResource:
             return _ResumableRequest(
                 "files.create", self._d._maybe_fail, _read_media(media_body), finalize,
                 fail_after_check=self._d._maybe_fail_after,
+                fail_kwargs={"body": body},
             )
         return _Request(
             "files.create", self._d._maybe_fail, finalize,
             fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"body": body},
         )
 
     def delete(self, fileId, **_):
@@ -459,16 +535,24 @@ class _FilesResource:
             self._d.files.pop(fileId, None)
             self._d._record_change(fileId)
             return None
-        return _Request("files.delete", self._d._maybe_fail, run)
+        return _Request("files.delete", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
+                        fail_kwargs={"fileId": fileId})
 
     def generateIds(self, count=1, **_):
         def run():
             return {"ids": [self._d._new_id() for _ in range(count)]}
-        return _Request("files.generateIds", self._d._maybe_fail, run)
+        return _Request("files.generateIds", self._d._maybe_fail, run,
+                        fail_kwargs={})
 
     def get_media(self, fileId, **_):
         rec = self._d.files[fileId]
-        return _MediaRequest(rec["content"])
+        return _MediaRequest(
+            rec["content"],
+            fail_check=self._d._maybe_fail,
+            fail_key="files.get_media",
+            fail_kwargs={"fileId": fileId},
+        )
 
     def update(self, fileId, body=None, media_body=None, addParents=None,
                removeParents=None, fields="", **_):
@@ -500,11 +584,17 @@ class _FilesResource:
             return _project(rec, fields)
 
         _resumable = callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        _update_kwargs = {
+            "fileId": fileId, "body": body,
+            "addParents": addParents, "removeParents": removeParents,
+        }
         if media_body is not None and _resumable:
             return _ResumableRequest(
-                "files.update", self._d._maybe_fail, _read_media(media_body), finalize
+                "files.update", self._d._maybe_fail, _read_media(media_body), finalize,
+                fail_kwargs=_update_kwargs,
             )
-        return _Request("files.update", self._d._maybe_fail, finalize)
+        return _Request("files.update", self._d._maybe_fail, finalize,
+                        fail_kwargs=_update_kwargs)
 
 
 class _ChangesResource:
@@ -514,7 +604,8 @@ class _ChangesResource:
     def getStartPageToken(self, **_):
         def run():
             return {"startPageToken": str(self._d._seq)}
-        return _Request("changes.getStartPageToken", self._d._maybe_fail, run)
+        return _Request("changes.getStartPageToken", self._d._maybe_fail, run,
+                        fail_kwargs={})
 
     def list(self, pageToken, pageSize=100, fields="", includeRemoved=True, **_):
         def run():
@@ -551,7 +642,8 @@ class _ChangesResource:
             else:
                 resp["newStartPageToken"] = str(self._d._seq)
             return resp
-        return _Request("changes.list", self._d._maybe_fail, run)
+        return _Request("changes.list", self._d._maybe_fail, run,
+                        fail_kwargs={"pageToken": pageToken})
 
 
 class _AboutResource:
@@ -561,7 +653,8 @@ class _AboutResource:
     def get(self, fields="", **_):
         def run():
             return {"user": dict(self._d.user), "storageQuota": dict(self._d.storage_quota)}
-        return _Request("about.get", self._d._maybe_fail, run)
+        return _Request("about.get", self._d._maybe_fail, run,
+                        fail_kwargs={})
 
 
 class _RevisionsResource:
@@ -582,13 +675,19 @@ class _RevisionsResource:
             if start + pageSize < len(revs):
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
-        return _Request("revisions.list", self._d._maybe_fail, run)
+        return _Request("revisions.list", self._d._maybe_fail, run,
+                        fail_kwargs={"fileId": fileId})
 
     def get_media(self, fileId, revisionId, **_):
         rec = self._d.files[fileId]
         for rev in rec["revisions"]:
             if rev["id"] == revisionId:
-                return _MediaRequest(rev["content"])
+                return _MediaRequest(
+                    rev["content"],
+                    fail_check=self._d._maybe_fail,
+                    fail_key="revisions.get_media",
+                    fail_kwargs={"fileId": fileId, "revisionId": revisionId},
+                )
         raise make_http_error(404, "notFound", "Revision not found")
 
 

@@ -419,3 +419,92 @@ def test_client_fixture_is_wired_to_fake(client_on_fake):
     client_on_fake.client._path_cache.set("/a.txt", fid, ROOT_ID, "a.txt", False)
     md = client_on_fake.client.get_metadata("/a.txt")
     assert md.size == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 7b-E2 Task 1 — Generalized fault surface
+# ---------------------------------------------------------------------------
+
+import socket  # noqa: E402
+import requests as _requests  # noqa: E402
+
+from tests.fake_drive import make_timeout, make_conn_reset  # noqa: E402
+
+
+def test_fail_next_count_fails_n_then_succeeds():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"x")
+    fake.fail_next("files.get", make_http_error(500), count=2)
+    svc = fake.service()
+    for _ in range(2):
+        try:
+            svc.files().get(fileId=fid, fields="id").execute()
+            assert False, "expected 500"
+        except HttpError as e:
+            assert e.resp.status == 500
+    assert svc.files().get(fileId=fid, fields="id").execute()["id"] == fid
+
+
+def test_fail_on_call_targets_the_nth_changes_list():
+    fake = FakeDrive()
+    fake.add_file("/a.txt", content=b"a")
+    fake.add_file("/b.txt", content=b"b")
+    fake.fail_on_call("changes.list", 2, make_http_error(503))
+    svc = fake.service()
+    r1 = svc.changes().list(pageToken="100", pageSize=1,
+                            fields="nextPageToken, changes(fileId)", includeRemoved=True).execute()
+    assert "nextPageToken" in r1
+    try:
+        svc.changes().list(pageToken=r1["nextPageToken"], pageSize=1,
+                           fields="nextPageToken, changes(fileId)", includeRemoved=True).execute()
+        assert False, "expected 503 on 2nd changes.list"
+    except HttpError as e:
+        assert e.resp.status == 503
+
+
+def test_fail_when_predicate_targets_one_fileid_in_batch():
+    fake = FakeDrive()
+    a = fake.add_file("/a.txt", content=b"a")
+    b = fake.add_file("/b.txt", content=b"b")
+    fake.fail_when("files.update", lambda **kw: kw.get("fileId") == b, make_http_error(500))
+    svc = fake.service()
+    svc.files().update(fileId=a, body={"name": "a2.txt"}, fields="id").execute()  # ok
+    try:
+        svc.files().update(fileId=b, body={"name": "b2.txt"}, fields="id").execute()
+        assert False, "expected 500 on b only"
+    except HttpError as e:
+        assert e.resp.status == 500
+
+
+def test_fail_after_commits_then_raises_on_arbitrary_key():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"x")
+    fake.fail_after("files.delete", make_http_error(500))
+    svc = fake.service()
+    try:
+        svc.files().delete(fileId=fid).execute()
+        assert False, "expected post-commit 500"
+    except HttpError as e:
+        assert e.resp.status == 500
+    assert fid not in fake.files  # the delete DID commit before the raise
+
+
+def test_get_media_can_fault():
+    fake = FakeDrive()
+    fid = fake.add_file("/big.bin", content=b"y" * 100)
+    fake.fail_next("files.get_media", make_timeout())
+    request = fake.service().files().get_media(fileId=fid)
+    buf = io.BytesIO()
+    from googleapiclient.http import MediaIoBaseDownload
+    downloader = MediaIoBaseDownload(buf, request, chunksize=64)
+    try:
+        downloader.next_chunk()
+        assert False, "expected timeout"
+    except (_requests.exceptions.Timeout, TimeoutError, socket.timeout):
+        pass
+
+
+def test_exception_factory_shapes():
+    assert make_http_error(429, "userRateLimitExceeded").resp.status == 429
+    assert isinstance(make_timeout(), (TimeoutError, socket.timeout, _requests.exceptions.Timeout))
+    assert isinstance(make_conn_reset(), (ConnectionError, _requests.exceptions.ConnectionError))
