@@ -1260,6 +1260,104 @@ def test_remote_move_with_occupied_target_keeps_index_and_conflicts(
     assert event.status is SyncStatus.Conflict
 
 
+def test_remote_folder_rename_with_same_batch_stale_child_echo(sync_engine: SyncEngine):
+    """A poll batch can carry BOTH a folder rename (/old -> /renamed) and a
+    stale echo of a child's own earlier change, resolved at the child's
+    PRE-rename path (/old/kid.txt). Apply order is folders-then-files, so the
+    folder rename re-keys the whole subtree first (child now at
+    /renamed/kid.txt), then the stale child event fires on the same child id.
+    The engine must NOT undo the subtree re-key: the child must end up indexed
+    only at /renamed/kid.txt, never resurrected at the stale /old/kid.txt
+    (cluster-E final-review finding 5, reproduced live)."""
+    data = b"kid content unchanged by the rename"
+    fake = FakeDrive()
+    # Drive's current truth after the rename: /renamed and /renamed/kid.txt.
+    dir_id = fake.add_folder("/renamed")
+    kid_id = fake.add_file("/renamed/kid.txt", data)
+    kid_rev = fake.files[kid_id]["headRevisionId"]
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._path_cache.set(
+        "/renamed", dir_id, parent_id=ROOT_ID, name="renamed", is_folder=True
+    )
+    sync_engine.client._path_cache.set(
+        "/renamed/kid.txt", kid_id, parent_id=dir_id, name="kid.txt", is_folder=False
+    )
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Fully synced PRE-rename state: /old/kid.txt on disk + index at /old.
+    _write_local_file(sync_engine, "/old/kid.txt", data)
+    _seed_entry(
+        sync_engine, "/old", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
+    )
+    _seed_entry(
+        sync_engine, "/old/kid.txt", kid_id, ItemType.File, rev=kid_rev,
+        content_hash=_md5(data),
+    )
+
+    # Apply order within the batch: folders before files.
+    folder_event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.Folder,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/renamed",
+        remote_path_lower="/renamed",
+        remote_id=dir_id,
+        local_path=sync_engine.to_local_path_from_cased("/renamed"),
+        rev="folder",
+        content_hash="folder",
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+    # Stale echo of the child, resolved at its PRE-rename path.
+    stale_child_event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/old/kid.txt",
+        remote_path_lower="/old/kid.txt",
+        remote_id=kid_id,
+        local_path=sync_engine.to_local_path_from_cased("/old/kid.txt"),
+        rev=kid_rev,
+        content_hash=_md5(data),
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=len(data),
+        completed=0,
+    )
+
+    sync_engine._create_local_entry(folder_event)
+    sync_engine._create_local_entry(stale_child_event)
+
+    # Disk: the subtree lives at /renamed; nothing resurrected at /old.
+    assert osp.isfile(sync_engine.to_local_path_from_cased("/renamed/kid.txt"))
+    assert not osp.exists(sync_engine.to_local_path_from_cased("/old"))
+    assert not osp.exists(sync_engine.to_local_path_from_cased("/old/kid.txt"))
+
+    # Index: child indexed only at /renamed/kid.txt, never at the stale path.
+    assert sync_engine.get_index_entry("/old/kid.txt") is None
+    assert sync_engine.get_index_entry("/old") is None
+    kid_entry = sync_engine.get_index_entry("/renamed/kid.txt")
+    assert kid_entry is not None
+    assert kid_entry.remote_id == kid_id
+
+    # Exactly one index row holds the child id (no duplicate at the stale path).
+    by_id = sync_engine.get_index_entry_by_remote_id(kid_id)
+    assert by_id is not None
+    assert by_id.remote_path_lower == "/renamed/kid.txt"
+
+    assert sync_engine.sync_errors == []
+
+
 # ==== Cluster E (F9): dead Dropbox-era except clauses in local-event handlers ==========
 #
 # client.remove raises DataChangedError on a rev mismatch (writes.py).
