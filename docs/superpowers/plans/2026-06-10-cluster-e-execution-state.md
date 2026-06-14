@@ -27,6 +27,8 @@
 
 Session task list (TaskList tool) mirrors this table: all tasks completed (Task 15 final gate in its closing steps — see Status line above).
 
+**Post-gate must-fix findings — BOTH RESOLVED 2026-06-14 (own TDD + review cycles).** Finding 2 (crash-window delete loss) FIXED in `9a96447` + review follow-up `e8525e6`: optional `resolve_deleted_path` callback (engine→client→changes); `SyncEngine._index_path_for_remote_id` re-resolves an evicted fileId against the surviving index by remote_id so a replayed delete still emits `DeletedMetadata`. TDD: 2 changes unit tests + end-to-end engine crash-replay test, verified RED with the resolver disabled; independent adversarial review = no Critical/Important defects. Finding 5 (T3 same-batch parent-rename + stale-child-echo) FIXED in `f83267c` + review follow-up `f51168b`: `_apply_remote_move` returns a stale-echo skip signal so the already-correct re-keyed subtree isn't re-indexed; offline repro + boundary regression added. **Re-gate after both: full offline suite 555 passed / 0 failed / 0 skipped (`--benchmark-disable`, `test_performance` assertion still runs), mypy baseline parity held. Branch clean-ready for Stage 7b.** Full detail in the deviations file (findings 2 & 5 sections).
+
 ## Resume procedure
 
 1. `git branch --show-current` must be `google-drive-port`; `git status` clean; HEAD should be `425642d` (or later if resumed mid-task).
