@@ -1,14 +1,12 @@
-"""Fault-injection tests for the Drive changes feed (Stage 7b-E2, Task 2).
+"""Fault-injection tests for the Drive change-feed (Stage 7b-E2, Task 2).
 
-Each scenario follows the red → triage → fix cycle documented in the task spec.
-Only ``tests/offline/test_fault_feed.py`` is run by these tests; the wider
-suite is NOT exercised here.
-
-Helpers mirror test_changes.py ~162-205 and test_sync.py ~196-214.
+Covers: page-fetch errors, cross-page stale-child echoes, fail_after
+redelivery idempotence, and duplicate change-log collapse.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import os.path as osp
 import sqlite3
@@ -36,6 +34,10 @@ from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error
 # ---------------------------------------------------------------------------
 
 _PAGE_SIZE = 100  # Must match changes._CHANGE_PAGE_SIZE
+
+
+def _md5(data: bytes) -> str:
+    return hashlib.md5(data, usedforsecurity=False).hexdigest()
 
 
 def _cache() -> PathIDCache:
@@ -252,10 +254,8 @@ def test_cross_page_stale_child_echo_not_resurrected(sync_engine: SyncEngine):
     Teeth: temporarily neutering the finding-5 guard makes this test FAIL
     (kid_id ends up re-indexed at /old/kid.txt instead of /renamed/kid.txt).
     """
-    import hashlib
-
     data = b"kid content unchanged by the rename"
-    kid_hash = hashlib.md5(data, usedforsecurity=False).hexdigest()
+    kid_hash = _md5(data)
 
     fake = FakeDrive()
 
@@ -347,6 +347,11 @@ def test_cross_page_stale_child_echo_not_resurrected(sync_engine: SyncEngine):
     for sync_events, _cursor in sync_engine.list_remote_changes_iterator(start):
         sync_engine.apply_remote_changes(sync_events)
 
+    # The renamed folder itself must be indexed at /renamed (full rename applied).
+    dir_entry = sync_engine.get_index_entry("/renamed")
+    assert dir_entry is not None, "renamed folder must be indexed at /renamed"
+    assert dir_entry.remote_id == dir_id
+
     # Child must be indexed only at /renamed/kid.txt, never at the stale path.
     assert sync_engine.get_index_entry("/old/kid.txt") is None
     assert sync_engine.get_index_entry("/old") is None
@@ -386,7 +391,6 @@ def test_fail_after_changes_list_raises_and_redelivers():
 
     start = _start(fake)
     file_id = fake.add_file("/idempotent.txt", content=b"idempotent content")
-    cache_first.set("/idempotent.txt", file_id, ROOT_ID, "idempotent.txt", False)
 
     # Arm: fire after the changes.list execute (response-lost simulation).
     fake.fail_after("changes.list", make_http_error(500))
@@ -396,15 +400,14 @@ def test_fail_after_changes_list_raises_and_redelivers():
         _drain(fake, cache_first, start)
     assert exc_info.value.resp.status == 500
 
-    # Cache must NOT have been mutated (file path should still resolve —
-    # we pre-seeded it, so this checks no EXTRA writes happened either).
-    # The key property: the cursor was not advanced, so a re-drain from
-    # start must still see the file change.
+    # The key property: the cursor was not advanced, so a re-drain from the
+    # same start cursor must still deliver the file change.
 
     # Second drain from the SAME start cursor: rule was consumed, so no fault.
+    # No pre-seeding needed — ROOT_ID always resolves via PathIDCache's root
+    # special-case, so the drain finds the file without any cache.set() call.
     assert not fake._fail_rules  # consumed by fail_after firing
     cache_second = _cache()
-    cache_second.set("/idempotent.txt", file_id, ROOT_ID, "idempotent.txt", False)
     entries, pages = _drain(fake, cache_second, start)
 
     # All changes redelivered.
