@@ -89,7 +89,9 @@ def sync_engine():
     local_dir = osp.join(get_home_dir(), "fault_feed_dir")
     os.mkdir(local_dir)
 
-    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
+    # check_same_thread=False is required because apply_remote_changes uses a
+    # thread pool (do_parallel) that may access the path cache from worker threads.
+    cache = PathIDCache(Database(sqlite3.connect(":memory:", check_same_thread=False)))
     cache.root_id = ROOT_ID
     sync = SyncEngine(
         GoogleDriveClient("fault-feed-config", CredentialStorage("fault-feed-config"), cache)
@@ -226,17 +228,29 @@ def test_page2_fault_before_any_yield():
 def test_cross_page_stale_child_echo_not_resurrected(sync_engine: SyncEngine):
     """Parent-folder rename and child stale echo split across two change pages.
 
-    The all-pages-buffered design means iter_remote_changes sees the complete
-    batch (both pages) before classification.  The path cache therefore has the
-    correct post-rename mapping when the child entry is classified.
+    Mechanism (mirrors test_remote_folder_rename_with_same_batch_stale_child_echo):
 
-    However the stale-echo guard in _apply_remote_move is a runtime check on
-    the on-disk tree and the index state AFTER the folder event has been applied.
-    This test confirms the cross-page variant has the same safety guarantee as
-    the same-batch variant (test_remote_folder_rename_with_same_batch_stale_child_echo).
+      * Pre-rename state (path cache + index + disk): /old  /old/kid.txt.
+      * Drive renames /old → /renamed; kid.txt gets a content touch in the same poll.
+      * The kid's change lands on page 1 (before the _PAGE_SIZE boundary);
+        the folder rename lands on page 2.
+      * iter_remote_changes buffers ALL pages before running the fixpoint.
+        The fixpoint processes kid first (page 1): kid's parent dir_id resolves to
+        /old in the still-unmodified path cache → emits FileMetadata(/old/kid.txt)
+        (stale echo). Then it processes the folder rename (page 2): moves /old → /renamed
+        in the path cache (re-keys subtree).
+      * apply_remote_changes applies the folder event first (shallow depth), re-keying
+        the index subtree: kid_id → /renamed/kid.txt.  Then it processes the stale file
+        event at /old/kid.txt: _apply_remote_move finds kid_id already indexed at
+        /renamed/kid.txt, attempts to move /renamed/kid.txt → /old/kid.txt, the move
+        silently no-ops (destination parent /old no longer exists), and the finding-5
+        guard fires (destination parent absent from index) → returns True (skip).
 
-    The stale child must NOT be resurrected at its old path; exactly one index
-    row must hold the child id.
+    The stale child must NOT be resurrected at /old/kid.txt; exactly one index
+    row must hold kid_id, at /renamed/kid.txt.
+
+    Teeth: temporarily neutering the finding-5 guard makes this test FAIL
+    (kid_id ends up re-indexed at /old/kid.txt instead of /renamed/kid.txt).
     """
     import hashlib
 
@@ -245,71 +259,81 @@ def test_cross_page_stale_child_echo_not_resurrected(sync_engine: SyncEngine):
 
     fake = FakeDrive()
 
-    # Drive current truth: /renamed and /renamed/kid.txt.
-    dir_id = fake.add_folder("/renamed")
-    kid_id = fake.add_file("/renamed/kid.txt", data)
+    # Drive pre-rename state: folder "old" containing kid.txt.
+    # These two entries are logged BEFORE we call _start(), so they are
+    # invisible to the drain from the start cursor.
+    dir_id = fake.add_folder("/old")
+    kid_id = fake.add_file("/old/kid.txt", data)
     kid_rev = fake.files[kid_id]["headRevisionId"]
 
-    # Seed path cache with post-rename reality.
+    # Seed path cache with the PRE-rename truth.
+    # iter_remote_changes will use these entries when classifying changes: the
+    # kid's change entry (page 1) will see dir_id → /old, so kid resolves to
+    # /old/kid.txt (stale echo).  The folder rename (page 2) then moves
+    # the path-cache entry from /old to /renamed, re-keying the subtree.
     sync_engine.client._path_cache.set(
-        "/renamed", dir_id, parent_id=ROOT_ID, name="renamed", is_folder=True
+        "/old", dir_id, parent_id=ROOT_ID, name="old", is_folder=True
     )
     sync_engine.client._path_cache.set(
-        "/renamed/kid.txt", kid_id, parent_id=dir_id, name="kid.txt", is_folder=False
+        "/old/kid.txt", kid_id, parent_id=dir_id, name="kid.txt", is_folder=False
     )
 
-    # Take the start cursor AFTER seeding the above (two entries logged so far).
-    # Now add 99 more filler files so the FIRST page fills to 101 entries,
-    # pushing the folder rename (dir_id) and its stale child (kid_id) to page 2.
-    # Because the fake deduplicates by fileId (latest-seq), we need 99 DISTINCT
-    # file ids that arrived BEFORE dir_id and kid_id in the change log.
-    filler_ids = []
+    # Take the start cursor NOW — before any changes that should be visible to
+    # the drain.  Everything logged after this point is eligible for the feed.
+    start = _start(fake)
+
+    # Seed 99 filler files.  Each gets its own unique change-log entry (seq).
+    # Together with the kid update below they fill exactly _PAGE_SIZE = 100
+    # slots on page 1, pushing the folder rename to page 2.
     for i in range(99):
-        fid = fake.add_file(f"/filler{i:03d}.txt", content=b"filler")
-        filler_ids.append(fid)
+        fake.add_file(f"/filler{i:03d}.txt", content=b"filler")
 
-    # Seed the filler files into the path cache so they resolve cleanly.
-    for i, fid in enumerate(filler_ids):
-        sync_engine.client._path_cache.set(
-            f"/filler{i:03d}.txt", fid, parent_id=ROOT_ID,
-            name=f"filler{i:03d}.txt", is_folder=False,
-        )
-
-    # Now log a "stale echo" of the child at the POST-rename path
-    # (same as the create above) by mutating the file — this generates a
-    # new change-log entry for kid_id AFTER the filler files, ensuring it
-    # lands on page 2.  The parent folder (dir_id) was also logged after
-    # the 99 fillers, so both folder + child are on page 2.
+    # Touch kid.txt so it re-appears in the change log AFTER the fillers.
+    # The fake deduplicates by latest-seq, so kid_id's change-log entry is now
+    # AFTER all filler entries.  kid ends up as the 100th visible entry = last
+    # slot of page 1.
     fake.service().files().update(
         fileId=kid_id,
         body={"modifiedTime": "2026-01-01T00:00:01.000Z"},
     ).execute()
 
-    start = _start(fake)
-
-    # We must ensure dir_id and kid_id are both logged AFTER the page boundary.
-    # Currently: 2 (dir_id, kid_id from seeding) + 99 (fillers) + 1 (kid update)
-    # = 102 entries.  The fake collapses to latest-seq per fileId, yielding:
-    # 99 fillers + dir_id + kid_id (latest-seq) = 101 unique entries, page-split
-    # at 100.  The 101st entry (kid_id) is on page 2.
-    # BUT we also need dir_id on page 2 to test the cross-page scenario.
-    # dir_id's latest-seq is its creation seq (before fillers), so it currently
-    # lands on page 1.  Force dir_id to page 2 by updating it after fillers + kid update.
+    # Rename the folder from "old" to "renamed" AFTER the kid update.  Its
+    # latest-seq is now the 101st visible entry → page 2.
+    # Drive truth after this update: /renamed  /renamed/kid.txt.
     fake.service().files().update(
         fileId=dir_id,
-        body={"name": "renamed"},  # same name — just bumps seq
+        body={"name": "renamed"},
     ).execute()
-    # Now change log (collapsed by latest-seq): 99 fillers + kid_id + dir_id = 101.
-    # Page 1: 100 fillers (filler000..filler098, kid_id) — wait, let's recalculate.
-    # After collapse: filler000-098 (99) + kid_id + dir_id = 101.
-    # Sorted by seq: 99 fillers (seqs 101-199), kid_update (seq 202), dir_update (seq 203).
-    # Page 1 (top 100 by seq): fillers (99) + kid_id. Page 2: dir_id.
-    # That means kid is on page 1 and dir is on page 2.  Good enough to test cross-page.
 
-    # Wire the fake service (after all mutations).
+    # ── Two-page teeth ──────────────────────────────────────────────────────
+    # Verify that the number of unique visible entries exceeds _PAGE_SIZE,
+    # proving the fake will serve TWO changes.list pages.
+    # (fake.changes.list collapses to latest-seq per fileId and paginates at
+    # _PAGE_SIZE; if we have ≤ _PAGE_SIZE unique entries it would be one page.)
+    _visible_latest: dict[str, int] = {}
+    for seq, fid in fake._change_log:
+        if seq >= int(start):
+            _visible_latest[fid] = seq
+    assert len(_visible_latest) > _PAGE_SIZE, (
+        f"Expected >{_PAGE_SIZE} visible unique entries to force 2 pages, "
+        f"got {len(_visible_latest)}"
+    )
+    # Also verify that the folder rename is NOT in the first _PAGE_SIZE entries
+    # (i.e. it is on page 2).
+    _sorted_visible = sorted(_visible_latest.items(), key=lambda kv: kv[1])
+    _page1_ids = {fid for fid, _ in _sorted_visible[:_PAGE_SIZE]}
+    assert dir_id not in _page1_ids, (
+        "dir_id must be on page 2, not page 1, for the cross-page scenario"
+    )
+    assert kid_id in _page1_ids, (
+        "kid_id must be on page 1 so the stale echo fires before the rename"
+    )
+    # ────────────────────────────────────────────────────────────────────────
+
+    # Wire the fake (after all mutations so service() returns final state).
     _wire_fake(sync_engine, fake)
 
-    # Local pre-rename state: /old/kid.txt on disk + index at /old.
+    # Fully synced PRE-rename state: /old/kid.txt on disk + index at /old.
     _write_local_file(sync_engine, "/old/kid.txt", data)
     _seed_entry(
         sync_engine, "/old", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
@@ -319,11 +343,11 @@ def test_cross_page_stale_child_echo_not_resurrected(sync_engine: SyncEngine):
         rev=kid_rev, content_hash=kid_hash,
     )
 
-    # Drive end-to-end: drain changes and apply.
+    # Drive end-to-end: drain both pages and apply.
     for sync_events, _cursor in sync_engine.list_remote_changes_iterator(start):
         sync_engine.apply_remote_changes(sync_events)
 
-    # Child must be indexed only at /renamed/kid.txt.
+    # Child must be indexed only at /renamed/kid.txt, never at the stale path.
     assert sync_engine.get_index_entry("/old/kid.txt") is None
     assert sync_engine.get_index_entry("/old") is None
     kid_entry = sync_engine.get_index_entry("/renamed/kid.txt")
@@ -481,23 +505,48 @@ def test_direct_changelog_duplicate_still_collapsed():
 
     Characterization: the dedup is in the fake's list() not in changes.py,
     so this test documents the boundary.
+
+    Teeth: both entries are visible from the start cursor (seq >= int(start)),
+    so WITHOUT the fake's dedup the drain would see TWO FileMetadata entries
+    for file_id.  The test confirms the fake collapses them to exactly one.
+    If the fake returned both, len(matching) would be 2.
     """
     fake = FakeDrive()
     cache = _cache()
 
+    # Take start BEFORE creating the file so BOTH change-log entries (the
+    # real create and the manually appended duplicate) are visible from
+    # the cursor.  The original bug appended (seq_before - 5, file_id) where
+    # seq_before = 101 and start = "100", so the duplicate had seq 96 < 100
+    # and was filtered out — only one entry ever reached the drain, making
+    # the dedup untested.
     start = _start(fake)
+
     file_id = fake.add_file("/dedup.txt", content=b"data")
 
-    # Manually append a second entry for the same fid with a lower seq.
-    seq_before = fake._seq
-    fake._change_log.append((seq_before - 5, file_id))  # lower seq, same fid
+    # Manually append a second entry for the same fid with a HIGHER seq so it
+    # is also visible (seq >= int(start)).  The fake deduplicates to the
+    # latest-seq entry per fileId; both entries are in the log and both have
+    # seq >= int(start), so the dedup IS actually exercised here.
+    seq_of_extra = fake._seq  # current seq counter, which will be > int(start)
+    fake._change_log.append((seq_of_extra, file_id))
 
-    # Two entries in the log.
+    # Precondition: exactly two raw change-log entries for file_id.
     raw_for_fid = [(seq, fid) for seq, fid in fake._change_log if fid == file_id]
-    assert len(raw_for_fid) == 2
+    assert len(raw_for_fid) == 2, "precondition: two change log entries for fid"
+
+    # Both entries must be visible from the start cursor.
+    visible_for_fid = [
+        (seq, fid) for seq, fid in raw_for_fid if seq >= int(start)
+    ]
+    assert len(visible_for_fid) == 2, (
+        "both entries must be above the start cursor so the dedup is exercised; "
+        f"start={start}, entries={raw_for_fid}"
+    )
 
     entries, _ = _drain(fake, cache, start)
 
-    # Still exactly one entry emitted.
+    # The fake collapses to latest-seq: still exactly one entry emitted.
+    # (If the fake returned both, len(matching) would be 2.)
     matching = [e for e in entries if isinstance(e, FileMetadata) and e.id == file_id]
     assert len(matching) == 1
