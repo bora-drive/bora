@@ -508,3 +508,36 @@ def test_exception_factory_shapes():
     assert make_http_error(429, "userRateLimitExceeded").resp.status == 429
     assert isinstance(make_timeout(), (TimeoutError, socket.timeout, _requests.exceptions.Timeout))
     assert isinstance(make_conn_reset(), (ConnectionError, _requests.exceptions.ConnectionError))
+
+
+def test_fail_after_update_commits_then_raises():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"x")
+    fake.fail_after("files.update", make_http_error(500))
+    svc = fake.service()
+    try:
+        svc.files().update(fileId=fid, body={"name": "b.txt"}, fields="id").execute()
+        assert False, "expected post-commit 500"
+    except HttpError as e:
+        assert e.resp.status == 500
+    assert fake.files[fid]["name"] == "b.txt"  # update DID commit before the raise
+
+
+def test_fail_after_changes_list_redelivers_on_next_poll():
+    fake = FakeDrive()
+    fake.add_file("/a.txt", content=b"a")
+    fake.fail_after("changes.list", make_http_error(500))
+    svc = fake.service()
+    try:
+        svc.changes().list(pageToken="100", pageSize=100,
+                           fields="changes(fileId), newStartPageToken",
+                           includeRemoved=True).execute()
+        assert False, "expected post-commit 500"
+    except HttpError as e:
+        assert e.resp.status == 500
+    # The read is non-mutating, so a fresh poll from the same cursor still
+    # delivers the change (no loss).
+    resp = svc.changes().list(pageToken="100", pageSize=100,
+                              fields="changes(fileId), newStartPageToken",
+                              includeRemoved=True).execute()
+    assert len(resp["changes"]) == 1

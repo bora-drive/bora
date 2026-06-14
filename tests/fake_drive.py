@@ -461,6 +461,7 @@ class _FilesResource:
                 raise make_http_error(404, "notFound", "File not found")
             return _project(rec, fields)
         return _Request("files.get", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs={"fileId": fileId, "fields": fields})
 
     def list(self, q="", fields="", pageSize=100, pageToken=None, **_):
@@ -482,6 +483,7 @@ class _FilesResource:
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
         return _Request("files.list", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs={"q": q, "pageToken": pageToken})
 
     def create(self, body=None, media_body=None, fields="", **_):
@@ -543,6 +545,7 @@ class _FilesResource:
         def run():
             return {"ids": [self._d._new_id() for _ in range(count)]}
         return _Request("files.generateIds", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs={})
 
     def get_media(self, fileId, **_):
@@ -591,9 +594,11 @@ class _FilesResource:
         if media_body is not None and _resumable:
             return _ResumableRequest(
                 "files.update", self._d._maybe_fail, _read_media(media_body), finalize,
+                fail_after_check=self._d._maybe_fail_after,
                 fail_kwargs=_update_kwargs,
             )
         return _Request("files.update", self._d._maybe_fail, finalize,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs=_update_kwargs)
 
 
@@ -605,6 +610,7 @@ class _ChangesResource:
         def run():
             return {"startPageToken": str(self._d._seq)}
         return _Request("changes.getStartPageToken", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs={})
 
     def list(self, pageToken, pageSize=100, fields="", includeRemoved=True, **_):
@@ -643,6 +649,7 @@ class _ChangesResource:
                 resp["newStartPageToken"] = str(self._d._seq)
             return resp
         return _Request("changes.list", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs={"pageToken": pageToken})
 
 
@@ -654,6 +661,7 @@ class _AboutResource:
         def run():
             return {"user": dict(self._d.user), "storageQuota": dict(self._d.storage_quota)}
         return _Request("about.get", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs={})
 
 
@@ -676,6 +684,7 @@ class _RevisionsResource:
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
         return _Request("revisions.list", self._d._maybe_fail, run,
+                        fail_after_check=self._d._maybe_fail_after,
                         fail_kwargs={"fileId": fileId})
 
     def get_media(self, fileId, revisionId, **_):
