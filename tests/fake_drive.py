@@ -180,6 +180,12 @@ class FakeDrive:
             The bytes served are correct, but the file record's
             ``md5Checksum`` is replaced with a known-wrong value.  Models a
             server returning an inconsistent checksum while the bytes are fine.
+
+        Note: ``truncate`` and ``flip`` are single-use (the corruption is
+        consumed at the next ``get_media`` call).  ``wrong_md5`` mutates the
+        record's ``md5Checksum`` permanently — a caller needing a clean
+        subsequent download must restore
+        ``fake.files[file_id]['md5Checksum']`` itself.
         """
         if mode not in ("truncate", "flip", "wrong_md5"):
             raise ValueError(f"Unknown corruption mode: {mode!r}")

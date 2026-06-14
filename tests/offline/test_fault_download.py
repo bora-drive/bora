@@ -3,8 +3,9 @@
 Covers:
   A — truncated ``get_media`` bytes → MD5 mismatch → DataCorruptionError,
       sidecar cleaned up, target file not committed.
-  B — flipped byte in ``get_media`` bytes → MD5 mismatch → DataCorruptionError,
-      same cleanup guarantees.
+  B — wrong advertised md5 (bytes correct, checksum wrong) → DataCorruptionError,
+      same cleanup guarantees; teeth test confirms the md5-comparison mechanism
+      is load-bearing (wrong_md5 mode + clean recovery after checksum restore).
   C — mid-stream fault on the 2nd chunk of a multi-chunk download → per-chunk
       _retry_transient recovers transparently; final file matches original MD5.
 
@@ -87,7 +88,7 @@ def test_truncated_download_raises_and_leaves_no_file(cof, tmp_path):
     assert not osp.exists(local + ".cumulus-part"), "sidecar must be cleaned up"
 
 
-def test_truncated_download_teeth(cof, tmp_path, monkeypatch):
+def test_truncated_download_teeth(cof, tmp_path):
     """Teeth: bypass the MD5 check → truncated file IS committed.
 
     This proves the above test is sensitive to the integrity check: without
@@ -124,7 +125,7 @@ def test_truncated_download_teeth(cof, tmp_path, monkeypatch):
 
 
 # ===========================================================================
-# Scenario B — flipped byte → DataCorruptionError, no committed file
+# Scenario B — wrong advertised md5 → DataCorruptionError, no committed file
 # ===========================================================================
 
 
@@ -144,17 +145,20 @@ def test_flipped_byte_download_raises_and_leaves_no_file(cof, tmp_path):
     assert not osp.exists(local + ".cumulus-part"), "sidecar must be cleaned up"
 
 
-def test_flipped_byte_download_teeth(cof, tmp_path):
-    """Teeth: wrong_md5 mode makes the server advertise an inconsistent checksum.
+def test_wrong_md5_download_raises_then_clean_recovery_teeth(cof, tmp_path):
+    """Teeth: integrity-check mechanism is load-bearing (exercised via wrong_md5 mode).
 
-    ``wrong_md5`` corrupts the advertised md5 while bytes are correct.  The
-    integrity check still raises DataCorruptionError (correct bytes ≠ wrong
-    advertised md5).  This test verifies that the DATA itself is fine (no
-    byte-flip in bytes), while the CHECK still fires — i.e. the check is
-    triggered by the advertised value, not solely by byte errors.
+    ``wrong_md5`` mode leaves the served bytes correct but mutates the
+    record's ``md5Checksum`` to a known-wrong value.  This isolates the
+    MD5 *comparison* as the detection mechanism: the check must fire even
+    when bytes are valid, purely because the advertised checksum differs.
 
-    Teeth inversion: if we then patch the expected checksum back to the
-    correct value, the download succeeds and the file IS committed.
+    Phase 1 — wrong_md5 armed: DataCorruptionError is raised and no file is
+    committed, proving the integrity guard is load-bearing.
+
+    Phase 2 — checksum restored: the correct md5 is written back to the
+    record and a clean download of the same file succeeds, confirming the
+    error was caused solely by the checksum mismatch and not by byte damage.
     """
     client, fake = cof
 
