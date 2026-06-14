@@ -1,7 +1,9 @@
 import hashlib
 import io
+import socket
 import sqlite3
 
+import requests as _requests
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaInMemoryUpload, MediaIoBaseDownload
 
@@ -9,7 +11,7 @@ from cumulus.client import GoogleDriveClient
 from cumulus.database.core import Database
 from cumulus.keyring import CredentialStorage
 from cumulus.path_cache import PathIDCache
-from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error
+from tests.fake_drive import ROOT_ID, FakeDrive, make_conn_reset, make_http_error, make_timeout
 
 
 def test_seed_root_and_file():
@@ -425,12 +427,6 @@ def test_client_fixture_is_wired_to_fake(client_on_fake):
 # Task 7b-E2 Task 1 — Generalized fault surface
 # ---------------------------------------------------------------------------
 
-import socket  # noqa: E402
-import requests as _requests  # noqa: E402
-
-from tests.fake_drive import make_timeout, make_conn_reset  # noqa: E402
-
-
 def test_fail_next_count_fails_n_then_succeeds():
     fake = FakeDrive()
     fid = fake.add_file("/a.txt", content=b"x")
@@ -495,7 +491,6 @@ def test_get_media_can_fault():
     fake.fail_next("files.get_media", make_timeout())
     request = fake.service().files().get_media(fileId=fid)
     buf = io.BytesIO()
-    from googleapiclient.http import MediaIoBaseDownload
     downloader = MediaIoBaseDownload(buf, request, chunksize=64)
     try:
         downloader.next_chunk()
