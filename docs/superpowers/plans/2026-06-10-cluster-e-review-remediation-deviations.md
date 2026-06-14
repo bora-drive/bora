@@ -201,7 +201,8 @@ A read-only interaction review of the whole cluster (commits
 see (feed pipeline T2+T4+T8+T12, move machinery T3+T9, id-pool/probe T6+T7,
 path-form discipline vs T10, error-boundary ordering). The composition was
 sound along every path the plan anticipated; clean probes are listed at the
-end. Four findings:
+end. Findings 1–4 are from the static interaction review; finding 5 was caught
+by the live linked-suite spot-checks (Task 15 step 3):
 
 - **Finding 1 (Important) — FIXED in `46de6bc`.** `_clean_remote_changes`
   dropped a move-out DELETE when a path was reused by a different item in the
@@ -250,6 +251,35 @@ end. Four findings:
   sits at B with a stale index hash/rev, unsynced until daemon restart
   (`upload_local_changes_while_inactive`) or the next remote rev bump (which
   then correctly conflicts). One-poll-cycle window; no on-disk data loss.
+
+- **Finding 5 (Important) — DISCOVERED BY THE LIVE SPOT-CHECKS; must fix before
+  Stage 7b.** T3 general-remote-rename, run live against the test account
+  (Task 15 step 3), failed: after a remote folder rename `/folder → /renamed`,
+  the index ended up holding the child at the stale `/folder/child.txt` while
+  disk was correctly at `/renamed/child.txt` (`assert_synced` caught the
+  index/Drive divergence; reproduced on all 3 reruns). Root cause from the
+  engine log: the poll batch contained BOTH the folder-rename
+  `FolderMetadata(/renamed)` AND a stale echo of the child's own earlier
+  upload, `FileMetadata(child.txt @ /folder/child.txt)` (resolved at the
+  child's pre-rename path). Apply order is folders-then-files, so
+  `_apply_remote_move` first re-keys the subtree (`/folder/child.txt →
+  /renamed/child.txt`, log confirms "Moved local item /folder -> /renamed"),
+  then the stale child event fires `_apply_remote_move` AGAIN on the same child
+  id — now found at `/renamed/child.txt` — and re-keys it BACK to the stale
+  `/folder/child.txt`, corrupting the index. Triggers only when a child's
+  change echo lands in the SAME poll batch as its parent's rename: reliably
+  reproduced at the test harness's 2 s poll interval; production's 180 s
+  interval makes the coincidence rarer but not impossible, and varied-timing
+  fault injection in Stage 7b will hit it. The offline T3 tests apply the
+  rename as a lone event, so they never exercised this parent-rename +
+  stale-child-echo interaction. **Not fixed here:** the fix needs an offline
+  reproduction (a batch with a folder-move event plus a same-id-subtree child
+  event at the pre-move path) and a guard so `_apply_remote_move` does not undo
+  a subtree re-key applied earlier in the same batch (e.g. ignore an event
+  whose path is stale relative to the index, or apply parent moves after child
+  events / dedupe by remote_id within the batch) — its own TDD + review cycle,
+  not a gate patch. T8 (stale-cursor auto-reindex) and T10 (mignore
+  exclusion/inclusion) live spot-checks both PASSED.
 
 **Clean probes (verified sound):** T8's 400→CursorReset wraps every page
 fetch including continuations and fires before any cache mutation/yield (old
