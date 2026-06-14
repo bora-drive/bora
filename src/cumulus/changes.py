@@ -158,21 +158,35 @@ def _emit_delete(
     change: dict[str, Any],
     path_cache: "PathIDCache",
     out_entries: list[Any],
+    resolve_deleted_path: "Callable[[str], str | None] | None" = None,
 ) -> None:
     """Apply a hard-delete / trash / move-out: drop the file from the
     cache and append a :class:`DeletedMetadata`.
 
-    A delete for a fileId the cache never knew about is a silent no-op
+    The path is resolved from the cache. If the cache does not know the
+    fileId and *resolve_deleted_path* is given, it is consulted as a
+    fallback — this resolves a replayed delete after a crash mid-batch:
+    the cache is mutated durably while the cursor advances only once the
+    whole batch is applied, so on replay the id is already evicted from
+    the cache, yet the engine index (keyed by remote_id) still holds the
+    row. The fallback re-emits the deletion so the stranded local file +
+    index row are removed (cluster-E finding 2). A delete for a fileId
+    that neither the cache nor the resolver knows is a silent no-op
     (debug log only) — there is nothing in the local mirror to remove.
     """
-    path = path_cache.id_to_path(change.get("fileId"))
+    file_id = change.get("fileId")
+    path = path_cache.id_to_path(file_id)
+    if path is not None:
+        path_cache.remove(path)
+    elif resolve_deleted_path is not None and file_id is not None:
+        # Cache miss: fall back to the engine index by remote_id. The id is
+        # not in the cache, so there is nothing to remove there.
+        path = resolve_deleted_path(file_id)
     if path is None:
         logger.debug(
-            "Delete for unknown fileId %s; nothing to remove",
-            change.get("fileId"),
+            "Delete for unknown fileId %s; nothing to remove", file_id
         )
         return
-    path_cache.remove(path)
     out_entries.append(
         DeletedMetadata(
             name=path.rsplit("/", 1)[-1],
@@ -251,6 +265,7 @@ def iter_remote_changes(
     retry: "Callable[[Callable[[], Any]], Any]",
     path_cache: "PathIDCache",
     last_cursor: str,
+    resolve_deleted_path: "Callable[[str], str | None] | None" = None,
 ) -> "Iterator[ListFolderResult]":
     """Drain Drive's ``changes.list`` pages and yield one
     :class:`~cumulus.core.ListFolderResult` per poll cycle.
@@ -272,23 +287,25 @@ def iter_remote_changes(
     and applied, so a crash mid-batch re-fetches the batch on next
     startup. Re-applied *creates* and *moves* are idempotent (a create
     re-resolves to the same path; a move is recovered by remote_id via
-    :meth:`SyncEngine._apply_remote_move`). Re-applied *deletes* are
-    NOT: this function mutates ``path_cache`` durably as it classifies
-    (a separate database from the engine's cursor), so on replay
-    :func:`_emit_delete` finds the fileId already gone from the cache
-    and silently no-ops — the ``DeletedMetadata`` is never re-emitted
-    and the cursor can advance past an unapplied deletion, stranding a
-    local file plus its index row until a manual rebuild. This is a
-    known crash-window limitation (cluster-E final-review finding 2,
-    recorded in the remediation deviations file) to close before the
-    Stage 7b fault-injection work, e.g. by resolving replayed deletes
-    against the index by remote_id or deferring cache mutations into
-    the apply phase.
+    :meth:`SyncEngine._apply_remote_move`). Re-applied *deletes* would
+    otherwise be lost: this function mutates ``path_cache`` durably as
+    it classifies (a separate database from the engine's cursor), so on
+    replay :func:`_emit_delete` finds the fileId already gone from the
+    cache. *resolve_deleted_path* closes that crash window — the engine
+    passes its index-by-remote_id lookup, so a replayed delete whose id
+    was already evicted from the cache is re-resolved against the
+    surviving index row and the ``DeletedMetadata`` is still emitted,
+    removing the stranded local file plus its index row (cluster-E
+    final-review finding 2). When the resolver is absent or the id is
+    unknown to it as well, the delete remains a silent no-op.
 
     :param service_factory: zero-arg callable returning a Drive service.
     :param retry: the client's ``_retry_transient`` helper.
     :param path_cache: the path cache to resolve and mutate.
     :param last_cursor: the page token to start from.
+    :param resolve_deleted_path: optional fileId -> cased-path fallback
+        for replayed deletes whose id the cache has already evicted; the
+        engine passes :meth:`SyncEngine._index_path_for_remote_id`.
     """
     # Phase 1: drain every page to the final newStartPageToken, buffering
     # raw changes. Parent-before-child is not guaranteed even ACROSS
@@ -331,7 +348,7 @@ def iter_remote_changes(
     for change in raw:
         file = change.get("file")
         if change.get("removed") or (file is not None and file.get("trashed")):
-            _emit_delete(change, path_cache, out_entries)
+            _emit_delete(change, path_cache, out_entries, resolve_deleted_path)
         elif file is None:
             logger.debug("Skipping malformed change entry: %r", change)
         else:
@@ -372,7 +389,7 @@ def iter_remote_changes(
         remaining: list[dict[str, Any]] = []
         for change in pending:
             if classify(change, path_cache) is ChangeDecision.DELETE:
-                _emit_delete(change, path_cache, out_entries)
+                _emit_delete(change, path_cache, out_entries, resolve_deleted_path)
                 progress = True
             else:
                 remaining.append(change)
@@ -388,7 +405,7 @@ def iter_remote_changes(
         for change in pending:
             decision = classify(change, path_cache)
             if decision is ChangeDecision.DELETE:
-                _emit_delete(change, path_cache, out_entries)
+                _emit_delete(change, path_cache, out_entries, resolve_deleted_path)
             elif decision is ChangeDecision.APPLY:
                 # Deterministically rejected again (no cache mutation
                 # since the stall); emits the Task-2 conflict warning.

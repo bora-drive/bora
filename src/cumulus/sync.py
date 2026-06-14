@@ -928,6 +928,25 @@ class SyncEngine:
             rows = self._index_table.select_sql("WHERE remote_id = ?", remote_id)
         return rows[0] if rows else None
 
+    def _index_path_for_remote_id(self, remote_id: str) -> str | None:
+        """
+        Resolve a remote ID to its current cased index path, if indexed.
+
+        Used as the crash-replay fallback for delete classification in
+        :func:`cumulus.changes.iter_remote_changes`: when the path cache has
+        already evicted a fileId — a delete replayed after a crash mid-batch,
+        because the cache mutates durably while the cursor advances only once
+        the whole batch is applied — the surviving index row still maps the id
+        to its path, so the deletion can be re-emitted and the stranded local
+        file + index row removed (cluster-E finding 2). The cased path is
+        URL-encoded, matching the form the path cache yields.
+
+        :param remote_id: Unique remote ID of the item.
+        :returns: Cased remote path or ``None`` if the id is not indexed.
+        """
+        entry = self.get_index_entry_by_remote_id(remote_id)
+        return entry.remote_path_cased if entry else None
+
     def get_index_entry_for_local_path(self, local_path: str) -> IndexEntry | None:
         """
         Gets the index entry for the given local path. Ensures that the index entry has
@@ -3088,7 +3107,9 @@ class SyncEngine:
             # Pick up where we left off. This may be an interrupted indexing /
             # pagination through changes or a completely new set of changes.
             self._logger.debug("Fetching remote changes since cursor: %s", last_cursor)
-            changes_iter = self.client.list_remote_changes_iterator(last_cursor)
+            changes_iter = self.client.list_remote_changes_iterator(
+                last_cursor, resolve_deleted_path=self._index_path_for_remote_id
+            )
 
         for changes in changes_iter:
             changes = self._clean_remote_changes(changes)

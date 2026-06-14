@@ -1251,7 +1251,9 @@ class GoogleDriveClient:
         return self.flatten_results(pages)
 
     def list_remote_changes_iterator(
-        self, last_cursor: str
+        self,
+        last_cursor: str,
+        resolve_deleted_path: "Callable[[str], str | None] | None" = None,
     ) -> Iterator[ListFolderResult]:
         """Lists remote changes as a paginated iterator.
 
@@ -1259,6 +1261,11 @@ class GoogleDriveClient:
         classifies each change, resolves paths, mutates the path cache,
         and strips Google-native documents. HTTP errors raised mid-stream
         are converted to Cumulus exceptions.
+
+        *resolve_deleted_path* is an optional fallback that maps a fileId to
+        its cased path when the path cache has already evicted it (the engine
+        passes its index-by-remote_id lookup, so a delete replayed after a
+        crash mid-batch is still propagated — cluster-E finding 2).
         """
         self._ensure_root_id()
         with convert_api_errors():
@@ -1267,6 +1274,7 @@ class GoogleDriveClient:
                 self._retry_transient,
                 self._path_cache,
                 last_cursor,
+                resolve_deleted_path=resolve_deleted_path,
             )
 
     # ---- Sharing ---------------------------------------------------------------------

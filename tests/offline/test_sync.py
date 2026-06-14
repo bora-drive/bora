@@ -1769,6 +1769,71 @@ def test_apply_remote_changes_prunes_deleted_excluded_item(
     assert sync_engine.excluded_items == set()
 
 
+def test_crash_replayed_delete_with_evicted_cache_removes_stranded_item(
+    sync_engine: SyncEngine,
+) -> None:
+    """End-to-end crash-replay (cluster-E finding 2): the path cache mutates
+    durably as ``iter_remote_changes`` classifies, but the engine cursor only
+    advances once the whole batch is applied. A hard crash mid-batch therefore
+    re-fetches a delete whose fileId the crashed run already evicted from the
+    cache — yet the index row (and the local file) still survive. The engine's
+    index-by-remote_id fallback must re-resolve that delete so the replayed
+    batch removes the stranded local file and index row instead of silently
+    no-op'ing and letting the cursor advance past an unapplied deletion.
+
+    Drives the real client iterator -> engine resolver -> apply path.
+    """
+    data = b"about to be deleted on the remote"
+    fake = FakeDrive()
+    file_id = fake.add_file("/gone.txt", data)
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    # Snapshot the cursor while /gone.txt still exists, then delete it remotely.
+    start_cursor = (
+        fake.service().changes().getStartPageToken().execute()["startPageToken"]
+    )
+
+    # Fully-synced local state survives the crash: file on disk + index row with
+    # a last_sync AFTER the file's ctime, so the replayed delete is classified
+    # RemoteNewer (not suppressed as a local-newer conflict).
+    local_path = _write_local_file(sync_engine, "/gone.txt", data)
+    _seed_entry(
+        sync_engine,
+        "/gone.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
+        content_hash=_md5(data),
+    )
+    with sync_engine._database_access():
+        entry = sync_engine.get_index_entry("/gone.txt")
+        entry.last_sync = datetime.today().timestamp() + 3600
+        sync_engine._index_table.update(entry)
+
+    # The crashed run already evicted /gone.txt from the path cache (durable),
+    # so the cache no longer knows file_id. The deletion was never applied and
+    # the cursor never advanced, so the index row above still maps id -> path.
+    assert sync_engine.client._path_cache.id_to_path(file_id) is None
+
+    fake.service().files().delete(fileId=file_id).execute()
+
+    # Replay the batch end-to-end: real client iterator -> resolver -> apply.
+    for sync_events, _cursor in sync_engine.list_remote_changes_iterator(start_cursor):
+        sync_engine.apply_remote_changes(sync_events)
+
+    assert not osp.exists(local_path), "stranded local file must be removed on replay"
+    assert sync_engine.get_index_entry("/gone.txt") is None
+    assert sync_engine.get_index_entry_by_remote_id(file_id) is None
+    assert sync_engine.sync_errors == []
+
+
 # ==== Cluster E final review: _clean_remote_changes must preserve move-out deletes ====
 #
 # The change feed is id-keyed: at most one entry per fileId per batch. The only way
