@@ -148,14 +148,6 @@ def _seed_entry(
         sync._index_table.update(entry)
 
 
-def _write_local_file(sync: SyncEngine, remote_path: str, data: bytes) -> str:
-    local_path = sync.to_local_path_from_cased(remote_path)
-    os.makedirs(osp.dirname(local_path), exist_ok=True)
-    with open(local_path, "wb") as f:
-        f.write(data)
-    return local_path
-
-
 # ===========================================================================
 # Scenario A — 400 invalid pageToken mid-stream
 # ===========================================================================
@@ -204,18 +196,18 @@ def test_scenario_a1_unit_400_raises_cursor_reset_error():
     remove_configuration(_CONFIG + "-unit")
 
 
-def test_scenario_a1_teeth_missing_cursor_reset_propagates_as_http_error():
-    """Teeth for A1: if the CursorResetError mapping were removed, a 400 would
-    propagate as a generic HttpError (not CursorResetError).
+def test_scenario_a1_no_fault_no_spurious_cursor_reset():
+    """Guard: CursorResetError must NOT be raised when no 400 fault is armed.
 
-    We prove teeth by bypassing the mapping: arm the fake with a 400 but assert
-    it does NOT raise CursorResetError when we drain changes.py's iter directly
-    with a stub that re-raises the raw HttpError (simulating no mapping).
+    This is a necessary (not sufficient) condition for the A1 mapping.  The
+    sufficient condition — that a 400 DOES raise CursorResetError — is covered
+    by ``test_scenario_a1_unit_400_raises_cursor_reset_error`` above, which is
+    the true teeth for the F5 mapping.
 
-    Actually the cleanest proof: monkey-patch changes.py to pass through HttpError
-    directly.  Instead we use a simpler inversion: assert that WITHOUT the 400
-    (no fault armed), CursorResetError is NOT raised — confirming the 400 is the
-    causal trigger.  If CursorResetError were raised spuriously, this would fail.
+    If CursorResetError were raised spuriously (e.g. on every call regardless
+    of the status code), that GREEN test would still pass but this guard would
+    fail, exposing a false positive in the GREEN test.  Together the pair pins
+    both directions of the mapping.
     """
     fake = FakeDrive()
     cache = PathIDCache(Database(sqlite3.connect(":memory:")))
@@ -396,12 +388,21 @@ def test_scenario_a3_teeth_bootstrap_requires_empty_cursor(sync_engine: SyncEngi
     # Pre-set did_finish_indexing=True to detect if bootstrap resets it.
     sync_engine._state.set("sync", "did_finish_indexing", True)
 
+    # Spy: list_folder_iterator is called ONLY on the bootstrap path.
+    # If the incremental path is taken it must never be called.
+    lfi_calls: list[object] = []
+    real_lfi = sync_engine.client.list_folder_iterator
+    sync_engine.client.list_folder_iterator = (  # type: ignore[method-assign]
+        lambda *a, **kw: (lfi_calls.append((a, kw)), real_lfi(*a, **kw))[-1]
+    )
+
     sync_engine.download_sync_cycle()
 
-    # Incremental path must NOT reset did_finish_indexing to False.
-    # (It ends by setting it to True, but it must not have been False mid-way
-    # in a detectable way — the cursor path taken is confirmed by it not
-    # calling list_folder_iterator, which would reset the path cache.)
+    # Incremental path: list_folder_iterator must NOT be called, and the
+    # post-conditions (non-empty cursor + did_finish_indexing=True) must hold.
+    assert lfi_calls == [], (
+        "Incremental path must not call list_folder_iterator"
+    )
     assert sync_engine.remote_cursor != "", (
         "Non-empty cursor must produce a non-empty post-cursor"
     )
@@ -478,16 +479,14 @@ def test_scenario_b_persistent_400_is_bounded(sync_engine: SyncEngine):
         assert sync_engine.remote_cursor == ""
 
         try:
-            # Bootstrap succeeds (uses getStartPageToken + files.list, not
-            # changes.list).  Then the engine sets a fresh cursor and returns.
-            # On the NEXT download_sync_cycle call (incremental), changes.list
-            # fires a 400.
+            # First call: bootstrap path (cursor == ""), so it uses
+            # getStartPageToken + list_folder_iterator/files.list — NOT
+            # changes.list.  The armed 400 fault is therefore NOT triggered here;
+            # bootstrap completes and stores a fresh non-empty cursor.
             sync_engine.download_sync_cycle()
-            # If we get here without raising, the bootstrap completed and the
-            # cursor was advanced — now arm the incremental poll.
-            # The next call would be the "wait_for_remote_changes + download"
-            # cycle; simulate it as a second download_sync_cycle with the fresh
-            # cursor in place.
+            # Second call: incremental path (cursor != "" after bootstrap).
+            # This call uses changes.list with the fresh token → hits the armed
+            # 400 → raises CursorResetError.  The except below catches it.
             sync_engine.download_sync_cycle()
         except CursorResetError:
             cursor_reset_count += 1
