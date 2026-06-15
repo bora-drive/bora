@@ -259,3 +259,111 @@ def test_s1_storm_load(sync_engine: SyncEngine):
         f"peak python allocation {_peak / 1e6:.0f}MB exceeded the "
         f"{_MEMORY_CEILING_BYTES / 1e6:.0f}MB ceiling — possible O(N) leak"
     )
+
+
+# ---------------------------------------------------------------------------
+# Scenario S2 — crash / resume idempotent re-index
+# ---------------------------------------------------------------------------
+
+
+def _run_crash_resume(
+    sync: SyncEngine,
+    fake: FakeDrive,
+    expected_folders: set[str],
+    expected_files: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    page_size: int,
+    crash_after_chunks: int,
+) -> None:
+    """Interrupt the initial index after K applied chunks (on a non-final page,
+    so cursor is still ""), then resume and assert idempotent completion."""
+    # Lower the bootstrap page size so the interruption lands mid-listing.
+    monkeypatch.setattr(client_mod, "_LIST_PAGE_SIZE", page_size)
+
+    _wire_fake(sync, fake)
+
+    # Interrupt after `crash_after_chunks` applied chunks via _cancel_requested.
+    real_apply = sync.apply_remote_changes
+    state = {"chunks": 0}
+
+    def counting_apply(events):
+        result = real_apply(events)
+        state["chunks"] += 1
+        if state["chunks"] == crash_after_chunks:
+            sync._cancel_requested.set()
+        return result
+
+    monkeypatch.setattr(sync, "apply_remote_changes", counting_apply)
+
+    with pytest.raises(CancelledError):
+        sync.download_sync_cycle()
+
+    # --- Partial state: cursor still "", indexing unfinished. ---
+    assert sync.remote_cursor == "", "mid-index crash must NOT advance the cursor"
+    assert sync._state.get("sync", "did_finish_indexing") is False
+    partial_ids = [e.remote_id for e in sync.iter_index()]
+    assert len(partial_ids) == len(set(partial_ids)), "duplicate rows after crash"
+    assert sync.index_count() > 0, "some entries must have been applied before crash"
+    assert sync.index_count() < len(expected_folders) + len(expected_files), (
+        "crash must leave a PARTIAL index"
+    )
+    # Files applied so far must already be intact on disk.
+    for entry in sync.iter_index():
+        path = entry.remote_path_cased
+        if path.lower() in expected_files:
+            local = sync.to_local_path_from_cased(path)
+            assert osp.isfile(local)
+            with open(local, "rb") as fh:
+                assert _md5(fh.read()) == expected_files[path.lower()]
+
+    # --- Resume: restore the real apply, clear cancel, re-enter the cycle. ---
+    monkeypatch.setattr(sync, "apply_remote_changes", real_apply)
+    sync._cancel_requested.clear()
+    _wire_fake(sync, fake)
+    sync.download_sync_cycle()
+
+    # --- Final state: complete, correct, no duplication, no corruption. ---
+    _assert_complete_index(sync, expected_folders, expected_files)
+
+
+def test_s0_crash_resume_small(sync_engine: SyncEngine, monkeypatch):
+    """Non-slow S0 guard for crash/resume (N~=150, page_size 50 -> 3 pages)."""
+    fake = FakeDrive()
+    expected_folders, expected_files = build_tree(fake, n_folders=30, n_files=120)
+    _run_crash_resume(
+        sync_engine, fake, expected_folders, expected_files, monkeypatch,
+        page_size=50, crash_after_chunks=1,
+    )
+
+
+@pytest.mark.load
+def test_s2_crash_resume_load(sync_engine: SyncEngine, monkeypatch):
+    """S2 (slow, N=10k): crash mid-index, then resume; the re-index is
+    idempotent and the final state is complete and uncorrupted. With page_size
+    1000 the 10k tree is ~10 pages; crash after 3 leaves a non-final partial."""
+    fake = FakeDrive()
+    expected_folders, expected_files = build_tree(
+        fake, n_folders=2000, n_files=8000
+    )
+
+    tracemalloc.start()
+    start = time.monotonic()
+    _run_crash_resume(
+        sync_engine, fake, expected_folders, expected_files, monkeypatch,
+        page_size=1000, crash_after_chunks=3,
+    )
+    elapsed = time.monotonic() - start
+    # _peak spans the whole run including _assert_complete_index, which md5-reads
+    # every file — so it is the harness+engine peak, a conservative leak guard,
+    # not a pure engine-memory figure.
+    _peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+
+    assert elapsed < _HANG_GUARD_SECONDS, (
+        f"crash/resume sync took {elapsed:.1f}s (> {_HANG_GUARD_SECONDS}s hang guard)"
+    )
+    assert _peak < _MEMORY_CEILING_BYTES, (
+        f"peak python allocation {_peak / 1e6:.0f}MB exceeded the "
+        f"{_MEMORY_CEILING_BYTES / 1e6:.0f}MB ceiling — possible O(N) leak"
+    )
