@@ -308,14 +308,17 @@ def _run_crash_resume(
     assert sync.index_count() < len(expected_folders) + len(expected_files), (
         "crash must leave a PARTIAL index"
     )
-    # Files applied so far must already be intact on disk.
+    # Files applied so far must already be intact on disk. Look up by the
+    # cased path (the key-space expected_files uses) so the integrity check
+    # cannot silently skip an applied file under a casing mismatch.
     for entry in sync.iter_index():
         path = entry.remote_path_cased
-        if path.lower() in expected_files:
+        expected_md5 = expected_files.get(path)
+        if expected_md5 is not None:
             local = sync.to_local_path_from_cased(path)
             assert osp.isfile(local)
             with open(local, "rb") as fh:
-                assert _md5(fh.read()) == expected_files[path.lower()]
+                assert _md5(fh.read()) == expected_md5
 
     # --- Resume: restore the real apply, clear cancel, re-enter the cycle. ---
     monkeypatch.setattr(sync, "apply_remote_changes", real_apply)
