@@ -538,6 +538,43 @@ def test_fail_after_changes_list_redelivers_on_next_poll():
     assert len(resp["changes"]) == 1
 
 
+def test_fail_every_fires_on_every_nth_call():
+    """fail_every(key, n, exc) raises on every n-th matching .execute(),
+    indefinitely, and tracks the number of times it fired."""
+    from googleapiclient.errors import HttpError
+
+    fake = FakeDrive()
+    fake.add_file("/a.txt", b"x")
+    rule = fake.fail_every("files.list", 3, make_http_error(429))
+    svc = fake.service()
+
+    outcomes = []
+    for _ in range(9):
+        try:
+            svc.files().list(
+                q="trashed=false", fields="nextPageToken, files(id)"
+            ).execute()
+            outcomes.append("ok")
+        except HttpError:
+            outcomes.append("fail")
+
+    # Calls 3, 6, 9 (1-based) fail; the rest pass.
+    assert outcomes == ["ok", "ok", "fail", "ok", "ok", "fail", "ok", "ok", "fail"]
+    # The returned rule reference exposes the live fire counter.
+    assert rule["fires"] == 3
+
+
+def test_fail_every_does_not_affect_other_keys():
+    """A fail_every rule on one key never fires for a different key."""
+    fake = FakeDrive()
+    fid = fake.add_file("/b.txt", b"y")
+    fake.fail_every("files.list", 2, make_http_error(429))
+    svc = fake.service()
+    # files.get is a different key — must never fail.
+    for _ in range(5):
+        svc.files().get(fileId=fid, fields="id").execute()
+
+
 # ---------------------------------------------------------------------------
 # Task 6 — corrupt_download hook
 # ---------------------------------------------------------------------------
