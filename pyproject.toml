@@ -110,3 +110,8 @@ target-version = ["py310", "py311", "py312", "py313"]
 
 [tool.isort]
 profile = "black"
+
+[tool.pytest.ini_options]
+markers = [
+    "load: slow, large-scale load/correctness tests (deselect with -m 'not load')",
+]
