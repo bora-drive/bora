@@ -145,6 +145,8 @@ class FakeDrive:
         Returns the rule dict; read ``rule["fires"]`` for the live count of
         times it has fired (used to prove a storm actually hit the backoff
         path rather than silently never firing)."""
+        if n < 1:
+            raise ValueError("fail_every requires n >= 1")
         rule = {
             "key": key, "exc": exc, "every": n, "seen": 0, "fires": 0,
             "when": None, "after": False,
@@ -156,7 +158,9 @@ class FakeDrive:
         """Fire the first matching, ready rule for (key, after-phase). At most
         one rule fires per call. A rule with a remaining ``skip`` count consumes
         the call toward its skip without firing. A recurring ``every`` rule fires
-        on every n-th matching call and never auto-removes."""
+        on every n-th matching call and never auto-removes.
+        Only the first matching ``every`` rule per (key, after-phase) is ever
+        consulted."""
         for rule in self._fail_rules:
             if rule["key"] != key or rule["after"] != after:
                 continue

@@ -666,3 +666,10 @@ def test_corrupt_download_is_single_use():
     # Second download: clean (directive was consumed).
     second = _download_all(svc.files().get_media(fileId=fid))
     assert second == content
+
+
+def test_fail_every_rejects_non_positive_n():
+    import pytest
+    fake = FakeDrive()
+    with pytest.raises(ValueError):
+        fake.fail_every("files.list", 0, make_http_error(429))
