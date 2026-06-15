@@ -47,10 +47,14 @@ _STUB_ACCOUNT = FullAccount(
     disabled=False,
 )
 
-# Soft guards. Generous absolute ceilings tuned to the dev/CI machine at plan
-# time; documented as soft guards so a slow machine does not produce false
-# failures. They catch hangs/leaks, not performance.
-_HANG_GUARD_SECONDS = 300.0
+# Soft guards. Generous absolute ceilings documented as soft guards so a slow
+# machine does not produce false failures. They catch hangs/leaks, NOT
+# performance (the hard gate is correctness). Calibrated against a real, fully
+# correct S1 run on this machine that took ~650s wall-clock — note the elapsed
+# time is measured with tracemalloc tracing active, which inflates it well
+# beyond the untraced runtime. The hang guard is set to ~3x that observation so
+# a genuine deadlock still trips it while a slow-but-correct run does not.
+_HANG_GUARD_SECONDS = 1800.0
 _MEMORY_CEILING_BYTES = 512 * 1024 * 1024
 
 
@@ -184,3 +188,71 @@ def test_build_tree_shape(sync_engine: SyncEngine):
     sync_engine.download_sync_cycle()
 
     _assert_complete_index(sync_engine, expected_folders, expected_files)
+
+
+# ---------------------------------------------------------------------------
+# Scenario S1 — initial sync under a rate-limit storm
+# ---------------------------------------------------------------------------
+
+
+def _run_storm(
+    sync: SyncEngine,
+    fake: FakeDrive,
+    expected_folders: set[str],
+    expected_files: dict[str, str],
+    *,
+    list_every: int = 5,
+    media_every: int = 7,
+) -> None:
+    """Arm a recurring 429/403 storm on list + download, run the full initial
+    sync, and assert the hard correctness gate plus that the storm fired."""
+    list_rule = fake.fail_every("files.list", list_every, make_http_error(429))
+    media_rule = fake.fail_every(
+        "files.get_media", media_every, make_http_error(403, "userRateLimitExceeded")
+    )
+
+    _wire_fake(sync, fake)
+    sync.download_sync_cycle()
+
+    _assert_complete_index(sync, expected_folders, expected_files)
+
+    # The storm must actually have hit the backoff path.
+    total_fires = list_rule["fires"] + media_rule["fires"]
+    assert total_fires > 0, "storm never fired — backoff path was not exercised"
+    # And the neutralised backoff sleep was invoked at least once per fire.
+    assert sync.client._poll_event.wait.call_count >= total_fires, (
+        "every injected fault must trigger a backoff wait()"
+    )
+
+
+def test_s0_storm_small(sync_engine: SyncEngine):
+    """Non-slow S0 guard for the storm scenario (N~=150)."""
+    fake = FakeDrive()
+    expected_folders, expected_files = build_tree(fake, n_folders=30, n_files=120)
+    _run_storm(sync_engine, fake, expected_folders, expected_files)
+
+
+@pytest.mark.load
+def test_s1_storm_load(sync_engine: SyncEngine):
+    """S1 (slow, N=10k): full initial sync under a rate-limit storm completes
+    correctly. Soft guards: hang-guard wall-clock + tracemalloc peak ceiling."""
+    fake = FakeDrive()
+    expected_folders, expected_files = build_tree(
+        fake, n_folders=2000, n_files=8000
+    )
+
+    tracemalloc.start()
+    start = time.monotonic()
+    _run_storm(sync_engine, fake, expected_folders, expected_files)
+    elapsed = time.monotonic() - start
+    _peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+
+    # Soft guards: catch hangs/leaks, not performance.
+    assert elapsed < _HANG_GUARD_SECONDS, (
+        f"initial sync took {elapsed:.1f}s (> {_HANG_GUARD_SECONDS}s hang guard)"
+    )
+    assert _peak < _MEMORY_CEILING_BYTES, (
+        f"peak python allocation {_peak / 1e6:.0f}MB exceeded the "
+        f"{_MEMORY_CEILING_BYTES / 1e6:.0f}MB ceiling — possible O(N) leak"
+    )
