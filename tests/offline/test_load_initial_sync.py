@@ -221,7 +221,7 @@ def _run_storm(
     assert total_fires > 0, "storm never fired — backoff path was not exercised"
     # And the neutralised backoff sleep was invoked at least once per fire.
     assert sync.client._poll_event.wait.call_count >= total_fires, (
-        "every injected fault must trigger a backoff wait()"
+        "at least one backoff wait() per injected fault"
     )
 
 
@@ -245,6 +245,9 @@ def test_s1_storm_load(sync_engine: SyncEngine):
     start = time.monotonic()
     _run_storm(sync_engine, fake, expected_folders, expected_files)
     elapsed = time.monotonic() - start
+    # _peak spans the whole run including _assert_complete_index, which md5-reads
+    # every file — so it is the harness+engine peak, a conservative leak guard,
+    # not a pure engine-memory figure.
     _peak = tracemalloc.get_traced_memory()[1]
     tracemalloc.stop()
 
