@@ -138,15 +138,36 @@ class FakeDrive:
             {"key": key, "exc": exc, "skip": 0, "remaining": 1,
              "when": predicate, "after": False})
 
+    def fail_every(self, key: str, n: int, exc: Exception) -> dict:
+        """Raise *exc* on every *n*-th matching ``.execute()`` of *key*,
+        indefinitely. The first n-1 calls pass, the n-th fails, and so on.
+
+        Returns the rule dict; read ``rule["fires"]`` for the live count of
+        times it has fired (used to prove a storm actually hit the backoff
+        path rather than silently never firing)."""
+        rule = {
+            "key": key, "exc": exc, "every": n, "seen": 0, "fires": 0,
+            "when": None, "after": False,
+        }
+        self._fail_rules.append(rule)
+        return rule
+
     def _consume_fail(self, key: str, kwargs: dict, *, after: bool) -> None:
         """Fire the first matching, ready rule for (key, after-phase). At most
         one rule fires per call. A rule with a remaining ``skip`` count consumes
-        the call toward its skip without firing."""
+        the call toward its skip without firing. A recurring ``every`` rule fires
+        on every n-th matching call and never auto-removes."""
         for rule in self._fail_rules:
             if rule["key"] != key or rule["after"] != after:
                 continue
             if rule["when"] is not None and not rule["when"](**kwargs):
                 continue
+            if rule.get("every"):
+                rule["seen"] += 1
+                if rule["seen"] % rule["every"] == 0:
+                    rule["fires"] += 1
+                    raise rule["exc"]
+                return
             if rule["skip"] > 0:
                 rule["skip"] -= 1
                 return
