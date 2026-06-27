@@ -780,3 +780,47 @@ def test_missing_parent_teeth(sync_engine: SyncEngine):
         "child file must be absent when _ensure_parent is neutered — "
         "proves the green test's reindex is doing real work"
     )
+
+
+def test_occupied_target_folder_move_conflict_copies_occupant(sync_engine: SyncEngine):
+    """7c-1: a remote folder moved onto a path occupied by an UNTRACKED local
+    folder must conflict-copy the occupant, not silently adopt it.
+
+    After the apply: a "conflicted copy" of the occupant must exist on disk
+    (the user's data is preserved) and the moved folder's id must be indexed
+    at the new path.  (Row-count collapse is covered by Task 2.)
+    """
+    fake = FakeDrive()
+    dir_id = fake.add_folder("/dst_cc")
+    _wire_fake(sync_engine, fake)
+    sync_engine.client._path_cache.set(
+        "/dst_cc", dir_id, parent_id=ROOT_ID, name="dst_cc", is_folder=True
+    )
+
+    # Moved folder's OLD location, tracked in the index.
+    _seed_entry(
+        sync_engine, "/src_cc", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
+    )
+    _write_local_dir(sync_engine, "/src_cc")
+    # Untracked occupant at the move target.
+    _write_local_dir(sync_engine, "/dst_cc")
+
+    move_event = _make_move_event(
+        sync_engine, "/dst_cc", dir_id, ItemType.Folder, "folder", "folder"
+    )
+    sync_engine._create_local_entry(move_event)
+
+    # Occupant preserved as a conflicted copy (the user's folder is not lost).
+    sync_root = sync_engine.sync_path
+    cc_dirs = [
+        name for name in os.listdir(sync_root)
+        if "conflicted copy" in name and osp.isdir(osp.join(sync_root, name))
+    ]
+    assert cc_dirs, (
+        "occupant must be preserved as a conflicted copy, not silently adopted; "
+        f"sync root contents: {os.listdir(sync_root)}"
+    )
+
+    # The moved folder is indexed at the new path.
+    new_entry = sync_engine.get_index_entry("/dst_cc")
+    assert new_entry is not None and new_entry.remote_id == dir_id

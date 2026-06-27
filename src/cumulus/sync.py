@@ -3383,6 +3383,27 @@ class SyncEngine:
         ):
             # Content hashes are equal, therefore items are identical. Folders will
             # have a content hash of 'folder'.
+            if event.content_hash == "folder" and local_rev is None and event.remote_id:
+                # An untracked local folder occupies this path. A folder's
+                # content hash is the constant sentinel "folder", so "equal
+                # hashes" here means nothing more than "a folder exists". If the
+                # event's remote_id is ALREADY indexed at a DIFFERENT path, this
+                # is an occupied-target move (_apply_remote_move bailed because
+                # the target was occupied): the occupant is NOT the moved folder,
+                # so adopting it would create a duplicate remote_id row (finding
+                # B) and silently swallow the user's folder. Conflict-copy it
+                # instead. A genuine first-sync merge — where the id is not yet
+                # indexed anywhere — falls through to Identical below.
+                other = self.get_index_entry_by_remote_id(event.remote_id)
+                if other is not None and other.remote_path_lower != event.remote_path_lower:
+                    self._logger.debug(
+                        'Untracked folder occupies move target "%s" (id=%s indexed '
+                        'at "%s"): conflict-copy occupant',
+                        event.remote_path,
+                        event.remote_id,
+                        other.remote_path_lower,
+                    )
+                    return Conflict.Conflict
             self._logger.debug(
                 'Equal content hashes for "%s": no conflict', event.remote_path
             )
