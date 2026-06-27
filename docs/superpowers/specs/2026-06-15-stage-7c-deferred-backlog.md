@@ -160,6 +160,48 @@ blocking.
   conflict + `UNIQUE` constraint) close this class; tracked here only to note the
   overlap so it isn't treated as separate work.
 
+### 7c-11 — Occupied-target **file** move leaves an on-disk orphan that re-uploads
+- **Opened by the 7c P0 work (2026-06-27).** After 7c-2, an occupied-target file
+  move evicts the stale old-path index row (correct — no duplicate `remote_id`),
+  but the on-disk copy at the old path is left with no index row, so the next
+  local scan treats it as a new local file and **re-uploads it as a duplicate**
+  in Drive. Not data loss (the moved file is correct at the new path, the
+  occupant is conflict-copied), and strictly better than the pre-7c duplicate-
+  `remote_id` defect (finding C) it replaced — but more user-visible than the
+  folder case (a spurious duplicate file appears).
+- **Proposed fix (Option C):** have the occupied-target download fallback delete
+  the source file on disk at the old path once the move completes (the file
+  moved away from it). **Deferred deliberately:** deleting local files in the
+  fallback path is higher-risk and warrants its own RED-before-GREEN TDD cycle
+  with adversarial review, not a quick patch. Severity P2. Guard test reference:
+  `test_remote_move_with_occupied_target_evicts_stale_index_and_conflicts`
+  (test_sync.py) currently asserts the orphan-on-disk residual.
+
+### 7c-12 — Circuit-breaker counter reset-race under concurrency
+- **Opened by the 7c-3 final review (2026-06-27).** `_handle_sync_thread_errors`
+  is shared by all worker threads, all touching `_cursor_reset_count`. Because
+  `stop()` is not instantaneous, a sibling worker's healthy pass can reset the
+  counter a cycle or two after the change-feed worker incremented it. **Benign:**
+  the breaker still trips (a persistent-400 feed never produces a healthy
+  change-feed pass), worst case it takes a few extra cycles. P2, and a fix would
+  add concurrency complexity (locking around the counter) for no behavioral gain
+  — fold in only if `_handle_sync_thread_errors` is refactored for another
+  reason.
+
+### 7c-13 — Upload-path eviction symmetry (analyzed → intentionally NOT added)
+- The 7c-3 final review noted `update_index_from_remote_metadata` (the upload /
+  metadata index-write path) has no same-`remote_id` eviction, unlike
+  `update_index_from_sync_event` (download path). **Investigated 2026-06-27 and
+  intentionally left as-is:** every callsite of `update_index_from_remote_metadata`
+  indexes an id at its *own* current path (upsert at the same path); the only
+  flows that index an id at a *new* path while the old row persists are remote
+  moves, handled on the download side (`_apply_remote_move` →
+  `update_index_from_sync_event`), which already evicts. On a fresh DB the
+  `UNIQUE` backstop means the upload path therefore cannot create or hit a
+  duplicate in practice. Adding eviction here would be speculative code for a
+  can't-occur case (YAGNI). Recorded so the note is not re-raised. Legacy-DB
+  caveat is moot pre-release (all DBs fresh).
+
 ---
 
 ## 4. Already resolved — do **not** re-open
@@ -174,6 +216,13 @@ re-investigation:
   fixed `f83267c` + `f51168b`. **Done.**
 - **Crash-window delete-loss / cluster-E finding 2** — fixed `9a96447` +
   `e8525e6`. **Done.**
+- **Load-test fixture contamination-hardening** — the 7c P0 gate hit a stale
+  `~/load_initial_sync_dir` + partial index DB left by a killed background run.
+  The `test_load_initial_sync.py` `sync_engine` fixture now defensively purges
+  the sync dir + all config/state/index DB files at **setup** (not just
+  teardown), so a killed prior run cannot contaminate the next. Verified by
+  planting a stale dir + corrupt index DB and confirming a clean pass.
+  **Done (2026-06-27).**
 
 ---
 
