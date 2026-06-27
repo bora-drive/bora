@@ -321,29 +321,27 @@ def test_stale_cache_move_teeth(sync_engine: SyncEngine):
 
 
 # ---------------------------------------------------------------------------
-# Scenario B — occupied-target move with a FOLDER occupant
+# Scenario B — occupied-target move with a FOLDER occupant (FIXED in 7c-1/7c-2)
 #
-# Baseline: test_remote_move_with_occupied_target_keeps_index_and_conflicts
+# Baseline: test_remote_move_with_occupied_target_evicts_stale_index_and_conflicts
 # (test_sync.py ~1183) uses a file occupant.
 # Adversarial variant: BOTH the moved item AND the occupant are FOLDERS.
 #
-# Analysis of actual behavior:
+# Former defect (finding B), now fixed:
 #   1. _apply_remote_move returns False (target occupied — osp.exists both paths).
 #   2. _on_remote_folder calls _check_download_conflict for the /dst_folder event.
 #   3. get_local_rev("/dst_folder") == None (no index row for occupant).
-#   4. event.rev == "folder" != None → not LocalNewerOrIdentical.
-#   5. get_local_hash(local_dst_folder) == "folder" (it's a dir) AND
-#      event.content_hash == "folder" → Identical.
-#   6. _check_download_conflict returns Identical → update_index_from_sync_event
-#      creates a NEW row at /dst_folder with dir_id.
-#   7. The old row at /src_folder SURVIVES as a stale orphan with the same id.
+#   4. get_local_hash(local_dst_folder) == "folder" AND event.content_hash ==
+#      "folder" formerly returned Identical, so update_index_from_sync_event
+#      inserted a NEW row at /dst_folder while the old /src_folder row SURVIVED
+#      as a stale orphan with the same id → duplicate remote_id rows, occupant
+#      silently adopted (never conflict-copied).
 #
-# This is a REAL DEFECT: the engine creates duplicate remote_id rows when a
-# folder remote-move targets a locally-occupied-by-folder path.  The occupant
-# is never conflict-copied (contrary to the docstring); the old row becomes a
-# stale orphan.  The fix requires making _check_download_conflict consider
-# missing-index-row folders as "untracked / newly-appeared" rather than
-# "identical to remote" — an architectural change.
+# Fix: _check_download_conflict now returns Conflict when an untracked folder
+# occupies the target of a move whose id is already indexed elsewhere (7c-1, so
+# the occupant is conflict-copied), and update_index_from_sync_event evicts any
+# stale same-remote_id row before inserting (7c-2, so exactly one row remains).
+# The tests below assert this fixed behavior.
 # ---------------------------------------------------------------------------
 
 

@@ -1180,16 +1180,25 @@ def test_remote_reparent_into_unsynced_parent_moves_local_file(
     assert sync_engine.sync_errors == []
 
 
-def test_remote_move_with_occupied_target_keeps_index_and_conflicts(
+def test_remote_move_with_occupied_target_evicts_stale_index_and_conflicts(
     sync_engine: SyncEngine,
 ):
     """If a foreign local item already occupies the target of a remote move,
     the engine must NOT re-key the index onto the occupant: that would adopt
-    the occupant into the moved file's sync identity (equal revs => Skipped),
-    silently overwrite the remote file with the occupant's content on the next
-    local scan, and resurrect the old path as a new upload. Instead, leave
-    disk and index untouched so the downstream conflict logic conflicted-copies
-    the occupant and downloads the moved file at the new path."""
+    the occupant into the moved file's sync identity (equal revs => Skipped)
+    and silently overwrite the remote file with the occupant's content on the
+    next local scan. Instead the downstream conflict logic conflict-copies the
+    occupant and downloads the moved file at the new path.
+
+    Post-7c-2: the stale index row at the OLD path is evicted when the new-path
+    row is inserted, so the moved file's id is indexed at exactly one path — no
+    duplicate remote_id row (finding C). The on-disk copy at the old path is
+    left as an orphan that the next local scan re-uploads as a new file
+    (accepted residual; see
+    docs/superpowers/plans/2026-06-15-stage-7c-p0-deviations.md §4). The key
+    safety property — the index is never re-keyed onto the occupant, so the
+    remote is never overwritten with the occupant's content — is asserted via
+    the new-path content + Conflict status below."""
     data = b"moved file content"
     occupant_data = b"foreign occupant created offline"
     fake = FakeDrive()
@@ -1235,11 +1244,24 @@ def test_remote_move_with_occupied_target_keeps_index_and_conflicts(
 
     sync_engine._create_local_entry(event)
 
-    # The old path is untouched: disk copy still there, index row NOT re-keyed.
-    assert osp.isfile(local_old)
-    old_entry = sync_engine.get_index_entry("/a.txt")
-    assert old_entry is not None
-    assert old_entry.remote_id == file_id
+    # 7c-2: the stale /a.txt index row is evicted when the new /b.txt row is
+    # inserted, so the moved file's id resolves to exactly ONE path (/b.txt) —
+    # no duplicate remote_id row. The on-disk /a.txt copy remains as an orphan
+    # (re-uploaded on the next local scan; accepted residual). Crucially the
+    # index was NOT re-keyed onto the occupant: /b.txt carries the moved file's
+    # content (asserted below), not the occupant's.
+    assert osp.isfile(local_old)  # on-disk orphan; self-heals on next scan
+    assert sync_engine.get_index_entry("/a.txt") is None
+    new_entry = sync_engine.get_index_entry("/b.txt")
+    assert new_entry is not None
+    assert new_entry.remote_id == file_id
+    assert new_entry.content_hash == _md5(data)
+    with sync_engine._database_access():
+        rows = sync_engine._index_table.select_sql("WHERE remote_id = ?", file_id)
+    assert len(rows) == 1, (
+        "exactly one row must hold the moved id, got "
+        f"{[r.remote_path_lower for r in rows]}"
+    )
 
     # The occupant was moved to a conflicted copy in the same folder.
     folder = osp.dirname(local_new)
