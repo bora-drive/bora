@@ -1250,6 +1250,34 @@ def test_restore_cleans_up_tempfile_on_upload_exception(client, cache, monkeypat
         assert not _os.path.exists(p)
 
 
+def test_download_revision_to_tempfile_cleans_up_on_download_failure(
+    client, monkeypatch
+):
+    """7c-8: a failure *during* the chunked download must not leak the
+    mkstemp'd temp file. The callers only clean up the path the helper
+    returns, so if the helper raises before returning, the file is orphaned
+    unless the helper cleans up after itself."""
+    import glob
+
+    svc = fake_service()
+    client._get_service = Mock(return_value=svc)
+
+    # Blow up mid-download (the chunk loop calls _retry_transient(next_chunk)).
+    def boom(_fn):
+        raise RuntimeError("network died mid-download")
+
+    monkeypatch.setattr(client, "_retry_transient", boom)
+
+    pattern = _os.path.join(tempfile.gettempdir(), "cumulus-restore-*")
+    before = set(glob.glob(pattern))
+    with pytest.raises(RuntimeError):
+        client._writes._download_revision_to_tempfile("F1", "rev1")
+    after = set(glob.glob(pattern))
+
+    leaked = after - before
+    assert after == before, f"temp file leaked mid-download: {leaked}"
+
+
 # ==== modifiedTime on upload (Stage 5, echo suppression) ==================
 
 def test_upload_create_sets_modified_time_from_local_mtime(client, cache):

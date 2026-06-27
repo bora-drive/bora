@@ -220,7 +220,7 @@ blocking.
 - On a mid-download failure the temp file is not cleaned up (pre-existing; shared
   with `restore()`). Candidate for a `try/finally` or context-managed temp path.
 
-### 7c-9 — `remote_path_lower` column name holds a *fold* value
+### 7c-9 — `remote_path_lower` column name holds a *fold* value — **TRIAGED 2026-06-27: accept the `_lower` name (won't-rename); no schema bump in flight**
 - `IndexEntry.remote_path_lower` (`models.py`) and `SyncEvent.remote_path_lower`
   are populated with a casefold key via `fold_path()`, but Stage 1 deliberately
   renamed the **cache** column `remote_path_lower → remote_path_fold` to avoid
@@ -229,6 +229,15 @@ blocking.
   consistent — but the rename rationale was not applied uniformly. Pure
   naming/readability; rename only if a model-schema bump is being made for
   another reason (the index is a derived cache, so no data migration is needed).
+- **Decision (P2, 2026-06-27): accept `_lower` as-is. No code change.** The 7c-P2
+  pass (7c-7 `client.py`, 7c-8 `writes.py`) made **no** change to `models.py`, so
+  the "rename only alongside an existing schema bump" precondition is not met. A
+  standalone rename would touch every `IndexEntry.remote_path_lower` /
+  `SyncEvent.remote_path_lower` read+write site purely for cosmetics, with no
+  behavioral benefit (the column already holds the correct fold value and is
+  blessed by Stage 6 §1). Folded into Stage 8's naming sweep *iff* a model-schema
+  change lands there for another reason; otherwise it stays. Item closed as
+  "won't do (accepted), revisit-on-bump."
 
 ### 7c-10 — Transient duplicate `remote_id` rows (subsumed by 7c-1 / 7c-2)
 - cluster-E and 7b docs note duplicate `remote_id` rows can exist transiently

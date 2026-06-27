@@ -258,6 +258,48 @@ def test_get_metadata_trashed_with_include_deleted_returns_metadata(client, cach
     assert meta.id == "F9"
 
 
+def test_get_metadata_file_uses_cached_cased_path_not_fold(client, cache):
+    """7c-7: path_display must carry the cache's true cased path, not the
+    casefolded lookup input. Seed a cased path, look it up via a casefolded
+    variant (ß casefolds to ss), and assert the returned metadata preserves
+    the original casing — otherwise the item materializes locally under the
+    wrong name."""
+    from cumulus.core import FileMetadata
+    from cumulus.path_codec import fold_path
+
+    _seed(cache, "/Straße.txt", "F7", "Straße.txt")
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "F7", "name": "Straße.txt", "mimeType": "text/plain",
+        "parents": ["ROOT"], "modifiedTime": "2026-04-30T00:00:00Z",
+        "size": "5", "md5Checksum": "h", "trashed": False,
+    }
+    client._get_service = Mock(return_value=service)
+
+    meta = client.get_metadata("/strasse.txt")
+    assert isinstance(meta, FileMetadata)
+    assert meta.path_display == "/Straße.txt"
+    assert meta.path_lower == fold_path("/Straße.txt")
+
+
+def test_get_metadata_folder_uses_cached_cased_path_not_fold(client, cache):
+    """7c-7: same as the file case, for the folder branch."""
+    from cumulus.core import FolderMetadata
+
+    _seed(cache, "/Straße", "D7", "Straße", is_folder=True)
+    service = fake_service()
+    service.files.return_value.get.return_value.execute.return_value = {
+        "id": "D7", "name": "Straße",
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": ["ROOT"], "trashed": False,
+    }
+    client._get_service = Mock(return_value=service)
+
+    meta = client.get_metadata("/strasse")
+    assert isinstance(meta, FolderMetadata)
+    assert meta.path_display == "/Straße"
+
+
 # ==== list_revisions / restore ============================================
 
 def test_list_revisions_returns_newest_first(client, cache):

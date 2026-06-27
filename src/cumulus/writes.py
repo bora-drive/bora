@@ -1131,24 +1131,34 @@ class _WriteHelper:
         client = self._client
         fd, path = _t.mkstemp(prefix="cumulus-restore-")
         os.close(fd)
-        with convert_api_errors():
-            request = client._get_service().revisions().get_media(
-                fileId=file_id, revisionId=rev,
-            )
-            with open(path, "wb") as fh:
-                downloader = MediaIoBaseDownload(
-                    fh, request, chunksize=_RESUMABLE_CHUNK_SIZE,
+        # Callers only clean up the path we *return*; if the download raises
+        # before we return, the mkstemp'd file would be orphaned (7c-8), so
+        # clean it up here on any failure (including cancellation).
+        try:
+            with convert_api_errors():
+                request = client._get_service().revisions().get_media(
+                    fileId=file_id, revisionId=rev,
                 )
-                done = False
-                while not done:
-                    if client._poll_event.is_set():
-                        raise CancelledError(
-                            "Restore cancelled",
-                            f"Restore of {file_id!r}@{rev!r} interrupted "
-                            "by shutdown.",
-                        )
-                    _status, done = client._retry_transient(
-                        downloader.next_chunk
+                with open(path, "wb") as fh:
+                    downloader = MediaIoBaseDownload(
+                        fh, request, chunksize=_RESUMABLE_CHUNK_SIZE,
                     )
+                    done = False
+                    while not done:
+                        if client._poll_event.is_set():
+                            raise CancelledError(
+                                "Restore cancelled",
+                                f"Restore of {file_id!r}@{rev!r} interrupted "
+                                "by shutdown.",
+                            )
+                        _status, done = client._retry_transient(
+                            downloader.next_chunk
+                        )
+        except BaseException:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
         client._count_request()
         return path
