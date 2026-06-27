@@ -62,9 +62,36 @@ def _md5(data: bytes) -> str:
     return hashlib.md5(data, usedforsecurity=False).hexdigest()
 
 
+# These slow tests use a FIXED sync dir + config name (not tmp_path) because the
+# crash-resume scenarios reopen the same persistent index DB across SyncEngine
+# instances. That makes them vulnerable to contamination: a run killed before
+# teardown (e.g. a slow test aborted mid-flight, or run as a background job that
+# is terminated) leaves both this dir AND a partial index/state DB under
+# get_data_path("cumulus", "<config>*"), which the next run inherits ->
+# FileExistsError at os.mkdir, or a wrong index_count from stale index rows.
+_CONFIG_NAME = "load-initial-sync-config"
+_LOCAL_DIR_NAME = "load_initial_sync_dir"
+
+
+def _purge_load_state(local_dir: str) -> None:
+    """Remove this fixture's sync dir + all config/state/index DB files.
+
+    Safe to call when nothing exists (``delete`` returns rather than raises;
+    ``remove_configuration`` only walks an already-created data dir). Used both
+    defensively at setup and in teardown so a killed prior run cannot
+    contaminate the next.
+    """
+    delete(local_dir)
+    remove_configuration(_CONFIG_NAME)
+
+
 @pytest.fixture
 def sync_engine():
-    local_dir = osp.join(get_home_dir(), "load_initial_sync_dir")
+    local_dir = osp.join(get_home_dir(), _LOCAL_DIR_NAME)
+    # Defensive pre-clean: purge any leftovers from a prior run that was killed
+    # before its teardown (see the module note above). get_data_path("cumulus")
+    # is created on demand, so remove_configuration's listdir is safe here.
+    _purge_load_state(local_dir)
     os.mkdir(local_dir)
 
     # check_same_thread=False: apply_remote_changes uses a thread pool
@@ -73,8 +100,8 @@ def sync_engine():
     cache.root_id = ROOT_ID
     sync = SyncEngine(
         GoogleDriveClient(
-            "load-initial-sync-config",
-            CredentialStorage("load-initial-sync-config"),
+            _CONFIG_NAME,
+            CredentialStorage(_CONFIG_NAME),
             cache,
         )
     )
@@ -83,8 +110,7 @@ def sync_engine():
 
     yield sync
 
-    remove_configuration("load-initial-sync-config")
-    delete(local_dir)
+    _purge_load_state(local_dir)
 
 
 def _wire_fake(sync: SyncEngine, fake: FakeDrive) -> None:
