@@ -828,3 +828,32 @@ def test_occupied_target_folder_move_conflict_copies_occupant(sync_engine: SyncE
     # The moved folder is indexed at the new path.
     new_entry = sync_engine.get_index_entry("/dst_cc")
     assert new_entry is not None and new_entry.remote_id == dir_id
+
+
+def test_remote_id_unique_constraint_rejects_duplicate(sync_engine: SyncEngine):
+    """7c-2: the index schema must enforce UNIQUE on remote_id, so a second
+    row with an already-used remote_id is rejected at the database layer.
+
+    The duplicate insert is issued directly against the index table rather than
+    through ``_seed_entry`` because ``SyncEngine._database_access`` deliberately
+    translates raw ``sqlite3.IntegrityError`` into ``DatabaseError``. Bypassing
+    that wrapper lets us assert the schema-level UNIQUE backstop fires.
+    """
+    import sqlite3 as _sqlite3
+
+    _seed_entry(
+        sync_engine, "/u_a.txt", "uniq-id", ItemType.File, rev="r1", content_hash="h"
+    )
+
+    duplicate = IndexEntry(
+        remote_path_cased="/u_b.txt",
+        remote_path_lower="/u_b.txt",
+        remote_id="uniq-id",
+        item_type=ItemType.File,
+        last_sync=0.0,
+        rev="r1",
+        content_hash="h",
+        symlink_target=None,
+    )
+    with pytest.raises(_sqlite3.IntegrityError):
+        sync_engine._index_table.update(duplicate)

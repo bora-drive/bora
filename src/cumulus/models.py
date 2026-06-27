@@ -488,7 +488,7 @@ class IndexEntry(Model):
     remote metadata.
     """
 
-    remote_id = NonNullColumn(SqlString(), index=True)
+    remote_id = NonNullColumn(SqlString(), unique=True, index=True)
     """The unique remote ID for the item."""
 
     item_type = NonNullColumn(SqlEnum(ItemType))
