@@ -126,22 +126,61 @@ the mark's removal. Full detail in
 - **Action taken:** the dangling Stage 3/4 → Stage 6 "persist root_id" promise is
   formally closed as "won't do (accepted)." Item complete.
 
-### 7c-5 — Spike Q3: unshare scenario never validated
+### 7c-5 — Spike Q3: unshare scenario never validated — **PARTIALLY RESOLVED 2026-06-27 (engine-side confirmed offline; live event-shape still pending)**
 - Stage 0 spike report (`spikes/2026-04-30-...-report.md`, Known gaps) left the
   unshare-of-a-shared-item scenario unrun (needs a second Google account). The
   working assumption is "treat unshare like hard-delete (`removed=true`, no file
   body)." Never re-validated in Stage 3 or later.
-- **Action:** run the scenario against a 2-account setup, or formally ratify the
-  assumption with a documented rationale.
+- **Offline code-trace (2026-06-27):** the engine side of the assumption is
+  sound. `changes.py` `classify` emits a delete whenever a change carries
+  `removed=true` **or** the file is `trashed` (`changes.py:141` and the
+  `iter_remote_changes` path at `changes.py:353`); `_emit_delete` removes the
+  indexed item by path/remote_id. So **IF** Drive signals an unshare as
+  `removed=true` in the change feed, the engine already does the right thing —
+  this is the same well-tested removal path used by hard-delete/trash (and the
+  cluster-E finding-2 crash-replay work). No engine change needed for the
+  assumed event shape.
+- **Genuinely live-only residual:** whether Drive actually emits `removed=true`
+  on an unshare of a shared-with-you item (vs. leaving a stale, now-inaccessible
+  entry, or a permission-only change). That is unanswerable offline and needs a
+  2-account session.
+- **Action (live):** with a 2-account setup, share an item to the test account,
+  let it sync, then unshare and confirm the change feed delivers `removed=true`
+  (engine then deletes locally — already covered). If Drive instead leaves a
+  stale entry, open a follow-up to detect lost-access. Batch with 7c-6 in the
+  next linked session.
 
-### 7c-6 — Spike Q1: headless paste-redirect OAuth never re-validated end-to-end
+### 7c-6 — Spike Q1: headless paste-redirect OAuth never re-validated — **RISK RETIRED 2026-06-27 (InsecureTransportError blocker not reproducible offline; live round-trip still nice-to-have)**
 - The spike flagged the Mode-B paste-redirect path as "broken-as-shipped due to
   `InsecureTransportError`; Stage 2 must address this before claiming headless
   support." Stage 2 set `OAUTHLIB_INSECURE_TRANSPORT=1` (`daemon.py:32`), but no
-  doc confirms the headless paste-redirect flow was directly observed working
-  end-to-end.
-- **Action:** verify the headless paste-redirect link flow on a port-forward-less
-  host, or downgrade the "headless support" claim accordingly.
+  doc confirmed the headless paste-redirect flow working end-to-end.
+- **Offline investigation (2026-06-27):**
+  - The flow is fully wired: `get_auth_url` + `_PasteFlowState` (`client.py:282`),
+    `make_paste_flow` (`oauth.py:186`, `redirect_uri=http://localhost:8080`),
+    `_parse_redirect_url_or_code` (CLI extracts the bare code), and the
+    `OAuth2Error` catch on the exchange (`client.py:338`, cluster-E F13).
+  - **The spike's blocker is not reproducible in the current code + deps.** With
+    `OAUTHLIB_INSECURE_TRANSPORT` explicitly **unset**, both
+    `flow.fetch_token(code=...)` (the path the paste flow uses — it extracts the
+    code, not the http URL) **and** `fetch_token(authorization_response="http://localhost...")`
+    reach Google's HTTPS token endpoint and fail only on the fake code
+    (`InvalidGrantError`) — no `InsecureTransportError`. The code-extraction
+    design sidesteps the http-response validation, and the installed oauthlib
+    does not reject the http loopback redirect. So the "broken-as-shipped" risk
+    is effectively gone.
+  - **Robustness note (latent, not currently biting):** `OAUTHLIB_INSECURE_TRANSPORT`
+    is set only in `daemon.py`; the in-process CLI link path (`auth_link` uses
+    `@inject_proxy(fallback=True)`, so first-link runs in-process with no daemon)
+    does **not** import `daemon.py` and does **not** set the env var. It works
+    today only because the current oauthlib doesn't enforce the http-loopback
+    check. If a future oauthlib version reintroduces strict checking, set
+    `OAUTHLIB_INSECURE_TRANSPORT` in `oauth.py` (imported by both daemon and CLI
+    link paths) rather than only `daemon.py`. Cheap one-line defensive fix;
+    deferred (no failing test today — adding it now would be speculative).
+- **Action (live, downgraded to nice-to-have):** confirm a real paste-redirect
+  link round-trip on a port-forward-less host once a live session is set up. The
+  specific failure mode that made it "broken" is no longer present.
 
 ---
 
