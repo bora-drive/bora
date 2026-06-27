@@ -99,15 +99,32 @@ the mark's removal. Full detail in
 
 ## 2. P1 — Unvalidated assumptions / loose ends with no home
 
-### 7c-4 — `root_id` not persisted across daemon restarts
+### 7c-4 — `root_id` not persisted across daemon restarts — **RESOLVED 2026-06-27: accept the per-start resolve (do NOT persist); cross-stage promise CLOSED**
 - Stage 3 §2.2 **and** Stage 4 §2.2 both deferred "persisting `root_id` across
   daemon restarts" to "Stage 6 (DB schema)." Stage 6 never picked it up, and no
   later stage did. Still in-memory only: `_ensure_root_id` resolves
   `files.get(fileId='root')` and caches on `PathIDCache.root_id`
   (`client.py:428`, `path_cache.py:114`), with no config/DB column.
-- **Impact:** tiny (one extra API call per daemon start). Decide: persist it
-  (config key or DB column) or formally accept the per-start resolve and close
-  the dangling cross-stage promise.
+- **Decision (P1, 2026-06-27): keep the per-start resolve; do not persist. No
+  code change.** Rationale:
+  - **Cost is negligible.** `_ensure_root_id` is idempotent — exactly one
+    `files.get(fileId='root', fields='id')` per daemon lifetime, behind
+    `_retry_transient`, then a GIL-atomic cached read for every subsequent call.
+  - **Persisting introduces a real correctness hazard for ~zero benefit.** A
+    persisted `root_id` (especially a config key, which survives the
+    version-bump `PathIDCache` rebuild) would go stale if the user unlinks and
+    relinks a *different* Google account — operations would target the old
+    account's root. The in-memory resolve is immune: it is re-derived fresh from
+    the current credentials on every start, so it always matches the linked
+    account.
+  - The `PathIDCache` is a derived cache rebuilt on version bump, so even a
+    DB-column persistence would be discarded on rebuild (re-resolving anyway) —
+    extra surface area with no durability guarantee.
+  - Offline-start is a non-issue: the daemon can do nothing offline regardless,
+    and `_ensure_root_id` resolves once connectivity returns (handled by
+    `_retry_transient` + `connection_monitor`).
+- **Action taken:** the dangling Stage 3/4 → Stage 6 "persist root_id" promise is
+  formally closed as "won't do (accepted)." Item complete.
 
 ### 7c-5 — Spike Q3: unshare scenario never validated
 - Stage 0 spike report (`spikes/2026-04-30-...-report.md`, Known gaps) left the
