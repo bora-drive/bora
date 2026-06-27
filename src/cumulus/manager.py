@@ -100,6 +100,12 @@ class PersistentQueue(Generic[T]):
         return entry in self._persistent
 
 
+MAX_CURSOR_RESETS = 3
+"""Maximum consecutive CursorResetError-driven reindex cycles before the
+manager gives up. A permanently-400ing change feed would otherwise loop
+bootstrap -> 400 -> reset -> restart forever (7c-3)."""
+
+
 class SyncManager:
     """Class to manage sync threads
 
@@ -125,6 +131,7 @@ class SyncManager:
         self.running = Event()
         self.startup_completed = Event()
         self.autostart = Event()
+        self._cursor_reset_count = 0
 
         self.download_queue = PersistentQueue(self._state, "sync", "pending_downloads")
 
@@ -559,6 +566,28 @@ class SyncManager:
             # Shutdown will be handled externally.
             running.clear()
         except CursorResetError:
+            self._cursor_reset_count += 1
+            if self._cursor_reset_count > MAX_CURSOR_RESETS:
+                # Circuit-breaker: the change feed has returned a cursor-reset
+                # error for MAX_CURSOR_RESETS consecutive reindex cycles,
+                # including freshly-bootstrapped tokens. Re-arming autostart
+                # would loop bootstrap -> 400 -> reset -> restart forever
+                # (7c-3). Give up: stop without autostart and surface a visible
+                # error so the user can act.
+                self._logger.error(
+                    "Google Drive change feed keeps rejecting the sync token "
+                    "after %s reindex attempts; giving up.",
+                    self._cursor_reset_count,
+                )
+                if self.desktop_notifier:
+                    self.desktop_notifier.notify(
+                        "Sync stopped",
+                        "Cumulus could not re-index Google Drive after repeated "
+                        "attempts. Please restart syncing.",
+                        level=notify.ERROR,
+                    )
+                self.stop()
+                return
             self._logger.warning(
                 "Google Drive change token expired; rebuilding the index."
             )
@@ -587,6 +616,10 @@ class SyncManager:
             if self.desktop_notifier:
                 self.desktop_notifier.notify(title, message, level=notify.ERROR)
             self.stop()
+        else:
+            # A healthy pass through the worker clears the cursor-reset
+            # circuit-breaker; only *consecutive* resets accumulate.
+            self._cursor_reset_count = 0
 
     def __del__(self) -> None:
         try:

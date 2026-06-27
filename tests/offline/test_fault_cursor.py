@@ -4,8 +4,9 @@ Covers:
   A — 400 invalid pageToken mid-stream → CursorResetError → stop-before-reset
       preserved; engine-level post-condition (cursor reset to "", index rebuilt).
   B — persistent 400 on EVERY changes.list call (even after reindex provides a
-      fresh token) — the persistent-400 bug class.  The manager has no circuit-
-      breaker, so this is an architectural finding → xfail(strict=True).
+      fresh token) — the persistent-400 bug class.  The circuit-breaker for this
+      is a manager-level concern (cumulus.manager.MAX_CURSOR_RESETS, 7c-3); its
+      acceptance tests live in tests/offline/test_manager.py.
 
 Architecture summary (confirmed by reconnaissance)
 ---------------------------------------------------
@@ -40,9 +41,9 @@ Persistent-400 finding:
   autostart.  The connection_monitor() then calls start() again.  If changes.list
   ALSO returns 400 with the FRESH token from the next bootstrap, the cycle repeats
   indefinitely: bootstrap → 400 → reset → autostart → bootstrap → 400 → …
-  There is no circuit-breaker, backoff guard, or max-reindex-attempts counter.
-  This is architectural (needs a circuit-breaker / backoff-state across the
-  manager's start() calls) and is flagged xfail(strict=True).
+  This is bounded by a manager-level circuit-breaker that counts consecutive
+  CursorResetError cycles across the manager's start() calls and gives up after
+  MAX_CURSOR_RESETS (7c-3); see tests/offline/test_manager.py.
 """
 
 from __future__ import annotations
@@ -412,95 +413,15 @@ def test_scenario_a3_teeth_bootstrap_requires_empty_cursor(sync_engine: SyncEngi
 
 
 # ===========================================================================
-# Scenario B — persistent 400 on fresh token: the persistent-400 bug class
+# Scenario B — persistent 400 on a fresh token (persistent-400 spin)
 # ===========================================================================
 #
-# Architectural finding: the manager has no circuit-breaker against repeated
-# CursorResetError.  When changes.list returns 400 even for the FRESH token
-# obtained from a successful bootstrap, the manager will loop:
-#   download_worker: changes.list → CursorResetError
-#   _handle_sync_thread_errors: stop() → reset_sync_state() → autostart.set()
-#   connection_monitor: start() → download_worker ...repeat indefinitely
-#
-# There is no counter, no backoff guard, and no "give up" path.
-#
-# At the engine level (no manager loop), download_sync_cycle simply raises
-# CursorResetError on each call.  The test proves the loop would be unbounded
-# by simulating N manager-reset→cycle calls and confirming each raises.
-# A guard would stop before N (e.g. raise a non-CursorResetError exception
-# or stop resetting after K attempts).
-#
-# Because the fix requires a circuit-breaker across the manager's start()
-# call boundary (architectural, cross-cutting), this is marked
-# @pytest.mark.xfail(strict=True).
+# The engine-level xfail test that used to live here has been removed.  The
+# persistent-400 circuit-breaker is a manager-level concern (it spans the
+# manager's start()/reset/autostart loop, not a single engine cycle), so its
+# acceptance criteria now live as real, passing tests in
+# tests/offline/test_manager.py:
+#   - test_persistent_cursor_reset_trips_circuit_breaker
+#   - test_cursor_reset_counter_resets_on_healthy_cycle
+# See cumulus.manager.MAX_CURSOR_RESETS (7c-3).
 # ===========================================================================
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "finding: persistent-400 causes unbounded reindex spin — "
-        "manager has no circuit-breaker against repeated CursorResetError "
-        "when changes.list returns 400 even for a fresh token post-bootstrap"
-    ),
-)
-def test_scenario_b_persistent_400_is_bounded(sync_engine: SyncEngine):
-    """Persistent 400 on changes.list must NOT produce an unbounded reindex loop.
-
-    Scenario: changes.list returns 400 for ALL calls, including the fresh
-    token obtained from a bootstrap.  The simulated manager loop
-    (reset_sync_state → download_sync_cycle) must terminate within a finite
-    number of attempts — either by surfacing a non-CursorResetError exception
-    or by stopping resets after K attempts.
-
-    Current behaviour: every iteration raises CursorResetError; the manager
-    resets state and restarts unconditionally → UNBOUNDED SPIN.
-
-    The test encodes "bounded = at most MAX_REINDEX_ATTEMPTS=3 manager cycles",
-    which is absent from the current code.  As long as the current code has no
-    circuit-breaker, this test MUST xfail.  When a circuit-breaker is added,
-    remove the xfail decorator and the assertion becomes the acceptance criterion.
-    """
-    fake = FakeDrive()
-    fake.add_file("/file.txt", b"data")
-    _wire_fake(sync_engine, fake)
-
-    # Arm enough 400s to cover: bootstrap fresh-token poll + several manager
-    # reset cycles.  10 covers 3 simulated restart cycles with margin.
-    # The fake's changes.list will fail on EVERY call for these 10 attempts.
-    fake.fail_next("changes.list", make_http_error(400), count=10)
-
-    MAX_REINDEX_ATTEMPTS = 3  # what a circuit-breaker SHOULD enforce
-
-    cursor_reset_count = 0
-    for _ in range(MAX_REINDEX_ATTEMPTS + 1):
-        # Simulate manager reset: cursor → "" (bootstrap path next cycle).
-        sync_engine.reset_sync_state()
-        assert sync_engine.remote_cursor == ""
-
-        try:
-            # First call: bootstrap path (cursor == ""), so it uses
-            # getStartPageToken + list_folder_iterator/files.list — NOT
-            # changes.list.  The armed 400 fault is therefore NOT triggered here;
-            # bootstrap completes and stores a fresh non-empty cursor.
-            sync_engine.download_sync_cycle()
-            # Second call: incremental path (cursor != "" after bootstrap).
-            # This call uses changes.list with the fresh token → hits the armed
-            # 400 → raises CursorResetError.  The except below catches it.
-            sync_engine.download_sync_cycle()
-        except CursorResetError:
-            cursor_reset_count += 1
-            continue
-        else:
-            # If no exception, the 400s were exhausted or a guard fired — BOUNDED.
-            break
-
-    # Assert bounded: a circuit-breaker must prevent more than
-    # MAX_REINDEX_ATTEMPTS full reset→bootstrap→400 cycles.
-    # Current code has no such guard, so cursor_reset_count == MAX_REINDEX_ATTEMPTS+1
-    # (or more) and this assertion FAILS → xfail(strict=True) is justified.
-    assert cursor_reset_count <= MAX_REINDEX_ATTEMPTS, (
-        f"Unbounded reindex spin detected: CursorResetError raised "
-        f"{cursor_reset_count} times in {MAX_REINDEX_ATTEMPTS + 1} iterations "
-        f"with no circuit-breaker — a persistent-400 would loop forever."
-    )
