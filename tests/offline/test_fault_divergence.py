@@ -442,28 +442,26 @@ def test_occupied_target_folder_move_no_rekey_teeth(sync_engine: SyncEngine):
 
 
 def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncEngine):
-    """FINDING B: folder-vs-folder occupied-target move creates duplicate remote_id rows.
+    """FINDING B (FIXED, 7c-1/7c-2): folder-vs-folder occupied-target move
+    must not create duplicate remote_id rows.
 
     When a remote folder (dir_id) is moved onto a path occupied by a different
     local folder (no index row), _apply_remote_move correctly returns False.
-    But _on_remote_folder then calls _check_download_conflict which returns
-    Identical (both content_hash == "folder") and calls update_index_from_sync_event
-    which inserts a SECOND index row at the new path with the same remote_id.
+    Previously _on_remote_folder then called _check_download_conflict which
+    returned Identical (both content_hash == "folder") and called
+    update_index_from_sync_event, inserting a SECOND index row at the new path
+    with the same remote_id (a stale orphan at /src_b3 + a new row at /dst_b3),
+    silently adopting the occupant — the same nondeterministic-resolution defect
+    as Scenario C, triggered by the folder-vs-folder occupied-target path.
 
-    After the apply: TWO rows share the same remote_id:
-      - /src_b3  (old stale orphan row, not moved by _apply_remote_move)
-      - /dst_b3  (newly written row from update_index_from_sync_event)
+    The fix: _check_download_conflict now treats a locally-existing folder whose
+    remote_id is already indexed elsewhere as an occupied-target move and returns
+    Conflict (occupant conflict-copied, 7c-1), and update_index_from_sync_event
+    evicts any stale same-remote_id row before inserting (7c-2), so exactly one
+    row remains at /dst_b3.
 
-    This is the same nondeterministic-resolution defect as Scenario C but
-    triggered by the folder-vs-folder occupied-target path.  The fix is
-    architectural: _check_download_conflict must treat a locally-existing folder
-    with NO index row as "untracked / newly appeared" (not Identical), so the
-    conflict-copy branch fires and the occupant is renamed before the moved
-    folder is downloaded.
-
-    Desired (currently-failing) outcome: exactly one row at /dst_b3 (occupant
-    conflict-copied).  Marked strict xfail so CI fails the moment this is fixed,
-    forcing explicit triage before the mark is removed.
+    This test was a strict xfail until the fix landed; it now asserts the fixed
+    outcome (one row at /dst_b3, occupant conflict-copied).
     """
     fake = FakeDrive()
     dir_id = fake.add_folder("/dst_b3")
