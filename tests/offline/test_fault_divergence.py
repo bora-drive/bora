@@ -347,13 +347,16 @@ def test_stale_cache_move_teeth(sync_engine: SyncEngine):
 
 
 def test_occupied_target_folder_move_no_rekey_of_old_row(sync_engine: SyncEngine):
-    """_apply_remote_move must NOT re-key the index row when the target is
-    occupied: the old row at /src_folder must survive after the apply.
+    """An occupied-target folder move must not silently adopt the occupant, and
+    must end with exactly one (correctly re-keyed) index row for the moved id.
 
-    This is the minimal safety check: even if the downstream logic incorrectly
-    adopts the occupant (the defect documented below), the occupied-target guard
-    in _apply_remote_move must at least NOT do an explicit re-key of the old row.
-    The old row remaining is what the guard guarantees.
+    _apply_remote_move detects the occupied target and bails (it does NOT
+    re-key the old /src_folder row itself). The downstream download path then
+    conflict-copies the untracked occupant and writes the moved folder at
+    /dst_folder; update_index_from_sync_event's same-remote_id eviction (7c-1/
+    7c-2) collapses the stale /src_folder orphan so the index ends with a single
+    row at /dst_folder. Before that fix the engine left a stale /src_folder
+    orphan plus a duplicate /dst_folder row (finding B).
     """
     fake = FakeDrive()
     dir_id = fake.add_folder("/dst_folder")
@@ -386,14 +389,18 @@ def test_occupied_target_folder_move_no_rekey_of_old_row(sync_engine: SyncEngine
 
     sync_engine._create_local_entry(event)
 
-    # The occupied-target guard in _apply_remote_move must NOT have re-keyed
-    # the old row: /src_folder row must still be present.
-    old_entry = sync_engine.get_index_entry("/src_folder")
-    assert old_entry is not None, (
-        "old index row must survive when _apply_remote_move detects target occupied — "
-        "re-keying would silently adopt the occupant"
+    # Exactly one row survives for the moved id, re-keyed to /dst_folder; the
+    # stale /src_folder orphan is evicted (no silent adoption, no duplicate).
+    with sync_engine._database_access():
+        rows = sync_engine._index_table.select_sql("WHERE remote_id = ?", dir_id)
+    assert len(rows) == 1, (
+        f"expected 1 row for the moved id, got "
+        f"{[r.remote_path_lower for r in rows]}"
     )
-    assert old_entry.remote_id == dir_id
+    assert rows[0].remote_path_lower == "/dst_folder"
+    assert sync_engine.get_index_entry("/src_folder") is None
+    new_entry = sync_engine.get_index_entry("/dst_folder")
+    assert new_entry is not None and new_entry.remote_id == dir_id
 
 
 def test_occupied_target_folder_move_no_rekey_teeth(sync_engine: SyncEngine):
@@ -433,16 +440,6 @@ def test_occupied_target_folder_move_no_rekey_teeth(sync_engine: SyncEngine):
     assert bad_entry is not None and bad_entry.remote_id == dir_id
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "finding B: folder-vs-folder occupied-target move creates duplicate remote_id rows"
-        " — _check_download_conflict returns Identical for an untracked folder"
-        " (content_hash 'folder' == 'folder'), so update_index_from_sync_event inserts a"
-        " second row at the new path while the stale orphan at the old path survives;"
-        " occupant never conflict-copied. Architectural fix needed (escalated)."
-    ),
-)
 def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncEngine):
     """FINDING B: folder-vs-folder occupied-target move creates duplicate remote_id rows.
 
@@ -497,6 +494,13 @@ def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncE
         rows = sync_engine._index_table.select_sql("WHERE remote_id = ?", dir_id)
     assert len(rows) == 1
     assert rows[0].remote_path_lower == "/dst_b3"
+
+    # Occupant preserved as a conflicted copy (not silently adopted).
+    cc_dirs = [
+        name for name in os.listdir(sync_engine.sync_path)
+        if "conflicted copy" in name
+    ]
+    assert cc_dirs, "occupant must be conflict-copied, not adopted"
 
 
 # ---------------------------------------------------------------------------
