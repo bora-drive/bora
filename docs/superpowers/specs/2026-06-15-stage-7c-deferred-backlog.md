@@ -126,7 +126,16 @@ the mark's removal. Full detail in
 - **Action taken:** the dangling Stage 3/4 → Stage 6 "persist root_id" promise is
   formally closed as "won't do (accepted)." Item complete.
 
-### 7c-5 — Spike Q3: unshare scenario never validated — **PARTIALLY RESOLVED 2026-06-27 (engine-side confirmed offline; live event-shape still pending)**
+### 7c-5 — Spike Q3: unshare scenario — **VALIDATED LIVE 2026-06-27 ✅ (assumption confirmed)**
+- **Live result (2026-06-27, cumulus-test@arko.net + a 2nd account):** shared a
+  file into the test account (appeared in the change feed as
+  `removed=False trashed=False shared=True` → cumulus UPSERT/apply, but dropped
+  as out-of-scope shared-with-me since its parent isn't under root), then
+  unshared it. The unshare produced **exactly** `removed=True, file=None` — the
+  same shape as a hard-delete. cumulus's `classify` routes it through the
+  delete path (`changes.py:353` → `_emit_delete`). **The spike's working
+  assumption ("treat unshare like hard-delete, removed=true, no file body") is
+  confirmed against real Drive.** Item complete. (Original notes retained below.)
 - Stage 0 spike report (`spikes/2026-04-30-...-report.md`, Known gaps) left the
   unshare-of-a-shared-item scenario unrun (needs a second Google account). The
   working assumption is "treat unshare like hard-delete (`removed=true`, no file
@@ -150,7 +159,18 @@ the mark's removal. Full detail in
   stale entry, open a follow-up to detect lost-access. Batch with 7c-6 in the
   next linked session.
 
-### 7c-6 — Spike Q1: headless paste-redirect OAuth never re-validated — **RISK RETIRED 2026-06-27 (InsecureTransportError blocker not reproducible offline; live round-trip still nice-to-have)**
+### 7c-6 — Spike Q1: headless paste-redirect OAuth — **VALIDATED LIVE 2026-06-27 ✅**
+- **Live result (2026-06-27):** ran the real paste-redirect round-trip against
+  cumulus-test@arko.net — generated the auth URL via `make_paste_flow`, approved
+  in a browser, pasted the failed `http://localhost:8080/?code=...` redirect URL
+  back, and exchanged the code via `fetch_token(code=...)`. **It succeeded
+  end-to-end** (real refresh token obtained, account confirmed as the dedicated
+  test account). Critically, the exchange ran **with `OAUTHLIB_INSECURE_TRANSPORT`
+  explicitly UNSET** and did **not** raise `InsecureTransportError` — confirming
+  the offline finding live: the in-process paste flow is not blocked. The
+  spike's "broken-as-shipped" concern is conclusively retired. The robustness
+  note below (env var only in `daemon.py`) stands as a latent future-dep caveat,
+  not a current bug. Item complete. (Original notes retained below.)
 - The spike flagged the Mode-B paste-redirect path as "broken-as-shipped due to
   `InsecureTransportError`; Stage 2 must address this before claiming headless
   support." Stage 2 set `OAUTHLIB_INSECURE_TRANSPORT=1` (`daemon.py:32`), but no
