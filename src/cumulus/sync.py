@@ -1043,6 +1043,26 @@ class SyncEngine:
             # Add or update entries for created or modified items.
 
             if event.change_type is not ChangeType.Removed:
+                # Evict any OTHER index row already holding this remote_id at a
+                # different path before inserting. Drive emits a single change at
+                # the new path for a moved item; an occupied-target / failed-move
+                # fallback (_apply_remote_move returning without re-keying) can
+                # leave a stale orphan row at the old path with the same
+                # remote_id. Inserting the new row without this eviction creates
+                # duplicate remote_id rows (findings B/C); get_index_entry_by_
+                # remote_id is first-wins with no ORDER BY, so the orphan can be
+                # returned for later moves. The UNIQUE schema constraint backstops
+                # this on fresh databases; evicting here keeps existing databases
+                # self-consistent too.
+                if event.remote_id:
+                    for stale in self._index_table.select(
+                        MatchQuery(IndexEntry.remote_id, event.remote_id)
+                    ):
+                        if stale.remote_path_lower != remote_path_lower:
+                            self._index_table.delete_primary_key(
+                                stale.remote_path_lower
+                            )
+
                 # Create or update entry.
                 entry = IndexEntry(
                     remote_path_cased=event.remote_path,
