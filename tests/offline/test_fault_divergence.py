@@ -23,6 +23,7 @@ from cumulus.client import GoogleDriveClient
 from cumulus.config import remove_configuration
 from cumulus.core import FullAccount
 from cumulus.database.core import Database
+from cumulus.exceptions import DatabaseError
 from cumulus.keyring import CredentialStorage
 from cumulus.models import (
     ChangeType,
@@ -515,136 +516,74 @@ def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncE
 # ---------------------------------------------------------------------------
 
 
-def test_duplicate_remote_id_rows_no_crash(sync_engine: SyncEngine):
-    """Two index rows sharing the same remote_id must not cause _apply_remote_move
-    to raise an exception.
+def test_duplicate_remote_id_rows_rejected_at_db(sync_engine: SyncEngine):
+    """A duplicate remote_id can no longer be inserted (7c-2 UNIQUE). The
+    second seed must raise (the engine's _database_access translates the raw
+    sqlite3.IntegrityError into DatabaseError) rather than create a second row.
 
-    Seed /path_a and /path_b with the same file_id.  Deliver a move event for
-    that id to /path_c.  Assert: no crash, engine returns without error.
+    Supersedes test_duplicate_remote_id_rows_no_crash, whose premise (two rows
+    coexisting) is no longer reachable.
     """
     file_id = "dup-id-1"
     data = b"duplicate id content"
-
-    # Write both local copies so the move logic has something to move.
     _write_local_file(sync_engine, "/path_a.txt", data)
-    _write_local_file(sync_engine, "/path_b.txt", data)
 
-    # Seed two rows with the SAME remote_id.
     _seed_entry(
-        sync_engine,
-        "/path_a.txt",
-        file_id,
-        ItemType.File,
-        rev="rev-1",
+        sync_engine, "/path_a.txt", file_id, ItemType.File, rev="rev-1",
         content_hash=_md5(data),
     )
-    _seed_entry(
-        sync_engine,
-        "/path_b.txt",
-        file_id,
-        ItemType.File,
-        rev="rev-1",
-        content_hash=_md5(data),
-    )
+    with pytest.raises(DatabaseError) as excinfo:
+        _seed_entry(
+            sync_engine, "/path_b.txt", file_id, ItemType.File, rev="rev-1",
+            content_hash=_md5(data),
+        )
+    # The DatabaseError wraps the schema-level UNIQUE violation.
+    cause = excinfo.value.__cause__ or excinfo.value.__context__
+    assert isinstance(cause, sqlite3.IntegrityError)
 
-    # Confirm both rows exist.
+    # Exactly one row for the id survives.
     with sync_engine._database_access():
         rows = sync_engine._index_table.select_sql("WHERE remote_id = ?", file_id)
-    assert len(rows) == 2, f"expected 2 duplicate rows, got {len(rows)}"
-
-    event = _make_move_event(
-        sync_engine,
-        "/path_c.txt",
-        file_id,
-        ItemType.File,
-        rev="rev-1",
-        content_hash=_md5(data),
-        size=len(data),
-    )
-    _write_local_file(sync_engine, "/path_c.txt", data)  # occupied target forces early-exit in _apply_remote_move; the no-crash claim still covers the sqlite dup-id query
-
-    # Must not raise.
-    try:
-        sync_engine._apply_remote_move(event)
-    except Exception as exc:
-        pytest.fail(f"_apply_remote_move raised with duplicate remote_id rows: {exc}")
+    assert len(rows) == 1
+    assert rows[0].remote_path_lower == "/path_a.txt"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "finding C: get_index_entry_by_remote_id has no uniqueness guard (no UNIQUE"
-        " constraint on remote_id, models.py); duplicate rows -> first-wins resolution"
-        " and the non-selected duplicate survives as a stale orphan after"
-        " _apply_remote_move re-keys only the selected row. Reachable in production via"
-        " finding B. Fix needs schema UNIQUE + _check_download_conflict semantic fix"
-        " (escalated)."
-    ),
-)
-def test_duplicate_remote_id_rows_no_dangling_stale_row(sync_engine: SyncEngine):
-    """FINDING C: duplicate remote_id rows leave a dangling stale orphan after move.
+def test_remote_id_move_via_create_rekeys_not_duplicates(sync_engine: SyncEngine):
+    """7c-2 closure: applying a create/move event for an id already indexed at
+    another path re-keys (one row), leaving no dangling orphan.
 
-    'Correct' means: the row that was selected (first-wins) was moved to /dup_c.txt
-    and the OTHER duplicate row (at the non-selected old path) is cleaned up.
-    The engine does NOT clean it up (single-row "first wins" logic with no
-    uniqueness guard).
-
-    The surviving stale row is a REAL DEFECT: get_index_entry_by_remote_id can
-    return the WRONG (stale) row depending on SQLite's ordering, breaking future
-    moves for that id.  Reachable in production via finding B.
-
-    Desired (currently-failing) outcome: exactly one row for the id, at /dup_c.txt,
-    with no dangling orphan.  Marked strict xfail so CI fails the moment this is
-    fixed, forcing explicit triage before the mark is removed.
+    Supersedes the finding-C xfail. The stale-orphan defect is closed by the
+    update_index_from_sync_event eviction (Task 2) plus the UNIQUE backstop
+    (Task 3): get_index_entry_by_remote_id can no longer return a wrong row.
     """
     file_id = "dup-id-2"
-    data = b"duplicate id dangling row"
+    data = b"rekey not duplicate"
 
     _write_local_file(sync_engine, "/dup_a.txt", data)
-    _write_local_file(sync_engine, "/dup_b.txt", data)
-
     _seed_entry(
-        sync_engine,
-        "/dup_a.txt",
-        file_id,
-        ItemType.File,
-        rev="rev-1",
-        content_hash=_md5(data),
-    )
-    _seed_entry(
-        sync_engine,
-        "/dup_b.txt",
-        file_id,
-        ItemType.File,
-        rev="rev-1",
+        sync_engine, "/dup_a.txt", file_id, ItemType.File, rev="rev-1",
         content_hash=_md5(data),
     )
 
-    # Deliver move to /dup_c.txt.
+    # Apply an index update for the same id at a new path (as the download path
+    # does after writing the file). Eviction must drop the /dup_a.txt row.
     event = _make_move_event(
-        sync_engine,
-        "/dup_c.txt",
-        file_id,
-        ItemType.File,
-        rev="rev-1",
-        content_hash=_md5(data),
-        size=len(data),
+        sync_engine, "/dup_c.txt", file_id, ItemType.File, rev="rev-1",
+        content_hash=_md5(data), size=len(data),
     )
+    _write_local_file(sync_engine, "/dup_c.txt", data)
+    sync_engine.update_index_from_sync_event(event)
 
-    sync_engine._apply_remote_move(event)
-
-    # Desired correct post-condition: exactly one row for this id, at /dup_c.txt,
-    # with no dangling orphan surviving from the non-selected duplicate.
     with sync_engine._database_access():
         rows_after = sync_engine._index_table.select_sql("WHERE remote_id = ?", file_id)
-    moved_to_c = sync_engine.get_index_entry("/dup_c.txt")
-
     assert len(rows_after) == 1, (
-        f"Expected 1 row after move, got {len(rows_after)}: "
-        f"{[r.remote_path_lower for r in rows_after]}"
+        f"expected 1 row, got {[r.remote_path_lower for r in rows_after]}"
     )
-    assert moved_to_c is not None
-    assert moved_to_c.remote_id == file_id
+    assert sync_engine.get_index_entry("/dup_c.txt") is not None
+    assert sync_engine.get_index_entry("/dup_a.txt") is None
+    # Resolution by id is now unambiguous.
+    by_id = sync_engine.get_index_entry_by_remote_id(file_id)
+    assert by_id is not None and by_id.remote_path_lower == "/dup_c.txt"
 
 
 # ---------------------------------------------------------------------------
