@@ -102,3 +102,70 @@ def test_cursor_reset_triggers_reindex_and_autostart(m: Maestral, tmp_path) -> N
     assert manager.autostart.is_set()       # sync will resume
     manager.desktop_notifier.notify.assert_called_once()
     assert manager.desktop_notifier.notify.call_args.kwargs["level"] == notify.INFO
+
+
+def test_persistent_cursor_reset_trips_circuit_breaker(m: Maestral, tmp_path) -> None:
+    """7c-3: repeated CursorResetError must NOT loop forever. After
+    MAX_CURSOR_RESETS consecutive resets the manager gives up: it stops without
+    re-arming autostart and raises a visible (ERROR-level) notification."""
+    local_dir = str(tmp_path / "SyncRoot")
+    os.makedirs(local_dir)
+    m.sync.sync_path = local_dir
+
+    manager = m.manager
+    running = manager.running
+    autostart = manager.autostart
+    manager.desktop_notifier = Mock()
+
+    from cumulus.manager import MAX_CURSOR_RESETS
+
+    # The first MAX_CURSOR_RESETS resets schedule a restart (autostart set).
+    for _ in range(MAX_CURSOR_RESETS):
+        manager.autostart.clear()
+        with manager._handle_sync_thread_errors(running, autostart):
+            raise CursorResetError("Sync cursor reset", "token expired")
+        assert manager.autostart.is_set(), "reset within budget must re-arm autostart"
+
+    # The next reset trips the breaker: give up, no autostart.
+    manager.autostart.clear()
+    with manager._handle_sync_thread_errors(running, autostart):
+        raise CursorResetError("Sync cursor reset", "token expired")
+
+    assert not manager.autostart.is_set(), (
+        "circuit-breaker must NOT re-arm autostart after the budget is exhausted"
+    )
+    error_calls = [
+        c for c in manager.desktop_notifier.notify.call_args_list
+        if c.kwargs.get("level") == notify.ERROR
+    ]
+    assert error_calls, "breaker must surface a visible ERROR notification"
+
+
+def test_cursor_reset_counter_resets_on_healthy_cycle(m: Maestral, tmp_path) -> None:
+    """7c-3: a healthy (exception-free) pass through the error handler clears
+    the reset counter, so transient resets never accumulate to a trip."""
+    local_dir = str(tmp_path / "SyncRoot2")
+    os.makedirs(local_dir)
+    m.sync.sync_path = local_dir
+
+    manager = m.manager
+    running = manager.running
+    autostart = manager.autostart
+    manager.desktop_notifier = Mock()
+
+    from cumulus.manager import MAX_CURSOR_RESETS
+
+    # Exhaust the budget minus one, then a healthy cycle clears it.
+    for _ in range(MAX_CURSOR_RESETS):
+        with manager._handle_sync_thread_errors(running, autostart):
+            raise CursorResetError("Sync cursor reset", "token expired")
+    with manager._handle_sync_thread_errors(running, autostart):
+        pass  # healthy cycle resets the counter
+
+    # A further reset is again treated as within-budget (autostart re-armed).
+    manager.autostart.clear()
+    with manager._handle_sync_thread_errors(running, autostart):
+        raise CursorResetError("Sync cursor reset", "token expired")
+    assert manager.autostart.is_set(), (
+        "counter must reset on a healthy cycle, so this reset is within budget"
+    )
