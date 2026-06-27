@@ -104,6 +104,12 @@ sized to ~3–10 days of focused work.
 | 7 | Test infrastructure & coverage | Phase 12 | E1, E2 (sync-engine side), E3 |
 | 8 | Docs + release | Phase 13, 14 | B2, D3, D5, D6, F items |
 
+> **Note (2026-06-15):** Stage 7 was decomposed during execution into **7a**
+> (test infrastructure + linked greening), **7b** (E2 fault-injection + E3 10k
+> load test), and **7c** (deferred backlog — the E2-surfaced production defects
+> and other punted items; see `docs/superpowers/specs/2026-06-15-stage-7c-deferred-backlog.md`).
+> The §5.7 prose below still describes Stage 7 monolithically.
+
 ### 5.1 Stage 1 — Path cache final form
 
 **Why first:** every later stage translates paths through the path cache.
@@ -373,14 +379,21 @@ stage-bound risks:
   rule table embedded in §5.3.
 - B1 OAuth UX: spike Q1 confirmed `run_local_server` works headless via
   port-forward; paste-redirect needs `OAUTHLIB_INSECURE_TRANSPORT=1`.
-  Embedded in §5.2.
+  Embedded in §5.2. **Resolved in Stage 2:** `OAUTHLIB_INSECURE_TRANSPORT=1`
+  is set at `daemon.py:32`; the headless paste-redirect path was never directly
+  re-validated end-to-end (spike Q1 loose end → Stage 7c backlog).
 - C4 trash vs delete default: `trashed=True` proposed, but final policy
   pending Stage 4 spec and possibly user input.
 - A6 `appProperties`: defer unless Stage 3 / 4 surface a concrete need.
-- D4 GUI compat: shim or break? Decision deferred to Stage 5 spec.
+  **Never needed — deferral held; not implemented.**
+- D4 GUI compat: shim or break? ~~Decision deferred to Stage 5 spec.~~
+  **Re-deferred to Stage 6 and decided there (Stage 6 §2 W3): documented break,
+  no model shims.** Code matches — no `dbx_path` alias on `models.py`/`core.py`;
+  only the pre-existing `exceptions.py` aliases remain (kept by design).
 - Q3 unshare scenario: not run in spike (single-account); revisit only if
   Stage 3 surfaces a concrete failure mode that the working assumption
-  (treat unshare like hard-delete) doesn't cover.
+  (treat unshare like hard-delete) doesn't cover. **Still unvalidated through
+  7b — spike Q3 loose end → Stage 7c backlog.**
 
 ## 10. Next step after this design is approved
 
