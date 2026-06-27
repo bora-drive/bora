@@ -590,6 +590,10 @@ class GoogleDriveClient:
                 f"No item at '{remote_path}' is known to Cumulus.",
                 remote_path=remote_path,
             )
+        # Recover the true cased path from the cache: `remote_path` is only a
+        # case-insensitive lookup key, so echoing it into `path_display` would
+        # materialize the item locally under the casefolded name (7c-7).
+        cased_path = self._path_cache.id_to_path(file_id) or remote_path
         with convert_api_errors(remote_path=remote_path):
             file = self._retry_transient(
                 lambda: self._get_service()
@@ -604,8 +608,8 @@ class GoogleDriveClient:
         if is_google_native(mime):
             return None
         if is_google_folder(mime):
-            return to_folder_metadata(file, remote_path)
-        return to_file_metadata(file, remote_path)
+            return to_folder_metadata(file, cased_path)
+        return to_file_metadata(file, cased_path)
 
     def list_revisions(
         self, remote_path: str, limit: int = 10
