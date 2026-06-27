@@ -1,5 +1,16 @@
 # Maestral Dropbox API Interface Analysis
 
+> ⚠️ **PRE-PORT BASELINE — describes the *original* Dropbox SDK integration, not
+> the shipped Google Drive (`cumulus`) code.** This document was written at the
+> start of the port to map the existing Dropbox surface; it has not been (and is
+> not meant to be) updated to the current implementation. The Dropbox SDK is gone
+> — `client.py` now wraps `googleapiclient`, the exception hierarchy was renamed
+> (`MaestralApiError`→`CumulusApiError`, etc.), and the method/class names below no
+> longer exist except for a backward-compat `DropboxClient = GoogleDriveClient`
+> alias slated for removal in Stage 8. For *current* Drive behavior see
+> `dropbox-vs-drive-differences.md` and the per-stage specs. Kept for historical
+> context only.
+
 ## Overview
 
 Maestral has a **clean abstraction layer** between its sync logic and the Dropbox API. The architecture follows this pattern:

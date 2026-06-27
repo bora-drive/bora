@@ -1,5 +1,17 @@
 # Maestral Sync Engine — Detailed Analysis
 
+> ⚠️ **PRE-PORT BASELINE — describes the *original* Dropbox sync engine, not the
+> shipped Google Drive (`cumulus`) engine.** Written at the start of the port to
+> document the existing mechanics; it has not been updated to the current code.
+> Sections 1–3 describe Dropbox mechanisms the port replaced (long-poll →
+> fixed-interval polling, `DropboxContentHasher` → MD5, globally-unique `rev` →
+> `(file_id, revisionId)`, team/path-root namespaces → removed, server
+> `path_lower` → locally-computed fold keys). Section 4 ("What Would Need to
+> Change") was the forward-looking plan and is now largely realized. The §5
+> line-number table is for the old `sync.py` and will not match current lines. For
+> *current* behavior see `dropbox-vs-drive-differences.md` and the per-stage specs.
+> Kept for historical context only.
+
 ## 1. How the Sync Loop Works (Upload/Download Cycle)
 
 ### Architecture Overview

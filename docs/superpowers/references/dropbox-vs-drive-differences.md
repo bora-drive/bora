@@ -168,12 +168,19 @@ adaptation**, and any **user-visible consequence**.
 ### 18. Precondition failure (rev mismatch)
 - **Dropbox:** a write-conflict error on `update_rev` mismatch, and the **server**
   atomically created the conflicted copy on conflict.
-- **Drive:** an update with a stale rev precondition raises HTTP 412
-  (`conditionNotMet`) → mapped to `DataChangedError`. **Drive has no server-side
+- **Drive:** Drive v3 has **no per-write rev precondition** — no `If-Match` /
+  atomic compare-and-set on `files.update`, so there is no precondition error to
+  map. (A generic HTTP 412 → `DataChangedError` mapping exists in
+  `errorhandling.py` for other preconditioned calls, but the rev-mismatch path
+  never triggers it.) **Drive also has no server-side
   conflicted-copy-on-conflict.**
-- **Port:** the engine must detect and create conflicted copies itself
-  (`generate_cc_name` / `_local_cc_filename`). The non-atomic emulation of this is
-  the source of the cluster-A data-loss bug (see cluster-A plan).
+- **Port:** the write client emulates the precondition with a *non-atomic*
+  check-then-write: before an update it issues a separate
+  `files.get(fields="headRevisionId")` and raises `DataChangedError` itself if the
+  head moved (`writes.py:219-235`). The engine then detects and creates conflicted
+  copies itself (`generate_cc_name` / `_local_cc_filename`). The window between the
+  check and the write is non-atomic and is the source of the cluster-A data-loss
+  bug (see cluster-A plan).
 
 ### 19. Symlinks
 - **Dropbox:** stored a `symlink_target` and synced symlinks.
@@ -201,9 +208,13 @@ adaptation**, and any **user-visible consequence**.
 ## Quota / batching
 
 ### 22. API quota
-- **Drive:** a tighter per-user daily query quota than Dropbox.
-- **Port:** the 180s poll interval is chosen to keep daily polling cost low;
-  requests are counted via `_count_request` and a warning logs near the cap.
+- **Drive:** a per-user rate limit of **12,000 queries per 60 seconds** — a
+  short-window throughput cap, *not* a daily quota (`client.py:99-107`). Transient
+  429 / rate-limit-403 responses are handled by `_retry_transient`'s backoff.
+- **Port:** the 180s poll interval sits far below the limit; it is a
+  latency/courtesy tradeoff, **not** a quota measure. Requests are counted via
+  `_count_request`, but the counter is **diagnostics/status only** — there is no
+  client-side budget and **no cap warning is logged**.
 
 ### 23. Batch operations
 - **Dropbox:** native async batch delete / folder-create with job polling.
@@ -215,5 +226,56 @@ adaptation**, and any **user-visible consequence**.
 
 ---
 
-*Last updated 2026-06-10 (Stage 7a → 7b interlude). Add new differences as they
+## Newly catalogued (2026-06-15 docs review)
+
+The following differences were present in the code but not yet documented when the
+2026-06-15 review of `docs/superpowers/` was done. Several are deliberate MVP
+simplifications; each names where it is handled and any correctness consequence.
+
+### 24. Multiple parents (file in more than one folder)
+- **Dropbox:** a file lives in exactly one location.
+- **Drive:** historically a `fileId` could have **multiple parents** (a single file
+  appearing in several folders). Adding new multi-parent relationships was
+  deprecated in Sept 2020, but **pre-existing multi-parent files persist** on older
+  accounts.
+- **Port:** the port collapses identity to a single parent — `path_cache`
+  populates from `parents[0]` (`path_cache.py:364-365`) and the classifier picks
+  the first in-scope parent (`changes.py`). **Consequence:** a legacy multi-parent
+  file is materialised in only one location; its other locations are invisible to
+  the sync. Acceptable for the single-account MVP; revisit if a real account hits
+  it.
+
+### 25. Change-feed scoping (My Drive vs. shared-with-me)
+- **Dropbox:** the change feed is already scoped to the account's namespace.
+- **Drive:** `changes.list` returns changes across everything visible to the user.
+  The port calls it **without** `restrictToMyDrive=True`, `spaces`, or
+  `includeItemsFromAllDrives` (`changes.py:319-331`), so shared-with-me items do
+  enter the raw change stream.
+- **Port:** the "My Drive only" guarantee (entry #12) is enforced **post-hoc** by
+  parent-scope classification (a change with no in-scope parent is ignored or
+  treated as move-out), **not** by query scoping. Functionally correct today, but
+  it processes and discards out-of-scope changes rather than filtering them at the
+  source. Adding `restrictToMyDrive=True` is a possible efficiency improvement.
+
+### 26. Drive shortcuts
+- **Drive:** a shortcut (`application/vnd.google-apps.shortcut`) is a pointer to
+  another file, with no byte content of its own.
+- **Port:** shortcuts match the Google-native MIME prefix and are **silently
+  dropped** by the same filter that excludes native Docs/Sheets/Slides
+  (`native_docs.is_google_native`, `native_docs.py:46-60`). **Consequence:** a
+  shortcut is treated like a native doc — reported skipped, never mirrored. This is
+  intentional but was previously undocumented (entry #20 covered only native docs).
+
+### 27. Sharing / shared-link API surface
+- **Dropbox:** Maestral implemented `share_dir`, `create_shared_link`,
+  `revoke_shared_link`, and `list_shared_links`.
+- **Drive:** the Drive API supports permissions/sharing, but the port does not.
+- **Port:** all four sharing methods are stubs that raise `NotImplementedError`
+  via `_not_implemented()` (`client.py:149`). **Consequence:** a notable functional
+  gap vs. Dropbox — sharing is entirely unimplemented in the MVP. Tracked as future
+  work; see the Stage 7c backlog.
+
+---
+
+*Last updated 2026-06-15 (post 7b-E3; docs review). Add new differences as they
 are discovered.*
