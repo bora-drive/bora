@@ -26,7 +26,7 @@ def _write_client_secret(path: Path) -> None:
 
 
 def test_load_client_config_uses_bundled_resource_by_default(monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     cfg = oauth.load_client_config()
     assert "installed" in cfg
     assert "client_id" in cfg["installed"]
@@ -35,7 +35,7 @@ def test_load_client_config_uses_bundled_resource_by_default(monkeypatch):
 def test_load_client_config_env_override(monkeypatch, tmp_path):
     override = tmp_path / "alt_client_secret.json"
     _write_client_secret(override)
-    monkeypatch.setenv("CUMULUS_CLIENT_SECRET_PATH", str(override))
+    monkeypatch.setenv("BORA_CLIENT_SECRET_PATH", str(override))
 
     cfg = oauth.load_client_config()
     assert cfg["installed"]["client_id"] == "test-client.apps.googleusercontent.com"
@@ -43,7 +43,7 @@ def test_load_client_config_env_override(monkeypatch, tmp_path):
 
 def test_load_client_config_missing_override_raises_auth_error(monkeypatch, tmp_path):
     missing = tmp_path / "nope.json"
-    monkeypatch.setenv("CUMULUS_CLIENT_SECRET_PATH", str(missing))
+    monkeypatch.setenv("BORA_CLIENT_SECRET_PATH", str(missing))
 
     with pytest.raises(AuthError):
         oauth.load_client_config()
@@ -52,14 +52,14 @@ def test_load_client_config_missing_override_raises_auth_error(monkeypatch, tmp_
 def test_load_client_config_malformed_override_raises_auth_error(monkeypatch, tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text("{not json")
-    monkeypatch.setenv("CUMULUS_CLIENT_SECRET_PATH", str(bad))
+    monkeypatch.setenv("BORA_CLIENT_SECRET_PATH", str(bad))
 
     with pytest.raises(AuthError):
         oauth.load_client_config()
 
 
 def test_load_client_config_missing_bundled_resource_raises_auth_error(monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
 
     def _raise(*_a, **_kw):
         raise ModuleNotFoundError("No module named 'bora.resources'")
@@ -70,7 +70,7 @@ def test_load_client_config_missing_bundled_resource_raises_auth_error(monkeypat
 
 
 def test_credentials_from_refresh_token_uses_bundled_client(monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     creds = oauth.credentials_from_refresh_token("test-refresh-token")
     assert creds.refresh_token == "test-refresh-token"
     assert creds.client_id  # comes from client_secret.json
@@ -93,7 +93,7 @@ def cred_storage():
 
 
 def test_save_and_load_credentials_round_trip(monkeypatch, cred_storage):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     original = oauth.credentials_from_refresh_token("rt-abc")
 
     oauth.save_credentials(cred_storage, original, account_id="perm-123")
@@ -129,7 +129,7 @@ def _mark_refreshed(self, request):
 
 
 def test_persisting_credentials_refresh_persists(monkeypatch, cred_storage):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     base = oauth.credentials_from_refresh_token("rt-abc")
     wrapped = oauth.wrap_persisting(base, cred_storage, account_id="perm-456")
 
@@ -146,7 +146,7 @@ def test_persisting_credentials_refresh_persists(monkeypatch, cred_storage):
 def test_persisting_credentials_refresh_does_not_persist_on_error(
     monkeypatch, cred_storage
 ):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     base = oauth.credentials_from_refresh_token("rt-abc")
     wrapped = oauth.wrap_persisting(base, cred_storage, account_id="perm-456")
 
@@ -164,7 +164,7 @@ def test_persisting_credentials_refresh_does_not_persist_on_error(
 
 
 def test_load_credentials_returned_blob_can_be_wrapped(monkeypatch, cred_storage):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     base = oauth.credentials_from_refresh_token("rt-abc")
     oauth.save_credentials(cred_storage, base, account_id="perm-789")
     loaded = oauth.load_credentials(cred_storage)
@@ -175,7 +175,7 @@ def test_load_credentials_returned_blob_can_be_wrapped(monkeypatch, cred_storage
 
 
 def test_make_paste_flow_authorization_url_shape(monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     flow = oauth.make_paste_flow()
 
     auth_url, _state = flow.authorization_url(
@@ -191,7 +191,7 @@ def test_make_paste_flow_authorization_url_shape(monkeypatch):
 
 
 def test_run_local_flow_returns_credentials(monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     fake_creds = mock.Mock(spec=Credentials)
     fake_flow = mock.Mock()
     fake_flow.run_local_server = mock.Mock(return_value=fake_creds)
@@ -209,7 +209,7 @@ def test_run_local_flow_returns_credentials(monkeypatch):
 
 
 def test_run_local_flow_port_in_use_raises_auth_error(monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     fake_flow = mock.Mock()
     fake_flow.run_local_server = mock.Mock(
         side_effect=OSError(98, "Address already in use")

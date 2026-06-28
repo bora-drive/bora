@@ -23,11 +23,11 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from .core import FileMetadata, FolderMetadata, WriteMode
-from .errorhandling import convert_api_errors, extract_http_reason, http_error_to_cumulus
+from .errorhandling import convert_api_errors, extract_http_reason, http_error_to_bora
 from .exceptions import (
     BadInputError,
     CancelledError,
-    CumulusApiError,
+    BoraApiError,
     DataChangedError,
     DataCorruptionError,
     FileConflictError,
@@ -97,7 +97,7 @@ class _WriteHelper:
         if file_id is None:
             raise NotFoundError(
                 "Not found",
-                f"No item at {remote_path!r} is known to Cumulus.",
+                f"No item at {remote_path!r} is known to Bora.",
                 remote_path=remote_path,
             )
         return file_id
@@ -111,7 +111,7 @@ class _WriteHelper:
         if parent_id is None:
             raise NotFoundError(
                 "Parent folder not found",
-                f"The parent of {for_path!r} is not known to Cumulus.",
+                f"The parent of {for_path!r} is not known to Bora.",
                 remote_path=for_path,
             )
         return parent_id
@@ -229,7 +229,7 @@ class _WriteHelper:
             if meta.get("headRevisionId") != update_rev:
                 raise DataChangedError(
                     "Item changed on Google Drive",
-                    f"{remote_path!r} changed on Drive since Cumulus last saw it.",
+                    f"{remote_path!r} changed on Drive since Bora last saw it.",
                     remote_path=remote_path,
                     local_path=local_path,
                 )
@@ -244,7 +244,7 @@ class _WriteHelper:
 
         # These steps read the local file (MD5, mtime, size). Wrap them in
         # convert_api_errors so a local OS error — e.g. a permission-denied
-        # file — surfaces as a Cumulus SyncError (InsufficientPermissionsError)
+        # file — surfaces as a Bora SyncError (InsufficientPermissionsError)
         # that the per-item handler records, rather than escaping as a raw
         # OSError to the sync-thread error handler.
         with convert_api_errors(remote_path=remote_path, local_path=local_path):
@@ -301,9 +301,9 @@ class _WriteHelper:
                         remote_path=remote_path, local_path=local_path
                     ):
                         resp = client._retry_transient(request.execute)
-                except CumulusApiError as exc:
+                except BoraApiError as exc:
                     # convert_api_errors has already converted the HttpError (409
-                    # has no dedicated cumulus class), so inspect __cause__ rather
+                    # has no dedicated bora class), so inspect __cause__ rather
                     # than catching HttpError directly.
                     if (
                         isinstance(exc.__cause__, HttpError)
@@ -363,7 +363,7 @@ class _WriteHelper:
                     resp["id"], update_rev, resp.get("headRevisionId"),
                     remote_path=remote_path, local_path=local_path,
                 )
-            except (CumulusApiError, OSError) as exc:
+            except (BoraApiError, OSError) as exc:
                 logger.warning(
                     "Post-upload revision audit for %r failed (%s); a remote "
                     "revision committed during our upload may not have been "
@@ -451,9 +451,9 @@ class _WriteHelper:
                     status, response = client._retry_transient(request.next_chunk)
                     if sync_event is not None and status is not None:
                         sync_event.completed = status.resumable_progress
-        except CumulusApiError as exc:
+        except BoraApiError as exc:
             # convert_api_errors has already converted the HttpError (409
-            # has no dedicated cumulus class), so inspect __cause__ rather
+            # has no dedicated bora class), so inspect __cause__ rather
             # than catching HttpError directly.
             if (
                 new_file_id is not None
@@ -613,7 +613,7 @@ class _WriteHelper:
             if meta.get("headRevisionId") != parent_rev:
                 raise DataChangedError(
                     "Item changed on Google Drive",
-                    f"{remote_path!r} changed on Drive since Cumulus last "
+                    f"{remote_path!r} changed on Drive since Bora last "
                     "saw it.",
                     remote_path=remote_path,
                 )
@@ -690,11 +690,11 @@ class _WriteHelper:
         self,
         entries: Sequence[tuple[str, str | None]],
         batch_size: int = 100,
-    ) -> list["FileMetadata | FolderMetadata | CumulusApiError"]:
+    ) -> list["FileMetadata | FolderMetadata | BoraApiError"]:
         client = self._client
         client._ensure_root_id()
         cache = client._path_cache
-        results: list[FileMetadata | FolderMetadata | CumulusApiError | None] = [
+        results: list[FileMetadata | FolderMetadata | BoraApiError | None] = [
             None
         ] * len(entries)
 
@@ -706,7 +706,7 @@ class _WriteHelper:
             if file_id is None:
                 results[idx] = NotFoundError(
                     "Not found",
-                    f"No item at {remote_path!r} is known to Cumulus.",
+                    f"No item at {remote_path!r} is known to Bora.",
                     remote_path=remote_path,
                 )
                 continue
@@ -729,7 +729,7 @@ class _WriteHelper:
                 if meta.get("headRevisionId") != parent_rev:
                     results[idx] = DataChangedError(
                         "Item changed on Google Drive",
-                        f"{remote_path!r} changed on Drive since Cumulus last saw it.",
+                        f"{remote_path!r} changed on Drive since Bora last saw it.",
                         remote_path=remote_path,
                     )
                     continue
@@ -758,7 +758,7 @@ class _WriteHelper:
                 client._retry_transient(batch.execute)
             client._count_request(len(chunk))
 
-        return [r if r is not None else CumulusApiError(
+        return [r if r is not None else BoraApiError(
             "batch slot empty", "")
                 for r in results]
 
@@ -770,7 +770,7 @@ class _WriteHelper:
 
         def cb(request_id, response, exception):
             if exception is not None:
-                results[idx] = self._batch_exception_to_cumulus(
+                results[idx] = self._batch_exception_to_bora(
                     exception, remote_path
                 )
                 return
@@ -931,9 +931,9 @@ class _WriteHelper:
                     .create(body=body, fields="id,name,mimeType")
                     .execute()
                 )
-        except CumulusApiError as exc:
+        except BoraApiError as exc:
             # convert_api_errors has already converted the HttpError (409
-            # has no dedicated cumulus class), so inspect __cause__ rather
+            # has no dedicated bora class), so inspect __cause__ rather
             # than catching HttpError directly.
             if (
                 isinstance(exc.__cause__, HttpError)
@@ -973,10 +973,10 @@ class _WriteHelper:
 
     def make_dir_batch(
         self, remote_paths: list[str]
-    ) -> "list[FolderMetadata | CumulusApiError]":
+    ) -> "list[FolderMetadata | BoraApiError]":
         client = self._client
         client._ensure_root_id()
-        results: list[FolderMetadata | CumulusApiError | None] = [None] * len(
+        results: list[FolderMetadata | BoraApiError | None] = [None] * len(
             remote_paths
         )
 
@@ -996,7 +996,7 @@ class _WriteHelper:
                     parent_id = self._resolve_parent_id(
                         parent_path, for_path=remote_path
                     )
-                except CumulusApiError as e:
+                except BoraApiError as e:
                     results[idx] = e
                     continue
                 new_folder_id = client.reserve_file_id()
@@ -1027,7 +1027,7 @@ class _WriteHelper:
                 client._count_request(scheduled_count)
 
         # Backfill any None slots (shouldn't happen, but defensive)
-        return [r if r is not None else CumulusApiError(
+        return [r if r is not None else BoraApiError(
             "batch slot empty", "")
                 for r in results]
 
@@ -1054,11 +1054,11 @@ class _WriteHelper:
                                 .get(fileId=new_folder_id, fields="id,name,mimeType")
                                 .execute()
                             )
-                    except CumulusApiError as fetch_exc:
+                    except BoraApiError as fetch_exc:
                         results[idx] = fetch_exc
                         return
                 else:
-                    results[idx] = self._batch_exception_to_cumulus(
+                    results[idx] = self._batch_exception_to_bora(
                         exception, remote_path
                     )
                     return
@@ -1078,17 +1078,17 @@ class _WriteHelper:
         return cb
 
     @staticmethod
-    def _batch_exception_to_cumulus(
+    def _batch_exception_to_bora(
         exception: Exception, remote_path: str
-    ) -> CumulusApiError:
+    ) -> BoraApiError:
         if isinstance(exception, HttpError):
-            return http_error_to_cumulus(
+            return http_error_to_bora(
                 exception.resp.status,
                 extract_http_reason(exception),
                 exception,
                 remote_path=remote_path,
             )
-        return CumulusApiError(
+        return BoraApiError(
             "Batch sub-request failed",
             str(exception),
             remote_path=remote_path,
@@ -1129,7 +1129,7 @@ class _WriteHelper:
     def _download_revision_to_tempfile(self, file_id: str, rev: str) -> str:
         import tempfile as _t
         client = self._client
-        fd, path = _t.mkstemp(prefix="cumulus-restore-")
+        fd, path = _t.mkstemp(prefix="bora-restore-")
         os.close(fd)
         # Callers only clean up the path we *return*; if the download raises
         # before we return, the mkstemp'd file would be orphaned (7c-8), so

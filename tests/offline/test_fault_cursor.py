@@ -11,11 +11,11 @@ Covers:
 Architecture summary (confirmed by reconnaissance)
 ---------------------------------------------------
 CursorResetError is raised by:
-  • cumulus/changes.py:334 — inside iter_remote_changes when changes.list → 400
-  • cumulus/client.py:1238 — inside wait_for_remote_changes when changes.list → 400
+  • bora/changes.py:334 — inside iter_remote_changes when changes.list → 400
+  • bora/client.py:1238 — inside wait_for_remote_changes when changes.list → 400
 
 It is caught ONLY by:
-  • cumulus/manager.py:561 — _handle_sync_thread_errors (a context manager)
+  • bora/manager.py:561 — _handle_sync_thread_errors (a context manager)
     Action: self.stop() → self.sync.reset_sync_state() → self.autostart.set()
     reset_sync_state() clears ALL sync state: index, history, errors, hash table,
     and resets _state to defaults which sets cursor → "" (the config default).

@@ -86,7 +86,7 @@ dev = [
 bora = "bora.cli:main"
 
 [tool.setuptools.data-files]
-"share/icons/hicolor/512x512/apps" = ["src/bora/resources/maestral.png"]
+"share/icons/hicolor/512x512/apps" = ["src/bora/resources/bora.png"]
 
 [tool.setuptools.package-data]
 bora = ["resources/*.json", "resources/*.png", "py.typed"]

@@ -20,7 +20,7 @@ from keyring.core import load_keyring
 from keyring.errors import InitError, KeyringLocked, PasswordDeleteError
 
 # local imports
-from .config import CumulusConfig
+from .config import BoraConfig
 from .exceptions import KeyringAccessError
 from .logging import scoped_logger
 from .utils import exc_info_tuple
@@ -63,7 +63,7 @@ class CredentialStorage:
         app-specific access to passwords. If the user unlocks those keyrings, we and any
         other application in the same user session get access to *all* saved passwords.
 
-    :param config_name: Name of cumulus config.
+    :param config_name: Name of bora config.
     """
 
     _lock = RLock()
@@ -72,7 +72,7 @@ class CredentialStorage:
         self._config_name = config_name
         self._logger = scoped_logger(config_name, __name__)
 
-        self._conf = CumulusConfig(config_name)
+        self._conf = BoraConfig(config_name)
 
         # defer keyring access until token requested by user
         self._token: str | None = None
@@ -183,7 +183,7 @@ class CredentialStorage:
         accessor = self._get_accessor(self.account_id)
 
         try:
-            token = self.keyring.get_password("Cumulus", accessor)
+            token = self.keyring.get_password("Bora", accessor)
         except (KeyringLocked, InitError):
             title = "Could not load auth token"
             msg = (
@@ -220,11 +220,11 @@ class CredentialStorage:
             accessor = self._get_accessor(account_id)
 
             try:
-                keyring.set_password("Cumulus", accessor, token)
+                keyring.set_password("Bora", accessor, token)
             except Exception:
                 # switch to plain text keyring if we cannot access preferred backend
                 keyring = keyrings.alt.file.PlaintextKeyring()
-                keyring.set_password("Cumulus", accessor, token)
+                keyring.set_password("Bora", accessor, token)
 
             self.set_keyring_backend(keyring)
 
@@ -254,7 +254,7 @@ class CredentialStorage:
                 accessor = self._get_accessor(self.account_id)
 
                 try:
-                    self.keyring.delete_password("Cumulus", accessor)
+                    self.keyring.delete_password("Bora", accessor)
                 except (KeyringLocked, InitError):
                     title = "Could not delete auth token"
                     msg = (

@@ -11,7 +11,7 @@ from concurrent.futures import Future, InvalidStateError
 from logging.handlers import RotatingFileHandler
 from typing import Sequence
 
-from .config import CumulusConfig
+from .config import BoraConfig
 from .utils import sanitize_string
 from .utils.appdirs import get_log_path
 from .utils.integration import SystemdNotifier
@@ -178,7 +178,7 @@ class SdNotificationHandler(logging.Handler):
         self.notifier.notify(f"STATUS={record.getMessage()}")
 
 
-def scoped_logger_name(module_name: str, config_name: str = "cumulus") -> str:
+def scoped_logger_name(module_name: str, config_name: str = "bora") -> str:
     """
     Returns a logger name for the module ``module_name``, scoped to the given config.
 
@@ -186,13 +186,13 @@ def scoped_logger_name(module_name: str, config_name: str = "cumulus") -> str:
     :param config_name: Config name.
     :returns: Scoped logger name.
     """
-    if config_name == "cumulus":
+    if config_name == "bora":
         return module_name
     else:
         return f"{config_name}-{module_name}"
 
 
-def scoped_logger(module_name: str, config_name: str = "cumulus") -> logging.Logger:
+def scoped_logger(module_name: str, config_name: str = "bora") -> logging.Logger:
     """
     Returns a logger for the module ``module_name``, scoped to the given config.
 
@@ -223,15 +223,15 @@ def setup_logging(
         always be performed at level INFO.
     :returns: Log handlers.
     """
-    level = CumulusConfig(config_name).get("app", "log_level")
-    root_logger = scoped_logger("cumulus", config_name)
+    level = BoraConfig(config_name).get("app", "log_level")
+    root_logger = scoped_logger("bora", config_name)
     root_logger.setLevel(min(level, logging.INFO))
 
     handlers: list[logging.Handler] = []
 
     # Log to file.
     if file:
-        logfile = get_log_path("cumulus", f"{config_name}.log")
+        logfile = get_log_path("bora", f"{config_name}.log")
         log_handler_file = RotatingFileHandler(logfile, maxBytes=10**7, backupCount=1)
         log_handler_file.setFormatter(LOG_FMT_LONG)
         log_handler_file.setLevel(level)
@@ -245,7 +245,7 @@ def setup_logging(
         except ImportError:
             pass
         else:
-            log_handler_journal = JournalHandler(SYSLOG_IDENTIFIER="cumulus")
+            log_handler_journal = JournalHandler(SYSLOG_IDENTIFIER="bora")
             log_handler_journal.setFormatter(LOG_FMT_SHORT)
             log_handler_journal.setLevel(level)
             root_logger.addHandler(log_handler_journal)

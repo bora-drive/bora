@@ -2,12 +2,12 @@ import os
 from typing import List, TypeVar
 
 from ..utils.appdirs import get_conf_path, get_data_path
-from .main import CumulusConfig, CumulusState
+from .main import BoraConfig, BoraState
 from .user import PersistentMutableSet
 
 __all__ = [
-    "CumulusConfig",
-    "CumulusState",
+    "BoraConfig",
+    "BoraState",
     "PersistentMutableSet",
     "list_configs",
     "remove_configuration",
@@ -20,12 +20,12 @@ _C = TypeVar("_C", bound=str)
 
 def list_configs() -> List[str]:
     """
-    Lists all cumulus configs.
+    Lists all bora configs.
 
     :returns: A list of all currently existing config files.
     """
     configs = []
-    for file in os.listdir(get_conf_path("cumulus")):
+    for file in os.listdir(get_conf_path("bora")):
         if file.endswith(".ini"):
             configs.append(os.path.splitext(os.path.basename(file))[0])
 
@@ -39,10 +39,10 @@ def remove_configuration(config_name: str) -> None:
     :param config_name: The configuration to remove.
     """
 
-    CumulusConfig(config_name).cleanup()
-    CumulusState(config_name).cleanup()
+    BoraConfig(config_name).cleanup()
+    BoraState(config_name).cleanup()
 
-    data_path = get_data_path("cumulus")
+    data_path = get_data_path("bora")
 
     files = []
 

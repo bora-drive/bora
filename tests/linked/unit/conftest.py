@@ -36,12 +36,12 @@ def clean_drive_dir(c: GoogleDriveClient, lock_name: str) -> None:
 @pytest.fixture
 def client(test_lock):
     """Returns a GoogleDriveClient instance linked to the test account."""
-    config_name = "cumulus-test-config-unit"
+    config_name = "bora-test-config-unit"
 
     c, cred_storage = _make_client(config_name)
 
-    refresh_token = os.environ["CUMULUS_TEST_REFRESH_TOKEN"]
-    access_token = os.environ.get("CUMULUS_TEST_ACCESS_TOKEN")
+    refresh_token = os.environ["BORA_TEST_REFRESH_TOKEN"]
+    access_token = os.environ.get("BORA_TEST_ACCESS_TOKEN")
     res = c.link(refresh_token=refresh_token, access_token=access_token)
 
     if res == 1:

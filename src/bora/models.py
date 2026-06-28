@@ -436,7 +436,7 @@ class SyncEvent(Model):
 
         # For file changes, update the change type based on our index. Local file system
         # events of created vs modified can be misleading for some safe save mechanisms.
-        # See https://github.com/samschott/cumulus/issues/850.
+        # See https://github.com/samschott/bora/issues/850.
         if item_type is ItemType.File and change_type in {
             ChangeType.Added,
             ChangeType.Modified,

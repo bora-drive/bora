@@ -48,7 +48,7 @@ __all__ = [
     "to_folder_metadata",
 ]
 
-# The Drive ``files`` resource fields Cumulus needs for every read. Used
+# The Drive ``files`` resource fields Bora needs for every read. Used
 # verbatim by client.py's files.get / files.list calls and embedded into
 # the change-feed field selector below.
 FILE_FIELDS = (
@@ -334,7 +334,7 @@ def iter_remote_changes(
                 raise CursorResetError(
                     "Sync cursor reset",
                     "The saved Google Drive change token is no longer "
-                    "valid (Cumulus was offline too long). The index "
+                    "valid (Bora was offline too long). The index "
                     "will be rebuilt.",
                 ) from exc
             raise

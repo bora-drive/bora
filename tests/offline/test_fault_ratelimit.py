@@ -30,7 +30,7 @@ from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
 from bora.config import remove_configuration
 from bora.errorhandling import RETRYABLE_403_REASONS
 from bora.database.core import Database
-from bora.exceptions import ConnectionError as CumulusConnectionError
+from bora.exceptions import ConnectionError as BoraConnectionError
 from bora.exceptions import InsufficientSpaceError
 from bora.keyring import CredentialStorage
 from bora.path_cache import PathIDCache
@@ -113,7 +113,7 @@ def test_429_storm_on_feed_converges(cof):
 
 def test_429_storm_bounded_raises_teeth(cof):
     """Teeth: arm count=_MAX_RETRY_ATTEMPTS 429s on changes.list → retries are
-    exhausted and CumulusConnectionError is raised.
+    exhausted and BoraConnectionError is raised.
 
     This proves the above convergence test worked via actual retries (not
     because the fault silently never fired).  It also proves the retry loop
@@ -127,7 +127,7 @@ def test_429_storm_bounded_raises_teeth(cof):
     # Exhaust all retry slots: _MAX_RETRY_ATTEMPTS faults → no successful call.
     fake.fail_next("changes.list", make_http_error(429), count=_MAX_RETRY_ATTEMPTS)
 
-    with pytest.raises(CumulusConnectionError):
+    with pytest.raises(BoraConnectionError):
         client.list_remote_changes(start)
 
 
@@ -164,7 +164,7 @@ def test_429_storm_on_move_bounded_raises_teeth(cof):
 
     fake.fail_next("files.update", make_http_error(429), count=_MAX_RETRY_ATTEMPTS)
 
-    with pytest.raises(CumulusConnectionError):
+    with pytest.raises(BoraConnectionError):
         client._writes.move("/orig.txt", "/moved.txt")
 
     # Rename must not have been applied.
@@ -199,7 +199,7 @@ def test_403_user_rate_limit_exceeded_retries_and_converges(cof):
 
 
 def test_403_user_rate_limit_exceeded_bounded_raises_teeth(cof):
-    """Teeth: _MAX_RETRY_ATTEMPTS × 403/userRateLimitExceeded → CumulusConnectionError raised."""
+    """Teeth: _MAX_RETRY_ATTEMPTS × 403/userRateLimitExceeded → BoraConnectionError raised."""
     client, fake = cof
 
     fid = fake.add_file("/rl-teeth.txt", b"data")
@@ -213,7 +213,7 @@ def test_403_user_rate_limit_exceeded_bounded_raises_teeth(cof):
         count=_MAX_RETRY_ATTEMPTS,
     )
 
-    with pytest.raises(CumulusConnectionError):
+    with pytest.raises(BoraConnectionError):
         client._writes.move("/rl-teeth.txt", "/rl-teeth-dst.txt")
 
     assert fake.files[fid]["name"] == "rl-teeth.txt", (
@@ -231,11 +231,11 @@ def test_daily_limit_exceeded_surfaces_immediately_not_retried(cof):
 
     _is_retryable_http_error returns False for this reason.
     _retry_transient therefore does NOT retry it; the very first failure
-    propagates immediately as CumulusConnectionError (mapped from 403
-    dailyLimitExceeded → ConnectionError in http_error_to_cumulus).
+    propagates immediately as BoraConnectionError (mapped from 403
+    dailyLimitExceeded → ConnectionError in http_error_to_bora).
 
     Assert:
-    - CumulusConnectionError is raised.
+    - BoraConnectionError is raised.
     - _poll_event.wait is NOT called (no retry backoff sleep), confirming
       there was exactly zero retry attempts.
     """
@@ -253,7 +253,7 @@ def test_daily_limit_exceeded_surfaces_immediately_not_retried(cof):
     # Record how many times wait was called before the call.
     wait_before = client._poll_event.wait.call_count
 
-    with pytest.raises(CumulusConnectionError):
+    with pytest.raises(BoraConnectionError):
         client._writes.move("/daily.txt", "/daily-dst.txt")
 
     wait_after = client._poll_event.wait.call_count
@@ -282,7 +282,7 @@ def test_daily_limit_exceeded_teeth(cof):
     # Arm count=1: if the code retried, the second attempt would succeed.
     fake.fail_next("files.update", make_http_error(403, "dailyLimitExceeded"), count=1)
 
-    with pytest.raises(CumulusConnectionError):
+    with pytest.raises(BoraConnectionError):
         client._writes.move("/daily-teeth.txt", "/daily-teeth-dst.txt")
 
     # Fault rule was consumed (fired exactly once → removed from _fail_rules).

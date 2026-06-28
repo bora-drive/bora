@@ -496,7 +496,7 @@ def test_requires_upload_true_when_remote_not_found(
     def _raise_not_found(path):
         raise NotFoundError(
             "Not found",
-            f"No item at '{path}' is known to Cumulus.",
+            f"No item at '{path}' is known to Bora.",
             remote_path=path,
         )
 

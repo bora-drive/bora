@@ -1,5 +1,5 @@
 """
-This module provides constants used throughout cumulus, the GUI and CLI. It should
+This module provides constants used throughout bora, the GUI and CLI. It should
 be kept free of memory heavy imports.
 """
 
@@ -22,10 +22,10 @@ FROZEN = getattr(sys, "frozen", False)
 
 for package in (
     __package__,
-    "cumulus",
-    "cumulus-cocoa",
-    "cumulus-qt",
-    "cumulus-gui",
+    "bora",
+    "bora-cocoa",
+    "bora-qt",
+    "bora-gui",
 ):
     try:
         FROZEN = "Briefcase-Version" in metadata(package) or FROZEN
@@ -33,16 +33,16 @@ for package in (
         pass
 
 # app
-APP_NAME = "Cumulus"
-BUNDLE_ID = "com.cumulus.app"
-APP_ICON_PATH = resource_path("bora.resources", "maestral.png").__enter__()
+APP_NAME = "Bora"
+BUNDLE_ID = "tools.bora.app"
+APP_ICON_PATH = resource_path("bora.resources", "bora.png").__enter__()
 ENV = {"PYTHONOPTIMIZE": "2", "LC_CTYPE": "UTF-8"}
-DEFAULT_CONFIG_NAME = "cumulus"
+DEFAULT_CONFIG_NAME = "bora"
 
 # sync
-OLD_REV_FILE = ".cumulus"
+OLD_REV_FILE = ".bora"
 MIGNORE_FILE = ".mignore"
-FILE_CACHE = ".cumulus.cache"
+FILE_CACHE = ".bora.cache"
 
 EXCLUDED_FILE_NAMES = frozenset(
     [
@@ -100,4 +100,4 @@ IS_LINUX = platform.system() == "Linux"
 
 # urls
 # TODO: Update to point to the fork's releases URL.
-GITHUB_RELEASES_API = "https://api.github.com/repos/samschott/cumulus/releases"
+GITHUB_RELEASES_API = "https://api.github.com/repos/samschott/bora/releases"

@@ -175,14 +175,14 @@ def m(pytestconfig, test_lock):
 
         bora.manager.Observer = OrderedPollingObserver
 
-    config_name = "cumulus-test-config-integration"
+    config_name = "bora-test-config-integration"
 
     m = Maestral(config_name)
     m.log_level = logging.DEBUG
     m.sync.max_cpu_percent = 20 * 100
 
-    refresh_token = os.environ["CUMULUS_TEST_REFRESH_TOKEN"]
-    access_token = os.environ.get("CUMULUS_TEST_ACCESS_TOKEN")
+    refresh_token = os.environ["BORA_TEST_REFRESH_TOKEN"]
+    access_token = os.environ.get("BORA_TEST_ACCESS_TOKEN")
     res = m.link(refresh_token=refresh_token, access_token=access_token)
 
     if res == 1:
@@ -212,7 +212,7 @@ def m(pytestconfig, test_lock):
     # like a real second device. Attached to ``m`` so the module-level
     # ``*_remote`` / ``create_remote_tree`` helpers can reach it without
     # threading a fixture through every test signature. See RemoteMutator.
-    remote_config = "cumulus-test-config-remote"
+    remote_config = "bora-test-config-remote"
     remote_client, remote_cred = _make_client(remote_config)
     rres = remote_client.link(refresh_token=refresh_token, access_token=access_token)
     if rres > 0:

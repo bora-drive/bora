@@ -85,7 +85,7 @@ def test_truncated_download_raises_and_leaves_no_file(cof, tmp_path):
         client.download("/big.bin", local)
 
     assert not osp.exists(local), "target file must not exist after corruption"
-    assert not osp.exists(local + ".cumulus-part"), "sidecar must be cleaned up"
+    assert not osp.exists(local + ".bora-part"), "sidecar must be cleaned up"
 
 
 def test_truncated_download_teeth(cof, tmp_path):
@@ -142,7 +142,7 @@ def test_flipped_byte_download_raises_and_leaves_no_file(cof, tmp_path):
         client.download("/flip.bin", local)
 
     assert not osp.exists(local), "target file must not exist after integrity failure"
-    assert not osp.exists(local + ".cumulus-part"), "sidecar must be cleaned up"
+    assert not osp.exists(local + ".bora-part"), "sidecar must be cleaned up"
 
 
 def test_wrong_md5_download_raises_then_clean_recovery_teeth(cof, tmp_path):
@@ -221,7 +221,7 @@ def test_mid_chunk_timeout_retries_and_produces_correct_file(cof, tmp_path):
 
     # File committed correctly.
     assert osp.exists(local), "file must exist after successful download with mid-chunk retry"
-    assert not osp.exists(local + ".cumulus-part"), "no sidecar should remain"
+    assert not osp.exists(local + ".bora-part"), "no sidecar should remain"
 
     with open(local, "rb") as fh:
         on_disk = fh.read()
@@ -230,18 +230,18 @@ def test_mid_chunk_timeout_retries_and_produces_correct_file(cof, tmp_path):
 
 
 def test_mid_chunk_timeout_teeth(cof, tmp_path):
-    """Teeth: exhaust ALL retry attempts on every chunk → CumulusApiError raised.
+    """Teeth: exhaust ALL retry attempts on every chunk → BoraApiError raised.
 
     This confirms the above test's success came from the retry recovering, not
     from the fault silently not firing.
 
     Arm fail_next("files.get_media", timeout, count=_MAX_RETRY_ATTEMPTS) so
     every chunk request faults.  After exhausting _MAX_RETRY_ATTEMPTS the
-    client must raise (wrapped as a Cumulus connection error), and no file is
+    client must raise (wrapped as a Bora connection error), and no file is
     committed.
     """
     from bora.client import _MAX_RETRY_ATTEMPTS
-    from bora.exceptions import ConnectionError as _CumulusConnError
+    from bora.exceptions import ConnectionError as _BoraConnError
 
     client, fake = cof
 
@@ -254,8 +254,8 @@ def test_mid_chunk_timeout_teeth(cof, tmp_path):
     fake.fail_next("files.get_media", make_timeout(), count=_MAX_RETRY_ATTEMPTS)
 
     local = str(tmp_path / "multi.bin")
-    with pytest.raises(_CumulusConnError):
+    with pytest.raises(_BoraConnError):
         client.download("/multi.bin", local)
 
     assert not osp.exists(local), "no file should be committed when all retries exhausted"
-    assert not osp.exists(local + ".cumulus-part"), "sidecar must be cleaned up on error"
+    assert not osp.exists(local + ".bora-part"), "sidecar must be cleaned up on error"

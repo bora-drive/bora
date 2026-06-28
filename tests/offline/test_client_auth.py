@@ -41,7 +41,7 @@ def test_linked_is_false_when_blob_lacks_refresh_token(client, cred_storage):
 
 
 def test_linked_caches_loaded_credentials(client, cred_storage, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     from bora import oauth
     base = oauth.credentials_from_refresh_token("rt-1")
     oauth.save_credentials(cred_storage, base, account_id="perm-1")
@@ -65,7 +65,7 @@ def test_get_service_raises_not_linked_when_unlinked(client):
 def test_get_service_builds_drive_v3_with_credentials(
     client, cred_storage, monkeypatch
 ):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     from bora import oauth
     base = oauth.credentials_from_refresh_token("rt-1")
     oauth.save_credentials(cred_storage, base, account_id="perm-1")
@@ -100,7 +100,7 @@ def _fake_about_response():
 
 
 def _link_to_perm_x(client, cred_storage, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     base = _oauth.credentials_from_refresh_token("rt-1")
     _oauth.save_credentials(cred_storage, base, account_id="perm-12345")
 
@@ -175,7 +175,7 @@ from google.auth.exceptions import RefreshError
 
 
 def test_link_with_refresh_token_happy_path(client, cred_storage, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
 
     # Mock Credentials.refresh to succeed without HTTP.
     def _mark_refreshed(self, request):
@@ -200,7 +200,7 @@ def test_link_with_refresh_token_happy_path(client, cred_storage, monkeypatch):
 def test_link_with_refresh_token_rejects_revoked_token(
     client, cred_storage, monkeypatch
 ):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     def _raise(self, request):
         raise RefreshError("invalid_grant")
     monkeypatch.setattr(_oauth.Credentials, "refresh", _raise)
@@ -216,7 +216,7 @@ def test_link_with_refresh_token_returns_2_on_connection_error(
     client, cred_storage, monkeypatch
 ):
     import requests as _req
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     def _raise(self, request):
         raise _req.exceptions.ConnectionError("boom")
     monkeypatch.setattr(_oauth.Credentials, "refresh", _raise)
@@ -237,7 +237,7 @@ def test_link_with_access_token_happy_path(client, cred_storage, monkeypatch):
     The in-process credential (token-only) is sufficient for linked to be
     True; on reload from storage linked will be False (no refresh_token
     was persisted), which is the correct cross-restart behaviour."""
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
     with mock.patch("bora.client.build", return_value=fake_service):
@@ -255,7 +255,7 @@ def test_link_with_bad_code_returns_1_not_traceback(client, monkeypatch):
     not surface a raw oauthlib traceback."""
     from oauthlib.oauth2.rfc6749.errors import InvalidGrantError
 
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     flow = mock.Mock()
     flow.fetch_token.side_effect = InvalidGrantError()
     client._pending_paste_flow = _PasteFlowState(
@@ -279,7 +279,7 @@ from datetime import datetime, timedelta
 
 
 def test_get_auth_url_creates_pending_flow(client, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     url = client.get_auth_url()
     assert url.startswith("https://accounts.google.com/o/oauth2/")
     assert client._pending_paste_flow is not None
@@ -288,7 +288,7 @@ def test_get_auth_url_creates_pending_flow(client, monkeypatch):
 
 
 def test_link_with_code_uses_pending_flow(client, cred_storage, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     client.get_auth_url()
     fake_flow = client._pending_paste_flow.flow
     fake_flow.fetch_token = mock.Mock()  # short-circuit token exchange
@@ -316,7 +316,7 @@ def test_link_with_code_returns_1_when_no_pending_flow(client):
 
 
 def test_link_with_code_returns_1_on_expired_pending_flow(client, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     client.get_auth_url()
     # Force the state to look stale.
     client._pending_paste_flow.created_at = datetime.utcnow() - timedelta(minutes=11)
@@ -326,7 +326,7 @@ def test_link_with_code_returns_1_on_expired_pending_flow(client, monkeypatch):
 
 
 def test_get_auth_url_replaces_prior_pending_flow(client, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     client.get_auth_url()
     first = client._pending_paste_flow
     client.get_auth_url()
@@ -334,7 +334,7 @@ def test_get_auth_url_replaces_prior_pending_flow(client, monkeypatch):
 
 
 def test_unlink_clears_credentials_and_revokes(client, cred_storage, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     base = _oauth.credentials_from_refresh_token("rt-to-revoke")
     _oauth.save_credentials(cred_storage, base, account_id="perm-1")
     # Force the client to populate _credentials.
@@ -352,7 +352,7 @@ def test_unlink_clears_credentials_and_revokes(client, cred_storage, monkeypatch
 
 
 def test_unlink_tolerates_revoke_failure(client, cred_storage, monkeypatch):
-    monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     base = _oauth.credentials_from_refresh_token("rt-to-revoke")
     _oauth.save_credentials(cred_storage, base, account_id="perm-1")
     assert client.linked is True

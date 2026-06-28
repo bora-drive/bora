@@ -57,7 +57,7 @@ def test_ensure_sync_folder_present_raises_when_dir_missing(
 ) -> None:
     """ensure_sync_folder_present must raise NoSyncDirError when the
     configured sync directory does not exist on disk."""
-    absent = osp.join(get_home_dir(), "does_not_exist_xyz_cumulus_test")
+    absent = osp.join(get_home_dir(), "does_not_exist_xyz_bora_test")
     m.sync.sync_path = absent  # bypass _check_linked; set directly
 
     with pytest.raises(NoSyncDirError):

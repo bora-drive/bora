@@ -622,7 +622,7 @@ def test_download_md5_mismatch_raises_and_cleans_up(client, cache, tmp_path, mon
     with pytest.raises(DataCorruptionError):
         client.download("/a.bin", str(dest))
     assert not dest.exists()
-    assert not (tmp_path / "a.bin.cumulus-part").exists()
+    assert not (tmp_path / "a.bin.bora-part").exists()
 
 
 def test_download_cache_miss_raises(client, tmp_path):
@@ -656,7 +656,7 @@ def test_download_cleans_up_sidecar_on_error(client, cache, tmp_path, monkeypatc
     with pytest.raises(RuntimeError):
         client.download("/a.bin", str(dest))
     assert not dest.exists()
-    assert not (tmp_path / "a.bin.cumulus-part").exists()
+    assert not (tmp_path / "a.bin.bora-part").exists()
 
 
 def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
@@ -806,7 +806,7 @@ def test_wait_400_raises_cursor_reset_not_bad_input(client, make_http_error):
     convert_api_errors and outside _retry_transient; this test pins that.
 
     Note: CursorResetError and BadInputError are both direct subclasses of
-    CumulusApiError with no parent-child relationship, so
+    BoraApiError with no parent-child relationship, so
     pytest.raises(CursorResetError) already rules out BadInputError."""
     from bora.exceptions import CursorResetError
 

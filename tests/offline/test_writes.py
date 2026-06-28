@@ -25,7 +25,7 @@ from bora.core import FileMetadata, WriteMode
 from bora.database.core import Database
 from bora.exceptions import (
     BadInputError,
-    CumulusApiError,
+    BoraApiError,
     DataChangedError,
     FolderConflictError,
     NotFoundError,
@@ -958,7 +958,7 @@ def test_make_dir_batch_handles_mixed_success_and_error(
     result = client._writes.make_dir_batch(["/a", "/b", "/c"])
 
     assert result[0].id == "DA"
-    assert isinstance(result[1], CumulusApiError)
+    assert isinstance(result[1], BoraApiError)
     assert result[2].id == "DC"
     # Only successful entries write through to the cache.
     assert cache.path_to_id("/a") == "DA"
@@ -1268,7 +1268,7 @@ def test_download_revision_to_tempfile_cleans_up_on_download_failure(
 
     monkeypatch.setattr(client, "_retry_transient", boom)
 
-    pattern = _os.path.join(tempfile.gettempdir(), "cumulus-restore-*")
+    pattern = _os.path.join(tempfile.gettempdir(), "bora-restore-*")
     before = set(glob.glob(pattern))
     with pytest.raises(RuntimeError):
         client._writes._download_revision_to_tempfile("F1", "rev1")
@@ -1724,7 +1724,7 @@ def test_fake_make_dir_batch_creates_folders(client_on_fake):
 
     assert len(results) == 3
     for r in results:
-        assert not isinstance(r, CumulusApiError), f"unexpected error: {r}"
+        assert not isinstance(r, BoraApiError), f"unexpected error: {r}"
         assert r.id in fake.files
         assert fake.files[r.id]["trashed"] is False
     names = {fake.files[r.id]["name"] for r in results}
@@ -1748,7 +1748,7 @@ def test_fake_remove_batch_trashes_files(client_on_fake):
 
     assert len(results) == 2
     for r in results:
-        assert not isinstance(r, CumulusApiError), f"unexpected error: {r}"
+        assert not isinstance(r, BoraApiError), f"unexpected error: {r}"
     assert fake.files[fid_a]["trashed"] is True
     assert fake.files[fid_b]["trashed"] is True
     assert client._path_cache.path_to_id("/a.txt") is None
@@ -2206,8 +2206,8 @@ def test_create_retry_409_resolves_batch_callback(client_on_fake):
 
     results = client._writes.make_dir_batch(["/batchdir"])
 
-    from bora.exceptions import CumulusApiError
-    assert not isinstance(results[0], CumulusApiError), f"unexpected error: {results[0]}"
+    from bora.exceptions import BoraApiError
+    assert not isinstance(results[0], BoraApiError), f"unexpected error: {results[0]}"
     assert results[0].id == next_id
 
 

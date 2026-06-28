@@ -13,13 +13,13 @@ import pytest
 from bora.errorhandling import (
     convert_api_errors,
     extract_http_reason,
-    http_error_to_cumulus,
-    os_to_cumulus_error,
+    http_error_to_bora,
+    os_to_bora_error,
 )
 from bora.exceptions import (
     BadInputError,
     ConnectionError,
-    CumulusApiError,
+    BoraApiError,
     InsufficientPermissionsError,
     InsufficientSpaceError,
     NotFoundError,
@@ -41,7 +41,7 @@ def test_extract_reason_empty_when_absent(make_http_error):
     assert extract_http_reason(exc) == ""
 
 
-# ---- http_error_to_cumulus mapping table ----------------------------------
+# ---- http_error_to_bora mapping table ----------------------------------
 
 @pytest.mark.parametrize(
     "status, reason, expected_cls",
@@ -62,12 +62,12 @@ def test_extract_reason_empty_when_absent(make_http_error):
         (502, "", ServerError),
         (503, "", ServerError),
         (504, "", ServerError),
-        (418, "", CumulusApiError),
+        (418, "", BoraApiError),
     ],
 )
 def test_http_error_mapping(make_http_error, status, reason, expected_cls):
     exc = make_http_error(status, reason=reason)
-    result = http_error_to_cumulus(status, reason, exc)
+    result = http_error_to_bora(status, reason, exc)
     assert type(result) is expected_cls
 
 
@@ -89,23 +89,23 @@ def test_convert_api_errors_preserves_cause(make_http_error):
         pytest.fail("expected NotFoundError")
 
 
-# ---- os_to_cumulus_error (unchanged behavior, pinned here) ----------------
+# ---- os_to_bora_error (unchanged behavior, pinned here) ----------------
 
 def test_os_error_permission_maps_to_insufficient_permissions():
     exc = PermissionError("denied")
-    result = os_to_cumulus_error(exc)
+    result = os_to_bora_error(exc)
     assert isinstance(result, InsufficientPermissionsError)
 
 
 def test_os_error_not_found_maps_to_not_found():
     exc = FileNotFoundError("missing")
-    result = os_to_cumulus_error(exc)
+    result = os_to_bora_error(exc)
     assert isinstance(result, NotFoundError)
 
 
 def test_os_error_enospc_maps_to_insufficient_space():
     exc = OSError(errno.ENOSPC, "no space")
-    result = os_to_cumulus_error(exc)
+    result = os_to_bora_error(exc)
     assert isinstance(result, InsufficientSpaceError)
 
 
@@ -118,7 +118,7 @@ def test_os_error_enametoolong_reports_limits_in_correct_order():
     assert max_path != max_name, "limits must differ for this test to be meaningful"
 
     exc = OSError(errno.ENAMETOOLONG, "name too long")
-    result = os_to_cumulus_error(exc, local_path="/")
+    result = os_to_bora_error(exc, local_path="/")
     assert isinstance(result, PathError)
 
     # The name limit must appear in the file-name clause and the path limit in
@@ -129,20 +129,20 @@ def test_os_error_enametoolong_reports_limits_in_correct_order():
 
 
 def test_http_error_412_condition_not_met_maps_to_data_changed(make_http_error):
-    from bora.errorhandling import http_error_to_cumulus
+    from bora.errorhandling import http_error_to_bora
     from bora.exceptions import DataChangedError
 
     exc = make_http_error(412, reason="conditionNotMet")
-    out = http_error_to_cumulus(412, "conditionNotMet", exc, remote_path="/foo.txt")
+    out = http_error_to_bora(412, "conditionNotMet", exc, remote_path="/foo.txt")
     assert isinstance(out, DataChangedError)
     assert "/foo.txt" in str(out) or out.remote_path == "/foo.txt"
 
 
 def test_http_error_412_other_reason_falls_through(make_http_error):
-    from bora.errorhandling import http_error_to_cumulus
+    from bora.errorhandling import http_error_to_bora
     from bora.exceptions import DataChangedError
 
     # Any 412 should map to DataChangedError regardless of sub-reason.
     exc = make_http_error(412, reason="")
-    out = http_error_to_cumulus(412, "", exc)
+    out = http_error_to_bora(412, "", exc)
     assert isinstance(out, DataChangedError)

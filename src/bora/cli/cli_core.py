@@ -33,13 +33,13 @@ KILLED = click.style("[KILLED]", fg="red")
 
 
 def stop_daemon_with_cli_feedback(config_name: str) -> None:
-    """Wrapper around :meth:`daemon.stop_cumulus_daemon_process`
+    """Wrapper around :meth:`daemon.stop_bora_daemon_process`
     with command line feedback."""
 
-    from ..daemon import Stop, stop_cumulus_daemon_process
+    from ..daemon import Stop, stop_bora_daemon_process
 
     echo("Stopping Maestral...", nl=False)
-    res = stop_cumulus_daemon_process(config_name)
+    res = stop_bora_daemon_process(config_name)
     if res == Stop.Ok:
         echo("\rStopping Maestral...        " + OK)
     elif res == Stop.NotRunning:
@@ -115,9 +115,9 @@ def _local_server_dialog(m: "MaestralProxy | Maestral") -> int:
     Returns the same 0/1/2 contract as Maestral.link.
     """
     import os as _os
-    port = int(_os.environ.get("CUMULUS_AUTH_PORT", "8080"))
+    port = int(_os.environ.get("BORA_AUTH_PORT", "8080"))
 
-    info("Cumulus will print an authorization URL below.")
+    info("Bora will print an authorization URL below.")
     info("Open it in your local browser to authorize access to your Google Drive.")
     info("If you're on a headless server, first run on your laptop:")
     info(f"    ssh -L {port}:localhost:{port} <your-host>")
@@ -160,7 +160,7 @@ def _paste_redirect_dialog(m: "MaestralProxy | Maestral") -> int:
     consumes the code via link(code=...).
     """
     url = m.get_auth_url()
-    info("Open this URL in any browser to authorize Cumulus:")
+    info("Open this URL in any browser to authorize Bora:")
     info(f"    {url}")
     info(
         "After approving, your browser will fail to connect to a "
@@ -214,8 +214,8 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         MaestralProxy,
         Start,
         is_running,
-        start_cumulus_daemon,
-        start_cumulus_daemon_process,
+        start_bora_daemon,
+        start_bora_daemon_process,
         wait_for_startup,
     )
 
@@ -281,12 +281,12 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         setup_thread = threading.Thread(target=startup_dialog, daemon=True)
         setup_thread.start()
 
-        start_cumulus_daemon(config_name, log_to_stderr=verbose)
+        start_bora_daemon(config_name, log_to_stderr=verbose)
 
     else:
         echo("Starting Maestral...", nl=False)
 
-        res = start_cumulus_daemon_process(config_name)
+        res = start_bora_daemon_process(config_name)
 
         if res == Start.Ok:
             echo("\rStarting Maestral...        " + OK)
@@ -314,14 +314,14 @@ def gui(config_name: str) -> None:
     from packaging.requirements import Requirement
     from packaging.version import Version
 
-    from ..daemon import start_cumulus_daemon_process
+    from ..daemon import start_bora_daemon_process
 
-    # Find all entry points for "cumulus_gui" registered by other packages.
-    gui_entry_points = entry_points(group="cumulus_gui")
+    # Find all entry points for "bora_gui" registered by other packages.
+    gui_entry_points = entry_points(group="bora_gui")
 
     if len(gui_entry_points) == 0:
         raise CliException(
-            "No cumulus GUI installed. Please run 'pip3 install cumulus[gui]'."
+            "No bora GUI installed. Please run 'pip3 install bora[gui]'."
         )
 
     entry_point_names = [e.name for e in gui_entry_points]
@@ -338,10 +338,10 @@ def gui(config_name: str) -> None:
 
     entry_point = gui_entry_points[entry_point_names[index]]
 
-    if entry_point.name in {"cumulus_cocoa", "cumulus_qt"}:
-        # For 1st party GUIs "cumulus_cocoa" or "cumulus_qt", check if the installed
-        # version fulfills requirements in cumulus's gui extra.
-        requirement_names = requires("cumulus")
+    if entry_point.name in {"bora_cocoa", "bora_qt"}:
+        # For 1st party GUIs "bora_cocoa" or "bora_qt", check if the installed
+        # version fulfills requirements in bora's gui extra.
+        requirement_names = requires("bora")
         if requirement_names is not None:
             for name in requirement_names:
                 r = Requirement(name)
@@ -352,7 +352,7 @@ def gui(config_name: str) -> None:
                             f"{r.name}{r.specifier} required but you have {version_str}"
                         )
     # Start the daemon
-    res = start_cumulus_daemon_process(config_name)
+    res = start_bora_daemon_process(config_name)
 
     # Run the GUI.
     run = entry_point.load()
@@ -406,7 +406,7 @@ def auth_link(
 ) -> None:
     if not m.pending_link and not relink:
         echo(
-            "Cumulus is already linked. Use '-r' to relink to the same "
+            "Bora is already linked. Use '-r' to relink to the same "
             "account or specify a new config name with '-c'."
         )
         return
@@ -451,10 +451,10 @@ def auth_unlink(yes: bool, config_name: str) -> None:
 @auth.command(name="status", help="View authentication status.")
 @existing_config_option
 def auth_status(config_name: str) -> None:
-    from ..config import CumulusConfig, CumulusState
+    from ..config import BoraConfig, BoraState
 
-    conf = CumulusConfig(config_name)
-    state = CumulusState(config_name)
+    conf = BoraConfig(config_name)
+    state = BoraState(config_name)
 
     dbid = conf.get("auth", "account_id")
     email = state.get("account", "email")

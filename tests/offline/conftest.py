@@ -12,7 +12,7 @@ from bora.config import list_configs, remove_configuration
 from bora.core import AccountType, FullAccount
 from bora.database.core import Database
 from bora.path_cache import PathIDCache
-from bora.daemon import Stop, stop_cumulus_daemon_process
+from bora.daemon import Stop, stop_bora_daemon_process
 from bora.fsevents import Observer
 from bora.keyring import CredentialStorage
 from bora.main import Maestral
@@ -94,7 +94,7 @@ def config_name(prefix: str = "test-config"):
 
     yield config_name
 
-    res = stop_cumulus_daemon_process(config_name)
+    res = stop_bora_daemon_process(config_name)
 
     if res is Stop.Failed:
         raise RuntimeError("Could not stop test daemon")

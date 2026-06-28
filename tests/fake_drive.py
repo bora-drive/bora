@@ -34,7 +34,7 @@ def make_timeout(message: str = "fake timeout") -> Exception:
     """A transport-level timeout, shaped like the production retry path catches.
 
     Returns ``requests.exceptions.Timeout`` because ``CONNECTION_ERRORS`` in
-    ``src/cumulus/errorhandling.py`` includes that type (not ``socket.timeout``),
+    ``src/bora/errorhandling.py`` includes that type (not ``socket.timeout``),
     so downstream retry tests will exercise the real retry path.
     """
     return requests.exceptions.Timeout(message)
@@ -71,7 +71,7 @@ class FakeDrive:
         self.user = {
             "permissionId": "perm-1",
             "displayName": "Test User",
-            "emailAddress": "cumulus-test@example.com",
+            "emailAddress": "bora-test@example.com",
             "photoLink": "https://example.com/p.jpg",
         }
         self.storage_quota = {"usage": "1024", "limit": "16106127360"}

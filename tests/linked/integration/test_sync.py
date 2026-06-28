@@ -1,6 +1,6 @@
 """Linked integration tests for the sync engine — ported to Google Drive (Stage 7a, D5).
 
-Tests run against a real Google account when CUMULUS_TEST_REFRESH_TOKEN is set;
+Tests run against a real Google account when BORA_TEST_REFRESH_TOKEN is set;
 they skip cleanly when the variable is absent.
 
 Dropbox-specific features dropped:

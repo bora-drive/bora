@@ -293,7 +293,7 @@ def test_about_get():
         fields="user(emailAddress,displayName,permissionId,photoLink),"
         "storageQuota(usage,limit)"
     ).execute()
-    assert resp["user"]["emailAddress"] == "cumulus-test@example.com"
+    assert resp["user"]["emailAddress"] == "bora-test@example.com"
     assert resp["storageQuota"]["limit"] == "16106127360"
 
 

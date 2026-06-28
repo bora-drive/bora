@@ -29,7 +29,7 @@ from bora.config import remove_configuration
 from bora.core import WriteMode
 from bora.writes import _SIMPLE_UPLOAD_THRESHOLD
 from bora.database.core import Database
-from bora.exceptions import CumulusApiError
+from bora.exceptions import BoraApiError
 from bora.keyring import CredentialStorage
 from bora.path_cache import PathIDCache
 from tests.fake_drive import (
@@ -146,8 +146,8 @@ def test_resumable_fault_first_chunk_teeth(cof, tmp_path):
 
     # After exhausting retries, _retry_transient re-raises the CONNECTION_ERROR;
     # convert_api_errors then wraps it as bora.exceptions.ConnectionError.
-    from bora.exceptions import ConnectionError as _CumulusConnError
-    with pytest.raises(_CumulusConnError):
+    from bora.exceptions import ConnectionError as _BoraConnError
+    with pytest.raises(_BoraConnError):
         client._writes.upload(str(local), "/big2.bin", write_mode=WriteMode.Add)
 
     non_root = {fid: rec for fid, rec in fake.files.items() if fid != ROOT_ID}
@@ -176,7 +176,7 @@ def test_remove_batch_one_fault_sibling_items_trashed(cof):
     """Seed 4 files; arm a 500 on one fileId inside the batch.
 
     Assert:
-    - result list slot for target_id contains a CumulusApiError (not trashed).
+    - result list slot for target_id contains a BoraApiError (not trashed).
     - all other 3 slots contain successful metadata objects.
     - the 3 non-target files are trashed in fake.files.
     - the target file is NOT trashed in fake.files.
@@ -203,15 +203,15 @@ def test_remove_batch_one_fault_sibling_items_trashed(cof):
     assert len(results) == 4
 
     # Target slot is an error.
-    assert isinstance(results[1], CumulusApiError), (
-        f"Expected CumulusApiError at slot 1; got {type(results[1]).__name__}"
+    assert isinstance(results[1], BoraApiError), (
+        f"Expected BoraApiError at slot 1; got {type(results[1]).__name__}"
     )
 
     # Non-target slots are success metadata.
     for i, (path, fid) in enumerate(pairs):
         if i == 1:
             continue
-        assert not isinstance(results[i], CumulusApiError), (
+        assert not isinstance(results[i], BoraApiError), (
             f"Slot {i} should be success metadata; got {type(results[i]).__name__}"
         )
 
@@ -230,7 +230,7 @@ def test_remove_batch_one_fault_sibling_items_trashed(cof):
 def test_remove_batch_one_fault_sibling_teeth(cof):
     """Teeth: arm a 500 on ALL four files.
 
-    All four result slots should be CumulusApiError instances and no files
+    All four result slots should be BoraApiError instances and no files
     are trashed.  This confirms the per-slot error routing is real.
     """
     client, fake = cof
@@ -246,8 +246,8 @@ def test_remove_batch_one_fault_sibling_teeth(cof):
 
     # All four slots must be errors.
     for i, r in enumerate(results):
-        assert isinstance(r, CumulusApiError), (
-            f"Expected CumulusApiError at slot {i}; got {type(r).__name__}"
+        assert isinstance(r, BoraApiError), (
+            f"Expected BoraApiError at slot {i}; got {type(r).__name__}"
         )
 
     # No files trashed.
@@ -306,7 +306,7 @@ def test_move_503_exceeds_max_retries_raises_teeth(cof):
 
     fake.fail_next("files.update", make_http_error(503), count=_MAX_RETRY_ATTEMPTS + 1)
 
-    with pytest.raises((CumulusApiError, _HttpError)):
+    with pytest.raises((BoraApiError, _HttpError)):
         client._writes.move("/foo.txt", "/bar.txt")
 
     # File name unchanged — move never committed.
@@ -349,7 +349,7 @@ def test_make_dir_503_exceeds_max_retries_raises_teeth(cof):
 
     fake.fail_next("files.create", make_http_error(503), count=_MAX_RETRY_ATTEMPTS + 1)
 
-    with pytest.raises((CumulusApiError, _HttpError)):
+    with pytest.raises((BoraApiError, _HttpError)):
         client._writes.make_dir("/newdir")
 
     # No folder was created in the fake.
