@@ -51,18 +51,18 @@ so contributor and credential-less local runs stay green-by-skip. To run against
 a real account, set:
 
 ```bash
-export CUMULUS_TEST_REFRESH_TOKEN=<refresh-token>
-export CUMULUS_TEST_ACCESS_TOKEN=<access-token>   # optional; speeds up first call
+export BORA_TEST_REFRESH_TOKEN=<refresh-token>
+export BORA_TEST_ACCESS_TOKEN=<access-token>   # optional; speeds up first call
 python -m pytest tests/linked
 ```
 
-`CUMULUS_TEST_ACCESS_TOKEN` is optional. `CUMULUS_TEST_REFRESH_TOKEN` is
+`BORA_TEST_ACCESS_TOKEN` is optional. `BORA_TEST_REFRESH_TOKEN` is
 required; its absence causes the entire `tests/linked/` tree to skip.
 
 ### Dedicated test account
 
 The linked suite must use a **dedicated Google test account**, linked under the
-config name **`cumulus-test-config`**. This is distinct from the `smoke-test`
+config name **`bora-test-config`**. This is distinct from the `smoke-test`
 config used by the smoke-test account (`cumulus@arko.net`).
 
 **Do not run `pytest tests/linked` while a smoke-test account is linked.** The
@@ -76,7 +76,7 @@ The linked suite serializes concurrent test sessions using `DriveTestLock`
 (`tests/linked/lock.py`). Drive has no atomic create-exclusive primitive, so
 the lock protocol is:
 
-1. List for a sentinel file named `.cumulus-test.lock` in the test account's
+1. List for a sentinel file named `.bora-test.lock` in the test account's
    Drive root.
 2. If a non-stale lock exists (age < 10 minutes), wait and retry with backoff
    for up to 5 minutes.
@@ -88,21 +88,21 @@ the lock protocol is:
 
 This is managed automatically by the `test_lock` session fixture in
 `tests/linked/conftest.py`. Tests declare a dependency on it via the
-`@requires_account` marker, which also gates on `CUMULUS_TEST_REFRESH_TOKEN`
+`@requires_account` marker, which also gates on `BORA_TEST_REFRESH_TOKEN`
 being set.
 
 ### Obtaining and refreshing the token
 
 Provision a dedicated Google account, run through the OAuth flow once (e.g.
-using `cumulus link cumulus-test-config`), then extract the stored refresh
-token from the keyring. Record it as `CUMULUS_TEST_REFRESH_TOKEN` in whatever
+using `bora link bora-test-config`), then extract the stored refresh
+token from the keyring. Record it as `BORA_TEST_REFRESH_TOKEN` in whatever
 CI secret store is in use.
 
 ### 7-day token-expiry caveat
 
 The OAuth client is currently in **Testing mode**. Google expires refresh tokens
 for Testing-mode clients after 7 days. Until Stage 8 verification is complete and
-the app is promoted to Production mode, `CUMULUS_TEST_REFRESH_TOKEN` must be
+the app is promoted to Production mode, `BORA_TEST_REFRESH_TOKEN` must be
 re-minted weekly. Token expiry degrades gracefully: an expired token causes the
 `test_lock` session fixture to raise `AuthError`, which skips the session rather
 than producing spurious failures.
