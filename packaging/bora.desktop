@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Bora
+Comment=Google Drive sync client
+Exec=bora gui
+Icon=bora
+Terminal=false
+Categories=Network;FileTransfer;
