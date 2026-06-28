@@ -11,8 +11,8 @@ sys.path.insert(0, os.path.abspath("../src"))
 author = "Sam Schott"
 version = "1.9.6"
 release = version
-project = "Maestral"
-title = "Maestral API Documentation"
+project = "Bora"
+title = "Bora API Documentation"
 copyright = f"{time.localtime().tm_year}, {author}"
 
 # -- General configuration -------------------------------------------------------------
@@ -44,7 +44,7 @@ html_css_files = [
 # -- Options for LaTeX output ----------------------------------------------------------
 
 latex_documents = [
-    (master_doc, "maestral.tex", title, author, "manual"),
+    (master_doc, "bora.tex", title, author, "manual"),
 ]
 
 # -- Extension configuration -----------------------------------------------------------
@@ -57,7 +57,7 @@ autodoc_inherit_docstrings = False
 
 # autoapi.extension
 autoapi_type = "python"
-autoapi_dirs = ["../src/maestral"]
+autoapi_dirs = ["../src/bora"]
 autoapi_options = [
     "members",
     "undoc-members",
@@ -71,7 +71,6 @@ todo_include_todos = True
 # sphinx.ext.intersphsinx
 intersphinx_mapping = {
     "click": ("https://click.palletsprojects.com/en/latest/", None),
-    "dropbox": ("https://dropbox-sdk-python.readthedocs.io/en/latest/", None),
     "fasteners": ("https://fasteners.readthedocs.io/en/latest/", None),
     "keyring": ("https://keyring.readthedocs.io/en/latest/", None),
     "Pyro5": ("https://pyro5.readthedocs.io/en/latest/", None),
