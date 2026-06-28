@@ -47,6 +47,7 @@ from .config import CumulusState
 from .native_docs import is_google_folder, is_google_native
 from .path_cache import PathIDCache
 from .path_codec import compose_path, fold_path
+from .utils import natural_size
 from .core import (
     Account,
     AccountType,
@@ -559,6 +560,20 @@ class GoogleDriveClient:
             allocated=int(quota.get("limit", 0)),
             team_usage=None,
         )
+        # Persist account info to the `account` state section so the CLI
+        # (status / auth status / config-files) can display it. Drive has no
+        # Basic/Pro/Business tiers, so type is always "personal".
+        used = int(quota.get("usage", 0))
+        allocated = int(quota.get("limit", 0))
+        if allocated:
+            usage_str = f"{used / allocated:.1%} of {natural_size(allocated)} used"
+        else:
+            usage_str = f"{natural_size(used)} used"
+        self._state.set("account", "email", user.get("emailAddress", ""))
+        self._state.set("account", "display_name", user.get("displayName", ""))
+        self._state.set("account", "type", "personal")
+        self._state.set("account", "usage", usage_str)
+        self._state.set("account", "usage_type", "individual")
         return FullAccount(
             account_id=user.get("permissionId", ""),
             display_name=user.get("displayName", ""),
