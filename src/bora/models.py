@@ -107,7 +107,7 @@ class SyncEvent(Model):
 
     The class methods :meth:`from_metadata` and :meth:`from_file_system_event`
     should be used to properly construct a :class:`SyncEvent` from a
-    :class:`dropbox.files.Metadata` instance or a
+    remote :class:`Metadata` instance or a
     :class:`watchdog.events.FileSystemEvent` instance, respectively.
     """
 

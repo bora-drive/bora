@@ -9,7 +9,7 @@ DEFAULTS_CONFIG = {
         "keyring": "automatic",
     },
     "sync": {
-        "path": "/Users/Leslie/Dropbox (Maestral)",
+        "path": "/Users/Leslie/Dropbox (Bora)",
         "excluded_items": ["/Photos"],
         "upload": True,
         "download": True,

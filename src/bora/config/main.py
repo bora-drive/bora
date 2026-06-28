@@ -133,7 +133,7 @@ def BoraConfig(config_name: str) -> UserConfig:
 
     :param config_name: Name of bora configuration to run. A new config file will
         be created if none exists for the given config_name.
-    :return: Maestral config instance which saves any changes to the drive.
+    :return: Bora config instance which saves any changes to the drive.
     """
     with _config_lock:
         config_path = get_conf_path(CONFIG_DIR_NAME, f"{config_name}.ini")
@@ -150,7 +150,7 @@ def BoraState(config_name: str) -> UserConfig:
 
     :param config_name: Name of bora configuration to run. A new state file will
         be created if none exists for the given config_name.
-    :return: Maestral state instance which saves any changes to the drive.
+    :return: Bora state instance which saves any changes to the drive.
     """
     with _state_lock:
         state_path = get_data_path(CONFIG_DIR_NAME, f"{config_name}.state")

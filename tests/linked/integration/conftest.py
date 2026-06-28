@@ -7,7 +7,7 @@ import pytest
 import bora.manager
 from bora.config import remove_configuration
 from bora.exceptions import AuthError, NotFoundError
-from bora.main import Maestral
+from bora.main import Bora
 from bora.utils.appdirs import get_home_dir
 from bora.utils.path import delete, generate_cc_name
 
@@ -109,7 +109,7 @@ def _force_delete_tree(path: str) -> None:
     delete(path)
 
 
-def clean_drive_dir(m: Maestral, lock_name: str) -> None:
+def clean_drive_dir(m: Bora, lock_name: str) -> None:
     """Remove all items at the Drive root except the lock sentinel file.
 
     Deletes by ``file_id`` via the raw Drive service rather than
@@ -139,8 +139,8 @@ def clean_drive_dir(m: Maestral, lock_name: str) -> None:
             pass
 
 
-def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
-    """Blocks until Maestral instance is idle for at least ``cycles`` sync cycles."""
+def wait_for_idle(m: Bora, cycles: int = 6) -> None:
+    """Blocks until Bora instance is idle for at least ``cycles`` sync cycles."""
     count = 0
     while count < cycles:
         if m.sync.busy():
@@ -156,7 +156,7 @@ def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
 @pytest.fixture
 def m(pytestconfig, test_lock):
     """
-    Returns a Maestral instance linked to the test account and syncing.
+    Returns a Bora instance linked to the test account and syncing.
     """
     if pytestconfig.option.OBSERVER == "inotify":
         from watchdog.observers.inotify import InotifyObserver
@@ -177,7 +177,7 @@ def m(pytestconfig, test_lock):
 
     config_name = "bora-test-config-integration"
 
-    m = Maestral(config_name)
+    m = Bora(config_name)
     m.log_level = logging.DEBUG
     m.sync.max_cpu_percent = 20 * 100
 

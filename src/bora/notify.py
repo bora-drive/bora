@@ -71,7 +71,7 @@ _name_to_level = {
 
 def level_number_to_name(number: int) -> str:
     """
-    Converts a Maestral notification level number to name.
+    Converts a Bora notification level number to name.
 
     :param number: Level number.
     :returns: Level name.
@@ -84,7 +84,7 @@ def level_number_to_name(number: int) -> str:
 
 def level_name_to_number(name: str) -> int:
     """
-    Converts a Maestral notification level name to number.
+    Converts a Bora notification level name to number.
 
     :param name: Level name.
     :returns: Level number.
@@ -96,7 +96,7 @@ def level_name_to_number(name: str) -> int:
 
 
 class BoraDesktopNotifier:
-    """Desktop notification emitter for Maestral
+    """Desktop notification emitter for Bora
 
     Desktop notifier with snooze functionality and variable notification levels. Must
     be instantiated in the main thread.

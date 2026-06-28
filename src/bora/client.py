@@ -502,7 +502,7 @@ class GoogleDriveClient:
 
     def get_account_info(self, dbid: str | None = None) -> Account:
         """Returns the current account info. The dbid param is preserved for
-        compat with the Maestral interface but is ignored for Drive (the
+        compat with the Bora interface but is ignored for Drive (the
         API only exposes the linked user, never arbitrary accounts)."""
         if self._cached_account_info is None:
             # Guard: calling _fetch_account_info_for_creds with credentials=None

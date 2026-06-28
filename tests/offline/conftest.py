@@ -15,7 +15,7 @@ from bora.path_cache import PathIDCache
 from bora.daemon import Stop, stop_bora_daemon_process
 from bora.fsevents import Observer
 from bora.keyring import CredentialStorage
-from bora.main import Maestral
+from bora.main import Bora
 from bora.sync import SyncEngine
 from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive
@@ -29,7 +29,7 @@ def _make_path_cache() -> PathIDCache:
 
 @pytest.fixture
 def m():
-    m = Maestral("test-config")
+    m = Bora("test-config")
     m.log_level = logging.DEBUG
     yield m
     remove_configuration(m.config_name)

@@ -318,7 +318,7 @@ class SyncManager:
                 raise NoSyncDirError(
                     "sync folder missing",
                     "Please move the sync folder back to its original location "
-                    "or restart Maestral to set up a new folder.",
+                    "or restart Bora to set up a new folder.",
                 )
             else:
                 raise BoraApiError(

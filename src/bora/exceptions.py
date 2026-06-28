@@ -1,5 +1,5 @@
 """
-This module defines Maestral's error classes. It should be kept free of memory heavy
+This module defines Bora's error classes. It should be kept free of memory heavy
 imports.
 
 All errors inherit from :exc:`BoraApiError` which has title and message attributes
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 
 class BoraApiError(Exception):
-    """Base class for Maestral errors
+    """Base class for Bora errors
 
     BoraApiError provides attributes that can be used to generate human-readable
     error messages and metadata regarding affected file paths (if any).

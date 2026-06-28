@@ -11,14 +11,14 @@ from Pyro5.api import Proxy
 from bora.daemon import (
     CommunicationError,
     Lock,
-    MaestralProxy,
+    BoraProxy,
     Start,
     Stop,
     start_bora_daemon_process,
     stop_bora_daemon_process,
 )
 from bora.exceptions import NotLinkedError
-from bora.main import Maestral
+from bora.main import Bora
 
 # locking tests
 
@@ -167,7 +167,7 @@ def test_connection(config_name: str) -> None:
     assert res_start is Start.Ok
 
     # create proxy
-    with MaestralProxy(config_name) as m:
+    with BoraProxy(config_name) as m:
         assert m.config_name == config_name
         assert not m._is_fallback
         assert isinstance(m._m, Proxy)
@@ -180,13 +180,13 @@ def test_connection(config_name: str) -> None:
 def test_fallback(config_name: str) -> None:
     # create proxy w/o fallback
     with pytest.raises(CommunicationError):
-        MaestralProxy(config_name)
+        BoraProxy(config_name)
 
     # create proxy w/ fallback
-    with MaestralProxy(config_name, fallback=True) as m:
+    with BoraProxy(config_name, fallback=True) as m:
         assert m.config_name == config_name
         assert m._is_fallback
-        assert isinstance(m._m, Maestral)
+        assert isinstance(m._m, Bora)
 
 
 def test_remote_exceptions(config_name: str) -> None:
@@ -194,7 +194,7 @@ def test_remote_exceptions(config_name: str) -> None:
     start_bora_daemon_process(config_name, timeout=20)
 
     # create proxy and call a remote method which raises an error
-    with MaestralProxy(config_name) as m:
+    with BoraProxy(config_name) as m:
         with pytest.raises(NotLinkedError):
             m.get_account_info()
 

@@ -5,9 +5,9 @@ from click.testing import CliRunner
 
 from bora.autostart import AutoStart
 from bora.cli import main
-from bora.daemon import MaestralProxy, Start, start_bora_daemon_process
+from bora.daemon import BoraProxy, Start, start_bora_daemon_process
 from bora.logging import scoped_logger
-from bora.main import Maestral
+from bora.main import Bora
 from bora.notify import level_name_to_number, level_number_to_name
 from bora.utils.appdirs import get_log_path
 
@@ -92,7 +92,7 @@ def test_stop(config_name: str) -> None:
     assert result.exit_code == 0, result.output
 
 
-def test_filestatus(m: Maestral) -> None:
+def test_filestatus(m: Bora) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["filestatus", "/usr", "-c", m.config_name])
 
@@ -107,7 +107,7 @@ def test_filestatus(m: Maestral) -> None:
     assert "'/invalid-dir' does not exist" in result.output
 
 
-def test_autostart(m: Maestral) -> None:
+def test_autostart(m: Bora) -> None:
     autostart = AutoStart(m.config_name)
     autostart.disable()
 
@@ -137,7 +137,7 @@ def test_autostart(m: Maestral) -> None:
     assert not autostart.enabled
 
 
-def test_excluded_list(m: Maestral) -> None:
+def test_excluded_list(m: Bora) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["excluded", "list", "-c", m.config_name])
 
@@ -145,7 +145,7 @@ def test_excluded_list(m: Maestral) -> None:
     assert result.output == "No excluded files or folders.\n"
 
 
-def test_excluded_add_raises_not_linked_error(m: Maestral) -> None:
+def test_excluded_add_raises_not_linked_error(m: Bora) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["excluded", "add", "test", "-c", m.config_name])
 
@@ -153,17 +153,17 @@ def test_excluded_add_raises_not_linked_error(m: Maestral) -> None:
     assert "No remote account linked" in result.output
 
 
-def test_excluded_remove_raises_not_running_error(m: Maestral) -> None:
+def test_excluded_remove_raises_not_running_error(m: Bora) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["excluded", "remove", "test", "-c", m.config_name])
 
     assert result.exit_code == 1
-    assert "Maestral daemon is not running" in result.output
+    assert "Bora daemon is not running" in result.output
 
 
 def test_notify_level(config_name: str) -> None:
     start_bora_daemon_process(config_name, timeout=TEST_TIMEOUT)
-    m = MaestralProxy(config_name)
+    m = BoraProxy(config_name)
 
     runner = CliRunner()
     result = runner.invoke(main, ["notify", "level", "-c", m.config_name])
@@ -189,7 +189,7 @@ def test_notify_level(config_name: str) -> None:
 
 def test_notify_snooze(config_name: str) -> None:
     start_bora_daemon_process(config_name, timeout=TEST_TIMEOUT)
-    m = MaestralProxy(config_name)
+    m = BoraProxy(config_name)
 
     runner = CliRunner()
     result = runner.invoke(main, ["notify", "snooze", "20", "-c", m.config_name])
@@ -203,7 +203,7 @@ def test_notify_snooze(config_name: str) -> None:
     assert m.notification_snooze == 0
 
 
-def test_log_level(m: Maestral) -> None:
+def test_log_level(m: Bora) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["log", "level", "-c", m.config_name])
 
@@ -221,7 +221,7 @@ def test_log_level(m: Maestral) -> None:
     assert isinstance(result.exception, SystemExit)
 
 
-def test_log_show(m: Maestral) -> None:
+def test_log_show(m: Bora) -> None:
     # log a message
     logger = scoped_logger("bora", m.config_name)
     logger.info("Hello from pytest!")
@@ -232,7 +232,7 @@ def test_log_show(m: Maestral) -> None:
     assert "Hello from pytest!" in result.output
 
 
-def test_log_clear(m: Maestral) -> None:
+def test_log_clear(m: Bora) -> None:
     # log a message
     logger = scoped_logger("bora", m.config_name)
     logger.info("Hello from pytest!")
@@ -381,7 +381,7 @@ def test_auth_link_uses_local_server_dialog_by_default(monkeypatch):
         lambda m, res: None,
     )
     monkeypatch.setattr(
-        "bora.daemon.MaestralProxy",
+        "bora.daemon.BoraProxy",
         lambda config_name, fallback: m_proxy,
     )
 
@@ -409,7 +409,7 @@ def test_auth_link_uses_paste_redirect_when_flag_set(monkeypatch):
         lambda m, res: None,
     )
     monkeypatch.setattr(
-        "bora.daemon.MaestralProxy",
+        "bora.daemon.BoraProxy",
         lambda config_name, fallback: m_proxy,
     )
 

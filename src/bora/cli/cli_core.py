@@ -23,8 +23,8 @@ from .dialogs import confirm, prompt, select, select_multiple, select_path
 from .output import echo, info, ok, warn
 
 if TYPE_CHECKING:
-    from ..daemon import MaestralProxy
-    from ..main import Maestral
+    from ..daemon import BoraProxy
+    from ..main import Bora
 
 
 OK = click.style("[OK]", fg="green")
@@ -38,16 +38,16 @@ def stop_daemon_with_cli_feedback(config_name: str) -> None:
 
     from ..daemon import Stop, stop_bora_daemon_process
 
-    echo("Stopping Maestral...", nl=False)
+    echo("Stopping Bora...", nl=False)
     res = stop_bora_daemon_process(config_name)
     if res == Stop.Ok:
-        echo("\rStopping Maestral...        " + OK)
+        echo("\rStopping Bora...        " + OK)
     elif res == Stop.NotRunning:
-        echo("\rMaestral daemon is not running.")
+        echo("\rBora daemon is not running.")
     elif res == Stop.Killed:
-        echo("\rStopping Maestral...        " + KILLED)
+        echo("\rStopping Bora...        " + KILLED)
     elif res == Stop.Failed:
-        echo("\rStopping Maestral...        " + FAILED)
+        echo("\rStopping Bora...        " + FAILED)
 
 
 def select_remote_path_dialog(
@@ -108,11 +108,11 @@ def select_remote_path_dialog(
             return sync_path
 
 
-def _local_server_dialog(m: "MaestralProxy | Maestral") -> int:
+def _local_server_dialog(m: "BoraProxy | Bora") -> int:
     """Shape A: run the loopback server in the CLI process, then hand the
     resulting refresh_token to the daemon's link(refresh_token=...).
 
-    Returns the same 0/1/2 contract as Maestral.link.
+    Returns the same 0/1/2 contract as Bora.link.
     """
     import os as _os
     port = int(_os.environ.get("BORA_AUTH_PORT", "8080"))
@@ -154,7 +154,7 @@ def _parse_redirect_url_or_code(value: str) -> str:
     return value
 
 
-def _paste_redirect_dialog(m: "MaestralProxy | Maestral") -> int:
+def _paste_redirect_dialog(m: "BoraProxy | Bora") -> int:
     """Shape C: ask the daemon for an auth URL, prompt the user to open it,
     then paste back the redirected URL (or just the code). The daemon
     consumes the code via link(code=...).
@@ -176,7 +176,7 @@ def _paste_redirect_dialog(m: "MaestralProxy | Maestral") -> int:
     return m.link(code=code)
 
 
-def _report_link_result(m: "MaestralProxy | Maestral", res: int) -> None:
+def _report_link_result(m: "BoraProxy | Bora", res: int) -> None:
     if res == 0:
         try:
             email = m.get_account_info().email or "your account"
@@ -197,7 +197,7 @@ def _report_link_result(m: "MaestralProxy | Maestral", res: int) -> None:
     "-f",
     is_flag=True,
     default=False,
-    help="Start Maestral in the foreground.",
+    help="Start Bora in the foreground.",
 )
 @click.option(
     "--verbose",
@@ -211,7 +211,7 @@ def _report_link_result(m: "MaestralProxy | Maestral", res: int) -> None:
 def start(foreground: bool, verbose: bool, config_name: str) -> None:
     from ..daemon import (
         CommunicationError,
-        MaestralProxy,
+        BoraProxy,
         Start,
         is_running,
         start_bora_daemon,
@@ -230,7 +230,7 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         except CommunicationError:
             return
 
-        m = MaestralProxy(config_name)
+        m = BoraProxy(config_name)
 
         if m.pending_link:
             res = _local_server_dialog(m)
@@ -284,16 +284,16 @@ def start(foreground: bool, verbose: bool, config_name: str) -> None:
         start_bora_daemon(config_name, log_to_stderr=verbose)
 
     else:
-        echo("Starting Maestral...", nl=False)
+        echo("Starting Bora...", nl=False)
 
         res = start_bora_daemon_process(config_name)
 
         if res == Start.Ok:
-            echo("\rStarting Maestral...        " + OK)
+            echo("\rStarting Bora...        " + OK)
         elif res == Start.AlreadyRunning:
-            echo("\rStarting Maestral...        " + "Already running.")
+            echo("\rStarting Bora...        " + "Already running.")
         else:
-            echo("\rStarting Maestral...        " + FAILED)
+            echo("\rStarting Bora...        " + FAILED)
             echo("Please check logs for more information.")
 
         startup_dialog()
@@ -361,14 +361,14 @@ def gui(config_name: str) -> None:
 
 @click.command(help="Pause syncing.")
 @inject_proxy(fallback=False, existing_config=True)
-def pause(m: Maestral) -> None:
+def pause(m: Bora) -> None:
     m.stop_sync()
     ok("Syncing paused.")
 
 
 @click.command(help="Resume syncing.")
 @inject_proxy(fallback=False, existing_config=True)
-def resume(m: Maestral) -> None:
+def resume(m: Bora) -> None:
     if not check_for_fatal_errors(m):
         m.start_sync()
         ok("Syncing resumed.")
@@ -398,7 +398,7 @@ def auth() -> None:
 @inject_proxy(fallback=True, existing_config=False)
 @convert_api_errors
 def auth_link(
-    m: "Maestral",
+    m: "Bora",
     relink: bool,
     no_local_server: bool,
     refresh_token: str | None,
@@ -426,7 +426,7 @@ def auth_link(
     help="""
 Unlink your remote account.
 
-If Maestral is running, it will be stopped before unlinking.
+If Bora is running, it will be stopped before unlinking.
 """,
 )
 @click.option(
@@ -439,13 +439,13 @@ def auth_unlink(yes: bool, config_name: str) -> None:
         yes = confirm("Are you sure you want unlink your account?", default=False)
 
     if yes:
-        from ..main import Maestral
+        from ..main import Bora
 
         stop_daemon_with_cli_feedback(config_name)
-        m = Maestral(config_name)
+        m = Bora(config_name)
         m.unlink()
 
-        ok("Unlinked Maestral.")
+        ok("Unlinked Bora.")
 
 
 @auth.command(name="status", help="View authentication status.")
@@ -456,12 +456,12 @@ def auth_status(config_name: str) -> None:
     conf = BoraConfig(config_name)
     state = BoraState(config_name)
 
-    dbid = conf.get("auth", "account_id")
+    remote_id = conf.get("auth", "account_id")
     email = state.get("account", "email")
     account_type = state.get("account", "type").capitalize()
 
     echo("")
     echo(f"Email:         {email}")
     echo(f"Account type:  {account_type}")
-    echo(f"Remote ID:    {dbid}")
+    echo(f"Remote ID:    {remote_id}")
     echo("")

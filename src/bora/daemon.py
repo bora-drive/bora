@@ -53,7 +53,7 @@ from .utils.appdirs import get_runtime_path
 from .utils.integration import SystemdNotifier
 
 if TYPE_CHECKING:
-    from .main import Maestral
+    from .main import Bora
 
 
 __all__ = [
@@ -70,7 +70,7 @@ __all__ = [
     "start_bora_daemon",
     "start_bora_daemon_process",
     "stop_bora_daemon_process",
-    "MaestralProxy",
+    "BoraProxy",
     "CommunicationError",
 ]
 
@@ -279,11 +279,11 @@ def _send_signal(pid: int, sig: int) -> None:
 
 def bora_lock(config_name: str) -> Lock:
     """
-    Returns an inter-process and inter-thread lock for Maestral. This is a wrapper
+    Returns an inter-process and inter-thread lock for Bora. This is a wrapper
     around :class:`Lock` which fills out the appropriate lockfile path for the given
     config name.
 
-    :param config_name: The name of the Maestral configuration.
+    :param config_name: The name of the Bora configuration.
     :returns: Lock instance for the config name
     """
     name = f"{config_name}.lock"
@@ -296,7 +296,7 @@ def sockpath_for_config(config_name: str) -> str:
     Returns the unix socket location to be used for the config. This should default to
     the apps runtime directory + 'CONFIG_NAME.sock'.
 
-    :param config_name: The name of the Maestral configuration.
+    :param config_name: The name of the Bora configuration.
     :returns: Socket path.
     """
     return get_runtime_path("bora", f"{config_name}.sock")
@@ -307,7 +307,7 @@ def lockpath_for_config(config_name: str) -> str:
     Returns the lock file location to be used for the config. This will be the apps
     runtime directory + 'CONFIG_NAME.lock'.
 
-    :param config_name: The name of the Maestral configuration.
+    :param config_name: The name of the Bora configuration.
     :returns: Path of lock file to use.
     """
     return get_runtime_path("bora", f"{config_name}.lock")
@@ -317,7 +317,7 @@ def get_bora_pid(config_name: str) -> int | None:
     """
     Returns the PID of the daemon if it is running, ``None`` otherwise.
 
-    :param config_name: The name of the Maestral configuration.
+    :param config_name: The name of the Bora configuration.
     :returns: The daemon's PID.
     """
     return bora_lock(config_name).locking_pid()
@@ -327,7 +327,7 @@ def is_running(config_name: str) -> bool:
     """
     Checks if a daemon is currently running.
 
-    :param config_name: The name of the Maestral configuration.
+    :param config_name: The name of the Bora configuration.
     :returns: Whether the daemon is running.
     """
     return bora_lock(config_name).locked()
@@ -367,17 +367,17 @@ def start_bora_daemon(
     config_name: str = "bora", log_to_stderr: bool = False
 ) -> None:
     """
-    Starts the Maestral daemon with event loop in the current thread.
+    Starts the Bora daemon with event loop in the current thread.
 
     Startup is race free: there will never be more than one daemon running with the same
-    config name. The daemon is a :class:`bora.main.Maestral` instance which is
+    config name. The daemon is a :class:`bora.main.Bora` instance which is
     exposed as Pyro daemon object and listens for requests on a unix domain socket. This
     call starts an asyncio event loop to process client requests and blocks until the
     event loop shuts down. On macOS, the event loop is integrated with Cocoa's
     CFRunLoop. This allows processing Cocoa events and callbacks, for instance for
     desktop notifications.
 
-    :param config_name: The name of the Maestral configuration to use.
+    :param config_name: The name of the Bora configuration to use.
     :param log_to_stderr: If ``True``, write logs to stderr.
     :raises RuntimeError: if a daemon for the given ``config_name`` is already running.
     """
@@ -385,7 +385,7 @@ def start_bora_daemon(
     import asyncio
 
     from .logging import scoped_logger, setup_logging
-    from .main import Maestral
+    from .main import Bora
 
     setup_logging(config_name, stderr=log_to_stderr)
     dlogger = scoped_logger(__name__, config_name)
@@ -448,7 +448,7 @@ def start_bora_daemon(
             dlogger.debug("WATCHDOG_PID = %s", WATCHDOG_PID)
             loop.create_task(periodic_watchdog())
 
-        # ==== Run Maestral as Pyro server =============================================
+        # ==== Run Bora as Pyro server =============================================
         # Get socket for config name.
         sockpath = sockpath_for_config(config_name)
         dlogger.debug("Socket path: %r", sockpath)
@@ -463,7 +463,7 @@ def start_bora_daemon(
         dlogger.debug("Creating Pyro daemon")
 
         shutdown_future = loop.create_future()
-        bora_daemon = expose(Maestral)(
+        bora_daemon = expose(Bora)(
             config_name,
             log_to_stderr=log_to_stderr,
             event_loop=loop,
@@ -509,7 +509,7 @@ def start_bora_daemon_process(
     config_name: str = "bora", timeout: float = 30
 ) -> Start:
     """
-    Starts the Maestral daemon in a new process by calling :func:`start_bora_daemon`.
+    Starts the Bora daemon in a new process by calling :func:`start_bora_daemon`.
 
     Startup is race free: there will never be more than one daemon running for the same
     config name. This function will use :obj:`sys.executable` as a Python executable to
@@ -518,7 +518,7 @@ def start_bora_daemon_process(
     Environment variables from the current process will be preserved and updated with
     the environment variables defined in :const:`constants.ENV`.
 
-    :param config_name: The name of the Maestral configuration to use.
+    :param config_name: The name of the Bora configuration to use.
     :param timeout: Time in sec to wait for daemon to start.
     :returns: :attr:`Start.Ok` if successful, :attr:`Start.AlreadyRunning` if the daemon
         was already running or :attr:`Start.Failed` if startup failed. It is possible
@@ -567,11 +567,11 @@ def stop_bora_daemon_process(
 ) -> Stop:
     """Stops a bora daemon process by finding its PID and shutting it down.
 
-    This function first tries to shut down Maestral gracefully. If this fails and we
+    This function first tries to shut down Bora gracefully. If this fails and we
     know its PID, it will send SIGTERM. If that fails as well, it will send SIGKILL to
     the process.
 
-    :param config_name: The name of the Maestral configuration to use.
+    :param config_name: The name of the Bora configuration to use.
     :param timeout: Number of sec to wait for daemon to shut down before killing it.
     :returns: :attr:`Stop.Ok` if successful, :attr:`Stop.Killed` if killed,
         :attr:`Stop.NotRunning` if the daemon was not running and :attr:`Stop.Failed`
@@ -600,39 +600,39 @@ def stop_bora_daemon_process(
     return Stop.Killed
 
 
-class MaestralProxy(ContextManager["MaestralProxy"]):
-    """A Proxy to the Maestral daemon
+class BoraProxy(ContextManager["BoraProxy"]):
+    """A Proxy to the Bora daemon
 
-    All methods and properties of Maestral's public API are accessible and calls /
-    access will be forwarded to the corresponding Maestral instance. This class can be
+    All methods and properties of Bora's public API are accessible and calls /
+    access will be forwarded to the corresponding Bora instance. This class can be
     used as a context manager to close the connection to the daemon on exit.
 
     :Example:
 
-        Use MaestralProxy as a context manager:
+        Use BoraProxy as a context manager:
 
         >>> import bora.cli.cli_info
-        >>> with MaestralProxy() as m:
+        >>> with BoraProxy() as m:
         ...     print(bora.cli.cli_info.status)
 
-        Use MaestralProxy directly:
+        Use BoraProxy directly:
 
         >>> import bora.cli.cli_info
-        >>> m = MaestralProxy()
+        >>> m = BoraProxy()
         >>> print(bora.cli.cli_info.status)
         >>> m._disconnect()
 
-    :ivar _is_fallback: Whether we are using an actual Maestral instance as fallback
+    :ivar _is_fallback: Whether we are using an actual Bora instance as fallback
         instead of a Proxy.
 
-    :param config_name: The name of the Maestral configuration to use.
-    :param fallback: If ``True``, a new instance of Maestral will be created in the
+    :param config_name: The name of the Bora configuration to use.
+    :param fallback: If ``True``, a new instance of Bora will be created in the
         current process when the daemon is not running.
     :raises CommunicationError: if the daemon is running but cannot be reached or if the
         daemon is not running and ``fallback`` is ``False``.
     """
 
-    _m: Maestral | Proxy
+    _m: Bora | Proxy
 
     def __init__(self, config_name: str = "bora", fallback: bool = False) -> None:
         self._config_name = config_name
@@ -652,9 +652,9 @@ class MaestralProxy(ContextManager["MaestralProxy"]):
                 raise
 
         elif fallback:
-            from .main import Maestral
+            from .main import Bora
 
-            self._m = Maestral(config_name)
+            self._m = Bora(config_name)
         else:
             raise CommunicationError(f"Could not get proxy for '{config_name}'")
 
@@ -664,7 +664,7 @@ class MaestralProxy(ContextManager["MaestralProxy"]):
         if isinstance(self._m, Proxy):
             self._m._pyroRelease()
 
-    def __enter__(self) -> MaestralProxy:
+    def __enter__(self) -> BoraProxy:
         return self
 
     def __exit__(

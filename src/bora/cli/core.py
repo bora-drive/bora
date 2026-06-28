@@ -1,5 +1,5 @@
 """
-This module provides custom click command line parameters for Maestral such
+This module provides custom click command line parameters for Bora such
 :class:`RemotePath`, :class:`ConfigKey` and :class:`ConfigName`, as well as an ordered
 command group class which prints its help output in sections.
 """
@@ -73,7 +73,7 @@ class RemotePath(click.ParamType):
         absolute = incomplete.startswith("/")
         incomplete = incomplete.lstrip("/")
 
-        # get the Maestral config for which to complete paths
+        # get the Bora config for which to complete paths
         config_name = ctx.params.get("config_name", "bora") if ctx else "bora"
 
         # get all matching paths in our local sync folder
