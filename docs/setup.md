@@ -65,7 +65,7 @@ can complete the OAuth flow:
 
 Bora looks for credentials in the following order:
 
-1. The path set in the `BORA_OAUTH_CLIENT_SECRET` environment variable (if set).
+1. The path set in the `BORA_CLIENT_SECRET_PATH` environment variable (if set).
 2. `src/bora/resources/client_secret.json` (bundled default, used when running from source
    or when the package was installed from PyPI with the bundled file).
 
@@ -73,7 +73,7 @@ To use your own credentials:
 
 ```console
 # Option A — environment variable (recommended for development)
-export BORA_OAUTH_CLIENT_SECRET=/path/to/your/client_secret.json
+export BORA_CLIENT_SECRET_PATH=/path/to/your/client_secret.json
 bora auth link
 
 # Option B — replace the bundled file (for forks / custom builds)

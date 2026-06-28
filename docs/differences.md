@@ -107,4 +107,4 @@ Symlinks are not synced. If Bora encounters a symlink in the sync folder it is i
 Dropbox used a globally unique `rev` string per file version. Drive revision IDs are
 per-file (not globally unique); the current version of a file is identified by its
 `headRevisionId`. This is transparent to most users but matters if you interact with
-the `bora revisions` command or the Python API directly.
+the `bora revs` command or the Python API directly.
