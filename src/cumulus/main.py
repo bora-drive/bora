@@ -48,11 +48,8 @@ from .constants import (
 from .core import (
     FileMetadata,
     FullAccount,
-    LinkAccessLevel,
-    LinkAudience,
     Metadata,
     PersonalSpaceUsage,
-    SharedLinkMetadata,
     UpdateCheckResult,
 )
 from .database.core import Database
@@ -1378,76 +1375,6 @@ class Maestral:
         # Resume syncing.
         if resume:
             self.start_sync()
-
-    def create_shared_link(
-        self,
-        remote_path: str,
-        visibility: LinkAudience = LinkAudience.Public,
-        access_level: LinkAccessLevel = LinkAccessLevel.Viewer,
-        allow_download: bool | None = None,
-        password: str | None = None,
-        expires: datetime | None = None,
-    ) -> SharedLinkMetadata:
-        """
-        Creates a shared link for the given ``remote_path``. Returns a dictionary with
-        information regarding the link, including the URL, access permissions, expiry
-        time, etc. The shared link will grant read / download access only. Note that
-        basic accounts do not support password protection or expiry times.
-
-        :param remote_path: remote path to file or folder to share.
-        :param visibility: The visibility of the shared link. Can be public, team-only,
-            or no-one. In case of the latter, the link merely points the user to the
-            content and does not grant additional rights to the user. Users of this link
-            can only access the content with their pre-existing access rights.
-        :param access_level: The level of access granted with the link. Can be viewer,
-            editor, or max for maximum possible access level.
-        :param allow_download: Whether to allow download capabilities for the link.
-        :param password: If given, enables password protection for the link.
-        :param expires: Expiry time for shared link. If no timezone is given, assume
-            UTC. May not be supported for all account types.
-        :returns: Metadata for shared link.
-        """
-        self._check_linked()
-        return self.client.create_shared_link(
-            remote_path=remote_path,
-            visibility=visibility,
-            password=password,
-            access_level=access_level,
-            allow_download=allow_download,
-            expires=expires,
-        )
-
-    def revoke_shared_link(self, url: str) -> None:
-        """
-        Revokes the given shared link. Note that any other links to the same file or
-        folder will remain valid.
-
-        :param url: URL of shared link to revoke.
-        :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal server errors.
-        :raises ConnectionError: if the connection to the remote fails.
-        :raises NotLinkedError: if no remote account is linked.
-        """
-        self._check_linked()
-        self.client.revoke_shared_link(url)
-
-    def list_shared_links(
-        self, remote_path: str | None = None
-    ) -> list[SharedLinkMetadata]:
-        """
-        Returns a list of all shared links for the given remote path. If no path is
-        given, return all shared links for the account, up to a maximum of 1,000 links.
-
-        :param remote_path: Path to item on the remote.
-        :returns: List of shared link information as dictionaries. See
-            :class:`SharedLinkMetadata` for keys and values.
-        :raises AuthError: in case of an invalid access token.
-        :raises ServerError: for internal server errors.
-        :raises ConnectionError: if the connection to the remote fails.
-        :raises NotLinkedError: if no remote account is linked.
-        """
-        self._check_linked()
-        return self.client.list_shared_links(remote_path)
 
     # ==== Utility methods for front ends ==============================================
 

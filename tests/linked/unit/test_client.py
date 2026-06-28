@@ -352,30 +352,3 @@ def test_batch_methods(client: GoogleDriveClient) -> None:
         assert res_remove[i].path_lower == normalize(folders[i])
 
     assert isinstance(res_remove[20], NotFoundError)
-
-
-# ---------------------------------------------------------------------------
-# Sharing stubs
-# ---------------------------------------------------------------------------
-
-@requires_account
-def test_sharing_stubs_raise(client: GoogleDriveClient) -> None:
-    """All sharing methods raise NotImplementedError (MVP stub).
-
-    Google Drive sharing (permission grants / public link creation) is not
-    implemented in the current client. This test confirms the stubs raise
-    NotImplementedError rather than silently succeeding or crashing.
-    """
-    client.make_dir("/stub-share-test")
-
-    with pytest.raises(NotImplementedError):
-        client.share_dir("/stub-share-test")
-
-    with pytest.raises(NotImplementedError):
-        client.create_shared_link("/stub-share-test")
-
-    with pytest.raises(NotImplementedError):
-        client.list_shared_links("/stub-share-test")
-
-    with pytest.raises(NotImplementedError):
-        client.revoke_shared_link("https://example.com/fake-link")

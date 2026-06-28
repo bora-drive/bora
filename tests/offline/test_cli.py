@@ -37,9 +37,6 @@ def test_invalid_config() -> None:
         ("resume",),
         ("auth", "status"),
         ("auth", "unlink"),
-        ("sharelink", "create"),
-        ("sharelink", "list"),
-        ("sharelink", "revoke"),
         ("status",),
         ("filestatus",),
         ("activity",),
@@ -421,3 +418,14 @@ def test_auth_link_uses_paste_redirect_when_flag_set(monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert called == ["paste"]
+
+
+def test_sharelink_command_removed():
+    """sharelink is cut for v0.1.0 (Drive sharing deferred); it must not be
+    registered, so invoking it errors as an unknown command."""
+    from click.testing import CliRunner
+    from cumulus.cli.cli_main import main
+
+    result = CliRunner().invoke(main, ["sharelink", "list"])
+    assert result.exit_code != 0
+    assert "No such command 'sharelink'" in result.output

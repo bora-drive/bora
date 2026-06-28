@@ -2,7 +2,7 @@
 import click
 
 from .. import __version__
-from .cli_core import auth, gui, pause, resume, sharelink, start, stop
+from .cli_core import auth, gui, pause, resume, start, stop
 from .cli_info import activity, config_files, filestatus, history, ls, status
 from .cli_maintenance import (
     completion,
@@ -32,7 +32,6 @@ main.add_command(gui, section="Core Commands")
 main.add_command(pause, section="Core Commands")
 main.add_command(resume, section="Core Commands")
 main.add_command(auth, section="Core Commands")
-main.add_command(sharelink, section="Core Commands")
 
 main.add_command(status, section="Information")
 main.add_command(filestatus, section="Information")
