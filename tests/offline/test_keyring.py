@@ -6,9 +6,9 @@ from keyring.backends.SecretService import Keyring as SecretServiceKeyring
 from keyring.errors import KeyringLocked
 from keyrings.alt.file import PlaintextKeyring
 
-from cumulus.config import CumulusConfig, remove_configuration
-from cumulus.exceptions import KeyringAccessError
-from cumulus.keyring import CredentialStorage
+from bora.config import CumulusConfig, remove_configuration
+from bora.exceptions import KeyringAccessError
+from bora.keyring import CredentialStorage
 
 
 @pytest.fixture

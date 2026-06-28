@@ -4,12 +4,12 @@ import time
 
 import pytest
 
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.database.core import Database
-from cumulus.exceptions import AuthError
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.database.core import Database
+from bora.exceptions import AuthError
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 
 from .lock import DriveTestLock
 

@@ -4,9 +4,9 @@ import stat
 import pytest
 import xattr
 
-from cumulus.constants import IS_LINUX
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import (
+from bora.constants import IS_LINUX
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import (
     get_existing_equivalent_paths,
     is_child,
     is_fs_case_sensitive,

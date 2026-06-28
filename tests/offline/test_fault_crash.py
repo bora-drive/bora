@@ -17,16 +17,16 @@ from unittest.mock import Mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.core import FullAccount
-from cumulus.database.core import Database
-from cumulus.keyring import CredentialStorage
-from cumulus.models import IndexEntry, ItemType
-from cumulus.path_cache import PathIDCache
-from cumulus.sync import SyncEngine
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import delete
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.core import FullAccount
+from bora.database.core import Database
+from bora.keyring import CredentialStorage
+from bora.models import IndexEntry, ItemType
+from bora.path_cache import PathIDCache
+from bora.sync import SyncEngine
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error
 
 # ---------------------------------------------------------------------------
@@ -596,7 +596,7 @@ def test_create_crash_idempotent_via_reserved_id(tmp_path):
         # convert_api_errors wraps → outer catch handles → fetch by reserved id.
         fake.fail_after("files.create", make_http_error(500))
 
-        from cumulus.core import WriteMode
+        from bora.core import WriteMode
 
         result = client._writes.upload(str(local), "/upload_me.txt", write_mode=WriteMode.Add)
 

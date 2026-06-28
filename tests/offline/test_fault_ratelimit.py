@@ -26,14 +26,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
-from cumulus.config import remove_configuration
-from cumulus.errorhandling import RETRYABLE_403_REASONS
-from cumulus.database.core import Database
-from cumulus.exceptions import ConnectionError as CumulusConnectionError
-from cumulus.exceptions import InsufficientSpaceError
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
+from bora.config import remove_configuration
+from bora.errorhandling import RETRYABLE_403_REASONS
+from bora.database.core import Database
+from bora.exceptions import ConnectionError as CumulusConnectionError
+from bora.exceptions import InsufficientSpaceError
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 from tests.fake_drive import (
     ROOT_ID,
     FakeDrive,

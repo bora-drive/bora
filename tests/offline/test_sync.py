@@ -9,19 +9,19 @@ from unittest.mock import Mock
 import pytest
 from pathspec import PathSpec
 
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.core import (
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.core import (
     DeletedMetadata,
     FileMetadata,
     FolderMetadata,
     FullAccount,
     ListFolderResult,
 )
-from cumulus.database.core import Database
-from cumulus.exceptions import DataChangedError
-from cumulus.keyring import CredentialStorage
-from cumulus.models import (
+from bora.database.core import Database
+from bora.exceptions import DataChangedError
+from bora.keyring import CredentialStorage
+from bora.models import (
     ChangeType,
     IndexEntry,
     ItemType,
@@ -29,11 +29,11 @@ from cumulus.models import (
     SyncEvent,
     SyncStatus,
 )
-from cumulus.path_cache import PathIDCache
-from cumulus.path_codec import encode_path, fold_path
-from cumulus.sync import ActivityNode, ActivityTree, Conflict, SyncEngine
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import delete
+from bora.path_cache import PathIDCache
+from bora.path_codec import encode_path, fold_path
+from bora.sync import ActivityNode, ActivityTree, Conflict, SyncEngine
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive
 
 EVENT1 = SyncEvent(
@@ -487,7 +487,7 @@ def test_requires_upload_true_when_remote_not_found(
     the NotFoundError-raising path (which broke every new-file upload against a
     real Drive) was never exercised.
     """
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
 
     remote_path = "/brand_new.txt"
     data = b"never uploaded before"

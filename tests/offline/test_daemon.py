@@ -8,7 +8,7 @@ import uuid
 import pytest
 from Pyro5.api import Proxy
 
-from cumulus.daemon import (
+from bora.daemon import (
     CommunicationError,
     Lock,
     MaestralProxy,
@@ -17,8 +17,8 @@ from cumulus.daemon import (
     start_cumulus_daemon_process,
     stop_cumulus_daemon_process,
 )
-from cumulus.exceptions import NotLinkedError
-from cumulus.main import Maestral
+from bora.exceptions import NotLinkedError
+from bora.main import Maestral
 
 # locking tests
 
@@ -106,7 +106,7 @@ def test_locking_multiprocess(tmp_path):
     # acquire lock from different process
 
     cmd = (
-        "import time; from cumulus.daemon import Lock; "
+        "import time; from bora.daemon import Lock; "
         f"l = Lock.singleton({path!r}); l.acquire(); "
         "time.sleep(60);"
     )

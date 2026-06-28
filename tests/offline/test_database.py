@@ -1,4 +1,4 @@
-"""Unit tests for cumulus.database.core.Database.transaction."""
+"""Unit tests for bora.database.core.Database.transaction."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import sqlite3
 
 import pytest
 
-from cumulus.database.core import Database
-from cumulus.database.orm import Manager, Model, NonNullColumn
-from cumulus.database.types import SqlInt, SqlString
+from bora.database.core import Database
+from bora.database.orm import Manager, Model, NonNullColumn
+from bora.database.types import SqlInt, SqlString
 
 
 @pytest.fixture

@@ -12,8 +12,8 @@ from __future__ import annotations
 import pytest
 from google.auth.exceptions import GoogleAuthError, RefreshError
 
-from cumulus.errorhandling import convert_api_errors
-from cumulus.exceptions import AuthError, TokenRevokedError
+from bora.errorhandling import convert_api_errors
+from bora.exceptions import AuthError, TokenRevokedError
 
 
 def test_convert_api_errors_maps_refresh_error_to_token_revoked():

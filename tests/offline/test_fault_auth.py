@@ -70,17 +70,17 @@ from unittest.mock import Mock
 import pytest
 from google.auth.exceptions import RefreshError
 
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.core import FullAccount
-from cumulus.database.core import Database
-from cumulus.exceptions import AuthError, TokenRevokedError
-from cumulus.keyring import CredentialStorage
-from cumulus.models import IndexEntry, ItemType
-from cumulus.path_cache import PathIDCache
-from cumulus.sync import SyncEngine
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import delete
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.core import FullAccount
+from bora.database.core import Database
+from bora.exceptions import AuthError, TokenRevokedError
+from bora.keyring import CredentialStorage
+from bora.models import IndexEntry, ItemType
+from bora.path_cache import PathIDCache
+from bora.sync import SyncEngine
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error
 
 # ---------------------------------------------------------------------------
@@ -394,7 +394,7 @@ def test_scenario_a4_teeth_401_not_swallowed_as_sync_error(sync_engine: SyncEngi
     2. The raised type IS specifically TokenRevokedError (not e.g. CursorResetError).
     3. Inverting the assertion (expecting NO exception) would fail → teeth confirmed.
     """
-    from cumulus.exceptions import SyncError
+    from bora.exceptions import SyncError
 
     # Confirm the type hierarchy: TokenRevokedError must NOT be a SyncError.
     assert not issubclass(TokenRevokedError, SyncError), (
@@ -521,7 +521,7 @@ def test_scenario_b1_teeth_refresh_error_not_raw():
     that removing it would break the B2 engine scenario.
     """
     # Path WITH convert_api_errors → must convert.
-    from cumulus.errorhandling import convert_api_errors
+    from bora.errorhandling import convert_api_errors
 
     with pytest.raises(TokenRevokedError):
         with convert_api_errors():

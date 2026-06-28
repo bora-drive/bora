@@ -1,16 +1,16 @@
-"""Unit tests for cumulus.changes."""
+"""Unit tests for bora.changes."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from cumulus.changes import (
+from bora.changes import (
     parse_drive_time,
     to_file_metadata,
     to_folder_metadata,
 )
-from cumulus.core import FileMetadata, FolderMetadata
-from cumulus.exceptions import CursorResetError
+from bora.core import FileMetadata, FolderMetadata
+from bora.exceptions import CursorResetError
 
 SAMPLE_FILE = {
     "id": "F1",
@@ -74,7 +74,7 @@ def test_to_file_metadata_handles_null_version():
 
 
 def test_to_file_metadata_rev_is_head_revision_id():
-    from cumulus.changes import to_file_metadata
+    from bora.changes import to_file_metadata
 
     drive_file = {
         "id": "FID",
@@ -104,9 +104,9 @@ def test_to_folder_metadata_maps_fields():
 
 import sqlite3
 
-from cumulus.changes import ChangeDecision, _emit_apply, classify
-from cumulus.database.core import Database
-from cumulus.path_cache import PathIDCache
+from bora.changes import ChangeDecision, _emit_apply, classify
+from bora.database.core import Database
+from bora.path_cache import PathIDCache
 
 
 def _cache() -> PathIDCache:
@@ -164,8 +164,8 @@ def test_classify_missing_file_body_is_unknown():
 import sqlite3
 from unittest.mock import patch
 
-from cumulus.changes import iter_remote_changes
-from cumulus.core import DeletedMetadata, FileMetadata, FolderMetadata
+from bora.changes import iter_remote_changes
+from bora.core import DeletedMetadata, FileMetadata, FolderMetadata
 from tests.fake_drive import ROOT_ID, FakeDrive
 
 
@@ -424,7 +424,7 @@ def test_iter_changes_paginates():
     fid1 = fake.add_file("/a.pdf", content=b"x")
     fid2 = fake.add_file("/b.pdf", content=b"y")
 
-    import cumulus.changes as _changes_mod
+    import bora.changes as _changes_mod
 
     with patch.object(_changes_mod, "_CHANGE_PAGE_SIZE", 1):
         pages = list(iter_remote_changes(
@@ -557,7 +557,7 @@ def test_create_at_path_vacated_by_move_out_same_batch(caplog, create_first):
         def execute(self):
             return pages.pop(0)
 
-    with caplog.at_level(logging.WARNING, logger="cumulus.changes"):
+    with caplog.at_level(logging.WARNING, logger="bora.changes"):
         results = list(
             iter_remote_changes(lambda: _Svc(), lambda fn: fn(), cache, "t1")
         )
@@ -575,7 +575,7 @@ def test_create_at_path_vacated_by_move_out_same_batch(caplog, create_first):
     # must not fire (path_cache's own internal warning is out of scope).
     assert not [
         r for r in caplog.records
-        if r.name == "cumulus.changes" and r.levelno >= logging.WARNING
+        if r.name == "bora.changes" and r.levelno >= logging.WARNING
     ]
 
 
@@ -592,8 +592,8 @@ def test_child_before_parent_across_pages_is_not_dropped():
     in the cache when the fixpoint runs.
     """
     import sqlite3
-    from cumulus.database.core import Database
-    from cumulus.path_cache import PathIDCache
+    from bora.database.core import Database
+    from bora.path_cache import PathIDCache
 
     cache = PathIDCache(Database(sqlite3.connect(":memory:")))
     cache.root_id = "root"

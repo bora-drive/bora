@@ -11,12 +11,12 @@ from watchdog.events import (
     FileMovedEvent,
 )
 
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.database.core import Database
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
-from cumulus.sync import SyncEngine
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.database.core import Database
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
+from bora.sync import SyncEngine
 
 
 @pytest.fixture

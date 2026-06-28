@@ -1,7 +1,7 @@
 import pytest
 from packaging.version import Version
 
-from cumulus.config.user import UserConfig
+from bora.config.user import UserConfig
 
 DEFAULTS_CONFIG = {
     "auth": {

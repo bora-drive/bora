@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-from cumulus.core import Account, FullAccount
+from bora.core import Account, FullAccount
 
 
 def test_file_metadata_has_single_modified_field():
     from datetime import datetime, timezone
-    from cumulus.core import FileMetadata
+    from bora.core import FileMetadata
 
     md = FileMetadata(
         name="f.txt",

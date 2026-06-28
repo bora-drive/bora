@@ -3,14 +3,14 @@ from unittest.mock import patch
 import pytest
 import requests
 
-import cumulus.main
-from cumulus.constants import GITHUB_RELEASES_API
-from cumulus.core import FolderMetadata, ListFolderResult
-from cumulus.exceptions import NotLinkedError
-from cumulus.main import Maestral
-from cumulus.models import IndexEntry, ItemType
-from cumulus.path_cache import PathIDCache
-from cumulus.path_codec import encode_path, fold_path
+import bora.main
+from bora.constants import GITHUB_RELEASES_API
+from bora.core import FolderMetadata, ListFolderResult
+from bora.exceptions import NotLinkedError
+from bora.main import Maestral
+from bora.models import IndexEntry, ItemType
+from bora.path_cache import PathIDCache
+from bora.path_codec import encode_path, fold_path
 
 
 def test_check_for_updates(m: Maestral) -> None:
@@ -31,7 +31,7 @@ def test_check_for_updates(m: Maestral) -> None:
 
     # check that no update is offered from current (newest) version
 
-    cumulus.main.__version__ = latest_stable_release
+    bora.main.__version__ = latest_stable_release
 
     update_res = m.check_for_updates()
 
@@ -41,7 +41,7 @@ def test_check_for_updates(m: Maestral) -> None:
 
     # check that update is offered from previous release
 
-    cumulus.main.__version__ = previous_release
+    bora.main.__version__ = previous_release
 
     update_res = m.check_for_updates()
 

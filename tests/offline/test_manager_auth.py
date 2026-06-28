@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from cumulus.exceptions import TokenRevokedError
+from bora.exceptions import TokenRevokedError
 
 
 def test_handle_sync_thread_errors_stops_on_token_revoked():
@@ -17,7 +17,7 @@ def test_handle_sync_thread_errors_stops_on_token_revoked():
     manager and triggers the notifier. If this test starts failing because
     of a manager refactor, add an explicit branch — don't loosen the test.
     """
-    from cumulus.manager import SyncManager
+    from bora.manager import SyncManager
 
     # Minimal SyncManager stub: real construction requires SyncEngine.
     mgr = SyncManager.__new__(SyncManager)

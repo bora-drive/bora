@@ -1,4 +1,4 @@
-"""Offline unit tests for cumulus.client.GoogleDriveClient.
+"""Offline unit tests for bora.client.GoogleDriveClient.
 
 Drive API calls are mocked at the `_get_service()` boundary: each test
 builds a MagicMock service and assigns `client._get_service` to a Mock
@@ -18,12 +18,12 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
-from cumulus.config import remove_configuration
-from cumulus.core import FileMetadata, FolderMetadata, WriteMode
-from cumulus.database.core import Database
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
+from bora.config import remove_configuration
+from bora.core import FileMetadata, FolderMetadata, WriteMode
+from bora.database.core import Database
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 from tests.fake_drive import ROOT_ID
 
 _CONFIG = "test-config-client-offline"
@@ -119,7 +119,7 @@ def test_retry_does_not_retry_permission_403(client, make_http_error):
 
 
 def test_retry_aborts_on_shutdown(client, make_http_error):
-    from cumulus.exceptions import CancelledError
+    from bora.exceptions import CancelledError
 
     client._poll_event = Mock()
     client._poll_event.wait.return_value = True  # shutdown during backoff
@@ -177,7 +177,7 @@ def _seed(cache, path, file_id, name, parent="ROOT", is_folder=False):
 
 
 def test_get_metadata_returns_file_metadata(client, cache):
-    from cumulus.core import FileMetadata
+    from bora.core import FileMetadata
 
     _seed(cache, "/report.pdf", "F1", "report.pdf")
     service = fake_service()
@@ -194,7 +194,7 @@ def test_get_metadata_returns_file_metadata(client, cache):
 
 
 def test_get_metadata_returns_folder_metadata(client, cache):
-    from cumulus.core import FolderMetadata
+    from bora.core import FolderMetadata
 
     _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
     service = fake_service()
@@ -223,7 +223,7 @@ def test_get_metadata_returns_none_for_native_doc(client, cache):
 
 
 def test_get_metadata_raises_not_found_on_cache_miss(client):
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
 
     client._get_service = Mock(side_effect=AssertionError("should not call API"))
     with pytest.raises(NotFoundError):
@@ -243,7 +243,7 @@ def test_get_metadata_trashed_returns_none(client, cache):
 
 
 def test_get_metadata_trashed_with_include_deleted_returns_metadata(client, cache):
-    from cumulus.core import FileMetadata
+    from bora.core import FileMetadata
 
     _seed(cache, "/old.pdf", "F9", "old.pdf")
     service = fake_service()
@@ -264,8 +264,8 @@ def test_get_metadata_file_uses_cached_cased_path_not_fold(client, cache):
     variant (ß casefolds to ss), and assert the returned metadata preserves
     the original casing — otherwise the item materializes locally under the
     wrong name."""
-    from cumulus.core import FileMetadata
-    from cumulus.path_codec import fold_path
+    from bora.core import FileMetadata
+    from bora.path_codec import fold_path
 
     _seed(cache, "/Straße.txt", "F7", "Straße.txt")
     service = fake_service()
@@ -284,7 +284,7 @@ def test_get_metadata_file_uses_cached_cased_path_not_fold(client, cache):
 
 def test_get_metadata_folder_uses_cached_cased_path_not_fold(client, cache):
     """7c-7: same as the file case, for the folder branch."""
-    from cumulus.core import FolderMetadata
+    from bora.core import FolderMetadata
 
     _seed(cache, "/Straße", "D7", "Straße", is_folder=True)
     service = fake_service()
@@ -351,7 +351,7 @@ def test_list_revisions_paginates(client, cache):
 
 
 def test_list_revisions_cache_miss_raises(client):
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
 
     client._get_service = Mock(side_effect=AssertionError("no API call"))
     with pytest.raises(NotFoundError):
@@ -361,7 +361,7 @@ def test_list_revisions_cache_miss_raises(client):
 # ==== list_folder_iterator (non-recursive) ================================
 
 def test_list_folder_non_recursive_yields_entries(client, cache):
-    from cumulus.core import FileMetadata, FolderMetadata
+    from bora.core import FileMetadata, FolderMetadata
 
     _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
     service = fake_service()
@@ -423,7 +423,7 @@ def test_list_folder_non_recursive_paginates(client, cache):
 
 
 def test_list_folder_non_recursive_cache_miss_raises(client):
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
 
     client._get_service = Mock(side_effect=AssertionError("no API call"))
     with pytest.raises(NotFoundError):
@@ -515,7 +515,7 @@ def test_bootstrap_drops_items_outside_root(client, cache, caplog):
     }]
     client._get_service = Mock(return_value=_bootstrap_service(pages))
 
-    with caplog.at_level(logging.INFO, logger="cumulus.client"):
+    with caplog.at_level(logging.INFO, logger="bora.client"):
         result_pages = list(client.list_folder_iterator("/", recursive=True))
     ids = {e.id for page in result_pages for e in page.entries}
     assert ids == {"F1"}
@@ -572,7 +572,7 @@ def _download_service(file_meta, file_bytes):
 
 
 def test_download_writes_file_and_verifies_md5(client, cache, tmp_path, monkeypatch):
-    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+    monkeypatch.setattr("bora.client.MediaIoBaseDownload", FakeDownloader)
     _seed(cache, "/a.bin", "F1", "a.bin")
     data = b"hello world"
     meta = {
@@ -589,7 +589,7 @@ def test_download_writes_file_and_verifies_md5(client, cache, tmp_path, monkeypa
 
 
 def test_download_native_doc_raises(client, cache, tmp_path):
-    from cumulus.exceptions import UnsupportedFileError
+    from bora.exceptions import UnsupportedFileError
 
     _seed(cache, "/Doc", "G1", "Doc")
     meta = {
@@ -606,9 +606,9 @@ def test_download_native_doc_raises(client, cache, tmp_path):
 
 
 def test_download_md5_mismatch_raises_and_cleans_up(client, cache, tmp_path, monkeypatch):
-    from cumulus.exceptions import DataCorruptionError
+    from bora.exceptions import DataCorruptionError
 
-    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+    monkeypatch.setattr("bora.client.MediaIoBaseDownload", FakeDownloader)
     _seed(cache, "/a.bin", "F1", "a.bin")
     data = b"hello world"
     meta = {
@@ -626,7 +626,7 @@ def test_download_md5_mismatch_raises_and_cleans_up(client, cache, tmp_path, mon
 
 
 def test_download_cache_miss_raises(client, tmp_path):
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
 
     client._get_service = Mock(side_effect=AssertionError("no API call"))
     with pytest.raises(NotFoundError):
@@ -643,7 +643,7 @@ def test_download_cleans_up_sidecar_on_error(client, cache, tmp_path, monkeypatc
         def next_chunk(self):
             raise RuntimeError("network died mid-download")
 
-    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FailingDownloader)
+    monkeypatch.setattr("bora.client.MediaIoBaseDownload", FailingDownloader)
     _seed(cache, "/a.bin", "F1", "a.bin")
     meta = {
         "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
@@ -660,7 +660,7 @@ def test_download_cleans_up_sidecar_on_error(client, cache, tmp_path, monkeypatc
 
 
 def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
-    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+    monkeypatch.setattr("bora.client.MediaIoBaseDownload", FakeDownloader)
     _seed(cache, "/a.bin", "F1", "a.bin")
     data = b"abcdef"
     meta = {
@@ -680,7 +680,7 @@ def test_download_by_file_id_skips_path_lookup(client, cache, tmp_path, monkeypa
     used for both metadata get and get_media must be the supplied id."""
     import hashlib as _hashlib2
 
-    monkeypatch.setattr("cumulus.client.MediaIoBaseDownload", FakeDownloader)
+    monkeypatch.setattr("bora.client.MediaIoBaseDownload", FakeDownloader)
 
     # Seed the cache with a DIFFERENT id so we can prove path_to_id was NOT used.
     _seed(cache, "/whatever.txt", "WRONG_ID", "whatever.txt")
@@ -729,7 +729,7 @@ def test_download_by_file_id_skips_path_lookup(client, cache, tmp_path, monkeypa
 
 def test_throttle_down_sleeps_when_limit_set(client, monkeypatch):
     slept = []
-    monkeypatch.setattr("cumulus.client.time.sleep", lambda s: slept.append(s))
+    monkeypatch.setattr("bora.client.time.sleep", lambda s: slept.append(s))
     client.bandwidth_limit_down = 1000  # bytes/sec
     client._throttle_down(2000)
     assert slept == [2.0]
@@ -737,7 +737,7 @@ def test_throttle_down_sleeps_when_limit_set(client, monkeypatch):
 
 def test_throttle_down_noop_when_no_limit(client, monkeypatch):
     slept = []
-    monkeypatch.setattr("cumulus.client.time.sleep", lambda s: slept.append(s))
+    monkeypatch.setattr("bora.client.time.sleep", lambda s: slept.append(s))
     client.bandwidth_limit_down = 0
     client._throttle_down(2000)
     assert slept == []
@@ -808,7 +808,7 @@ def test_wait_400_raises_cursor_reset_not_bad_input(client, make_http_error):
     Note: CursorResetError and BadInputError are both direct subclasses of
     CumulusApiError with no parent-child relationship, so
     pytest.raises(CursorResetError) already rules out BadInputError."""
-    from cumulus.exceptions import CursorResetError
+    from bora.exceptions import CursorResetError
 
     client._poll_event = Mock()
     client._poll_event.wait.return_value = False  # timed out normally
@@ -825,7 +825,7 @@ def test_wait_400_raises_cursor_reset_not_bad_input(client, make_http_error):
 def test_wait_403_raises_insufficient_permissions(client, make_http_error):
     """A non-400 HttpError must propagate through convert_api_errors normally
     and not be swallowed by the CursorResetError branch."""
-    from cumulus.exceptions import InsufficientPermissionsError
+    from bora.exceptions import InsufficientPermissionsError
 
     client._poll_event = Mock()
     client._poll_event.wait.return_value = False
@@ -888,7 +888,7 @@ def test_wait_false_on_fully_empty_final_page(client):
 # ==== list_remote_changes(_iterator) ======================================
 
 def test_list_remote_changes_iterator_delegates(client, cache):
-    from cumulus.core import FileMetadata
+    from bora.core import FileMetadata
 
     service = fake_service()
     service.changes.return_value.list.return_value.execute.return_value = {
@@ -914,7 +914,7 @@ def test_list_remote_changes_iterator_converts_http_error(client, make_http_erro
     )
     client._get_service = Mock(return_value=service)
 
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
 
     with pytest.raises(NotFoundError):
         list(client.list_remote_changes_iterator("CURSOR"))
@@ -935,7 +935,7 @@ def test_list_remote_changes_flattens(client, cache):
 # ==== writes.py wiring + delegators =======================================
 
 def test_client_constructs_write_helper(client):
-    from cumulus.writes import _WriteHelper
+    from bora.writes import _WriteHelper
 
     assert isinstance(client._writes, _WriteHelper)
     assert client._writes._client is client
@@ -954,7 +954,7 @@ def test_upload_delegates_to_helper(client, monkeypatch):
         return "sentinel-result"
 
     monkeypatch.setattr(client._writes, "upload", fake_upload)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     out = client.upload(
         "/local/a.txt", "/a.txt",
@@ -1055,7 +1055,7 @@ def test_get_metadata_unknown_path_raises_notfound(client_on_fake):
     Verified against client.py lines 551-557: path_cache.path_to_id returns
     None for an unknown path, which triggers an explicit NotFoundError raise.
     """
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
 
     cof = client_on_fake
     with pytest.raises(NotFoundError):
@@ -1074,11 +1074,11 @@ def test_check_requires_upload_for_new_file_returns_true(client_on_fake, tmp_pat
     """
     import os
     from datetime import datetime
-    from cumulus.sync import SyncEngine
-    from cumulus.models import (
+    from bora.sync import SyncEngine
+    from bora.models import (
         SyncEvent, SyncDirection, SyncStatus, ItemType, ChangeType
     )
-    from cumulus.utils.appdirs import get_home_dir
+    from bora.utils.appdirs import get_home_dir
 
     cof = client_on_fake
 
@@ -1200,7 +1200,7 @@ def test_move_then_get_metadata_at_new_path(client_on_fake, tmp_path):
     assert got.id == meta.id
 
     # Old path must no longer resolve.
-    from cumulus.exceptions import NotFoundError
+    from bora.exceptions import NotFoundError
     with pytest.raises(NotFoundError):
         cof.client.get_metadata("/orig.txt")
 
@@ -1210,8 +1210,8 @@ def test_remove_then_metadata_reflects_deletion(client_on_fake, tmp_path):
     (path evicted from cache), and the underlying Drive record is trashed.
     Also confirms that a separate fresh client seeing the trashed record
     via the change feed emits a DeletedMetadata entry."""
-    from cumulus.core import DeletedMetadata
-    from cumulus.exceptions import NotFoundError
+    from bora.core import DeletedMetadata
+    from bora.exceptions import NotFoundError
 
     cof = client_on_fake
     fake = cof.fake
@@ -1247,7 +1247,7 @@ def test_remove_then_metadata_reflects_deletion(client_on_fake, tmp_path):
     #    and produces a DeletedMetadata for the trashed item.
     import sqlite3 as _sqlite3
     fresh_cache = PathIDCache(
-        __import__("cumulus.database.core", fromlist=["Database"]).Database(
+        __import__("bora.database.core", fromlist=["Database"]).Database(
             _sqlite3.connect(":memory:")
         )
     )
@@ -1269,7 +1269,7 @@ def test_remove_then_metadata_reflects_deletion(client_on_fake, tmp_path):
     )
 
     # Cleanup the fresh client config.
-    from cumulus.config import remove_configuration as _rm
+    from bora.config import remove_configuration as _rm
     _rm("test-config-fresh")
 
 

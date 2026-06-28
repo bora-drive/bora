@@ -35,7 +35,7 @@ for package in (
 # app
 APP_NAME = "Cumulus"
 BUNDLE_ID = "com.cumulus.app"
-APP_ICON_PATH = resource_path("cumulus.resources", "maestral.png").__enter__()
+APP_ICON_PATH = resource_path("bora.resources", "maestral.png").__enter__()
 ENV = {"PYTHONOPTIMIZE": "2", "LC_CTYPE": "UTF-8"}
 DEFAULT_CONFIG_NAME = "cumulus"
 

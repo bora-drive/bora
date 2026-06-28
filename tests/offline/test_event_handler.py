@@ -8,9 +8,9 @@ from watchdog.events import (
     FileMovedEvent,
 )
 
-from cumulus.models import ChangeType, ItemType
-from cumulus.sync import SyncDirection, SyncEngine
-from cumulus.utils.path import move
+from bora.models import ChangeType, ItemType
+from bora.sync import SyncDirection, SyncEngine
+from bora.utils.path import move
 
 
 def ipath(i: int) -> str:

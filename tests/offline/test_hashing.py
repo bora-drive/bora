@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 
-from cumulus.utils.hashing import ContentHasher, StreamHasher
+from bora.utils.hashing import ContentHasher, StreamHasher
 
 
 def test_content_hasher_matches_hashlib_md5():

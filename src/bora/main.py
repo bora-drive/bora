@@ -117,7 +117,7 @@ class Maestral:
 
     All methods and properties return objects or raise exceptions which can safely be
     serialized, i.e., pure Python types. The only exception are instances of
-    :exc:`cumulus.exceptions.CumulusApiError`: they need to be registered explicitly
+    :exc:`bora.exceptions.CumulusApiError`: they need to be registered explicitly
     with the serpent serializer which is used for communication to frontends.
 
     Sync errors and fatal errors which occur in the sync threads can be read with the
@@ -130,7 +130,7 @@ class Maestral:
         existing remote account and set up the local sync folder. If successful,
         invoke :meth:`start_sync` to start syncing.
 
-        >>> from cumulus.main import Maestral
+        >>> from bora.main import Maestral
         >>> m = Maestral(config_name='private')
         >>> url = m.get_auth_url()  # get token from authorization website
         >>> print(f'Please go to {url} to retrieve a authorization token.')
@@ -561,7 +561,7 @@ class Maestral:
     def pending_sync_folder(self) -> bool:
         """Whether a local sync directory has been configured (read only). This will
         not check if the configured directory actually exists, starting the sync may
-        still raise a :exc:`cumulus.exceptions.NoSyncDirError`."""
+        still raise a :exc:`bora.exceptions.NoSyncDirError`."""
         return not self.sync.sync_path
 
     @property

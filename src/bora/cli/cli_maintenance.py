@@ -483,15 +483,15 @@ in `~/.zshrc`. Ensure that the following is present in your `~/.zshrc`:
 
 ### fish
 
-Generate and save a `cumulus.fish` completion script as follows. For all users:
+Generate and save a `bora.fish` completion script as follows. For all users:
 
 \b
-    cumulus completion fish > /usr/share/fish/vendor_completions.d/cumulus.fish
+    cumulus completion fish > /usr/share/fish/vendor_completions.d/bora.fish
 
 For the current user only:
 
 \b
-    cumulus completion fish > ~/.config/fish/completions/cumulus.fish
+    cumulus completion fish > ~/.config/fish/completions/bora.fish
 
 """,
 )

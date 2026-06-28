@@ -276,7 +276,7 @@ class FSEventHandler(FileSystemEventHandler):
             Prevent triggereing a sync event when creating a local file:
 
             >>> from watchdog.events import FileCreatedEvent
-            >>> from cumulus.main import Maestral
+            >>> from bora.main import Maestral
             >>> m = Maestral()
             >>> with m.sync.fs_events.ignore(FileCreatedEvent('path')):
             ...     open('path').close()
@@ -706,7 +706,7 @@ class SyncEngine:
         list. Canonicalises paths to the fold_human form (quoting-free casefold over
         the decoded human-readable path) so that user-supplied paths with non-ASCII
         or common punctuation (e.g. 'Ördner', 'Reports (2024)') compare correctly
-        against engine paths decoded via :func:`~cumulus.path_codec.decode_path`.
+        against engine paths decoded via :func:`~bora.path_codec.decode_path`.
 
         :param remote_paths: remote paths to exclude (human-readable, user-supplied).
         :returns: Cleaned up items in fold_human canonical form.
@@ -933,7 +933,7 @@ class SyncEngine:
         Resolve a remote ID to its current cased index path, if indexed.
 
         Used as the crash-replay fallback for delete classification in
-        :func:`cumulus.changes.iter_remote_changes`: when the path cache has
+        :func:`bora.changes.iter_remote_changes`: when the path cache has
         already evicted a fileId — a delete replayed after a crash mid-batch,
         because the cache mutates durably while the cursor advances only once
         the whole batch is applied — the surviving index row still maps the id
@@ -1547,7 +1547,7 @@ class SyncEngine:
         Check if file has been excluded through "selective sync" by the user.
 
         :param remote_path_lower: Fold-path lower remote path (percent-encoded virtual
-            form, already casefolded by :func:`~cumulus.path_codec.fold_path`).
+            form, already casefolded by :func:`~bora.path_codec.fold_path`).
         :returns: Whether the path is excluded from download syncing by the user.
         """
         # excluded_items are stored in fold_human form (decoded, casefolded).
@@ -1605,7 +1605,7 @@ class SyncEngine:
 
     def cancel_sync(self) -> None:
         """
-        Raises a :exc:`cumulus.exceptions.CancelledError` in all sync threads and waits
+        Raises a :exc:`bora.exceptions.CancelledError` in all sync threads and waits
         for them to shut down.
         """
         self._cancel_requested.set()
@@ -2386,7 +2386,7 @@ class SyncEngine:
     def _create_remote_entry(self, event: SyncEvent) -> SyncEvent:
         """
         Applies a local file system event to the remote and clears any existing
-        sync errors belonging to that path. Any :exc:`cumulus.exception.SyncError` will
+        sync errors belonging to that path. Any :exc:`bora.exception.SyncError` will
         be caught and logged as appropriate.
 
         This method always uses a new copy of client and closes the network session
@@ -3612,7 +3612,7 @@ class SyncEngine:
     def _create_local_entry(self, event: SyncEvent) -> SyncEvent:
         """
         Applies a file / folder change from the remote servers to the local sync folder.
-        Any :exc:`cumulus.exception.CumulusApiError` will be caught and logged as
+        Any :exc:`bora.exception.CumulusApiError` will be caught and logged as
         appropriate. Entries in the local index are created after successful completion.
 
         :param event: remote metadata.

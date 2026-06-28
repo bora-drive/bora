@@ -1,7 +1,7 @@
 """
 This module contains the definitions of our database tables which store the index, sync
 history and cache of content hashes. Each table is defined by a subclass of
-:class:`cumulus.database.orm.Model` with properties representing database columns.
+:class:`bora.database.orm.Model` with properties representing database columns.
 Class instances then represent table rows.
 """
 

@@ -82,7 +82,7 @@ WATCHDOG_PID = os.getenv("WATCHDOG_PID")
 IS_WATCHDOG = WATCHDOG_PID is None or WATCHDOG_PID == str(os.getpid())
 
 
-URI = "PYRO:cumulus.{0}@{1}"
+URI = "PYRO:bora.{0}@{1}"
 Pyro5.config.THREADPOOL_SIZE_MIN = 2
 
 
@@ -141,9 +141,9 @@ def serialize_api_types(obj: Any) -> dict[str, Any]:
 def deserialize_api_types(class_name: str, d: dict[str, Any]) -> Any:
     """
     Deserializes an API type. Allowed classes are defined in:
-        * :mod:`cumulus.core`
-        * :mod:`cumulus.model`
-        * :mod:`cumulus.exceptions`
+        * :mod:`bora.core`
+        * :mod:`bora.model`
+        * :mod:`bora.exceptions`
 
     :param class_name: Name of class to deserialize.
     :param d: Dictionary of serialized class.
@@ -370,7 +370,7 @@ def start_cumulus_daemon(
     Starts the Maestral daemon with event loop in the current thread.
 
     Startup is race free: there will never be more than one daemon running with the same
-    config name. The daemon is a :class:`cumulus.main.Maestral` instance which is
+    config name. The daemon is a :class:`bora.main.Maestral` instance which is
     exposed as Pyro daemon object and listens for requests on a unix domain socket. This
     call starts an asyncio event loop to process client requests and blocks until the
     event loop shuts down. On macOS, the event loop is integrated with Cocoa's
@@ -473,7 +473,7 @@ def start_cumulus_daemon(
         dlogger.debug("Starting event loop")
 
         with Daemon(unixsocket=sockpath) as daemon:
-            daemon.register(cumulus_daemon, f"cumulus.{config_name}")
+            daemon.register(cumulus_daemon, f"bora.{config_name}")
 
             # Reduce Pyro's housekeeping frequency from 2 sec to 20 sec.
             # This avoids constantly waking the CPU when we are idle.
@@ -531,7 +531,7 @@ def start_cumulus_daemon_process(
     # Protect against injection.
     cc = quote(config_name).strip("'")
 
-    script = f'import cumulus.daemon; cumulus.daemon.start_cumulus_daemon("{cc}")'
+    script = f'import bora.daemon; bora.daemon.start_cumulus_daemon("{cc}")'
 
     env = os.environ.copy()
     env.update(ENV)
@@ -611,15 +611,15 @@ class MaestralProxy(ContextManager["MaestralProxy"]):
 
         Use MaestralProxy as a context manager:
 
-        >>> import cumulus.cli.cli_info
+        >>> import bora.cli.cli_info
         >>> with MaestralProxy() as m:
-        ...     print(cumulus.cli.cli_info.status)
+        ...     print(bora.cli.cli_info.status)
 
         Use MaestralProxy directly:
 
-        >>> import cumulus.cli.cli_info
+        >>> import bora.cli.cli_info
         >>> m = MaestralProxy()
-        >>> print(cumulus.cli.cli_info.status)
+        >>> print(bora.cli.cli_info.status)
         >>> m._disconnect()
 
     :ivar _is_fallback: Whether we are using an actual Maestral instance as fallback

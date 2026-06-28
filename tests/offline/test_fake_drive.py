@@ -7,10 +7,10 @@ import requests as _requests
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaInMemoryUpload, MediaIoBaseDownload
 
-from cumulus.client import GoogleDriveClient
-from cumulus.database.core import Database
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient
+from bora.database.core import Database
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 from tests.fake_drive import ROOT_ID, FakeDrive, make_conn_reset, make_http_error, make_timeout
 
 

@@ -8,8 +8,8 @@ one, re-list, and confirm we own the earliest-created instance.
 import time
 from datetime import datetime, timezone
 
-from cumulus.changes import parse_drive_time
-from cumulus.client import GoogleDriveClient
+from bora.changes import parse_drive_time
+from bora.client import GoogleDriveClient
 
 _STALE_SECONDS = 600
 _RETRY_SECONDS = 5
