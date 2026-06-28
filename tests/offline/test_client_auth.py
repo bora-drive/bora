@@ -151,6 +151,26 @@ def test_get_space_usage(client, cred_storage, monkeypatch):
     assert usage.team_usage is None
 
 
+def test_fetch_account_info_persists_state(client, cred_storage, monkeypatch):
+    """Account email/type/usage must be written to the `account` state section
+    so the CLI (status / auth status / config-files) can display them."""
+    _link_to_perm_x(client, cred_storage, monkeypatch)
+    assert client.linked is True
+    fake_service = mock.MagicMock()
+    fake_service.about().get().execute.return_value = _fake_about_response()
+
+    with mock.patch("cumulus.client.build", return_value=fake_service):
+        client.get_account_info()
+        client.get_space_usage()
+
+    assert client._state.get("account", "email") == "alice@example.com"
+    assert client._state.get("account", "display_name") == "Alice Example"
+    assert client._state.get("account", "type") == "personal"
+    usage = client._state.get("account", "usage")
+    assert usage and "used" in usage
+    assert client._state.get("account", "usage_type") == "individual"
+
+
 from google.auth.exceptions import RefreshError
 
 
