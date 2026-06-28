@@ -82,5 +82,5 @@ connection errors. We verify that linking succeeded and proceed to create a loca
 Google Drive folder and start syncing:
 
     >>> if res == 0:
-    ...     m.create_dropbox_directory("~/Google Drive (Private)")
+    ...     m.create_sync_directory("~/Google Drive (Private)")
     ...     m.start_sync()
