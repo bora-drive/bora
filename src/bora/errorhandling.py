@@ -1,6 +1,6 @@
 """This module contains methods to convert OSErrors, Google auth-library
 exceptions, and HTTP errors to instances of
-:exc:`bora.exceptions.CumulusApiError`.
+:exc:`bora.exceptions.BoraApiError`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from .exceptions import (
     InsufficientSpaceError,
     InvalidDbidError,
     IsAFolderError,
-    CumulusApiError,
+    BoraApiError,
     NotAFolderError,
     NotFoundError,
     OutOfMemoryError,
@@ -53,9 +53,9 @@ __all__ = [
     "RETRYABLE_403_REASONS",
     "RETRYABLE_HTTP_STATUS",
     "extract_http_reason",
-    "http_error_to_cumulus",
-    "google_api_to_cumulus_error",
-    "os_to_cumulus_error",
+    "http_error_to_bora",
+    "google_api_to_bora_error",
+    "os_to_bora_error",
     "convert_api_errors",
 ]
 
@@ -80,7 +80,7 @@ RETRYABLE_403_REASONS = frozenset(
 # HTTP status codes that are always transient and worth retrying.
 RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 
-LocalError = Union[CumulusApiError, OSError]
+LocalError = Union[BoraApiError, OSError]
 
 FT = TypeVar("FT", bound=Callable[..., Any])
 
@@ -109,14 +109,14 @@ def extract_http_reason(exc: HttpError) -> str:
     return status if isinstance(status, str) else ""
 
 
-def http_error_to_cumulus(
+def http_error_to_bora(
     status: int,
     reason: str,
     exc: HttpError,
     remote_path: str | None = None,
     local_path: str | None = None,
-) -> CumulusApiError:
-    """Map an HTTP status + Drive sub-reason to a Cumulus exception.
+) -> BoraApiError:
+    """Map an HTTP status + Drive sub-reason to a Bora exception.
 
     See the Stage 3 spec §6.1 for the full table. Retryable statuses
     (429, 5xx, the rate-limit 403 reasons) only reach this function
@@ -126,7 +126,7 @@ def http_error_to_cumulus(
     if status == 400:
         return BadInputError(
             "Bad request",
-            "Cumulus made an invalid request to Google Drive.",
+            "Bora made an invalid request to Google Drive.",
             remote_path=remote_path,
             local_path=local_path,
         )
@@ -134,13 +134,13 @@ def http_error_to_cumulus(
         return TokenRevokedError(
             "Authentication revoked",
             "Your Google account has been disconnected. "
-            "Run 'cumulus auth link -r' to re-link.",
+            "Run 'bora auth link -r' to re-link.",
         )
     if status == 403:
         if reason in RETRYABLE_403_REASONS:
             return ConnectionError(
                 "Google Drive rate limit reached",
-                "Too many requests to Google Drive. Cumulus will retry.",
+                "Too many requests to Google Drive. Bora will retry.",
             )
         if reason == "storageQuotaExceeded":
             return InsufficientSpaceError(
@@ -179,22 +179,22 @@ def http_error_to_cumulus(
     if status == 412:
         return DataChangedError(
             "Item changed on Google Drive",
-            "The item changed on Drive since Cumulus last checked. "
-            "Cumulus will reconcile on the next sync pass.",
+            "The item changed on Drive since Bora last checked. "
+            "Bora will reconcile on the next sync pass.",
             remote_path=remote_path,
             local_path=local_path,
         )
     if status == 429:
         return ConnectionError(
             "Google Drive rate limit reached",
-            "Too many requests to Google Drive. Cumulus will retry.",
+            "Too many requests to Google Drive. Bora will retry.",
         )
     if status in (500, 502, 503, 504):
         return ServerError(
             "Google Drive server error",
-            "Google Drive reported an internal error. Cumulus will retry.",
+            "Google Drive reported an internal error. Bora will retry.",
         )
-    return CumulusApiError(
+    return BoraApiError(
         f"Google Drive API error ({status})",
         str(exc),
         remote_path=remote_path,
@@ -207,7 +207,7 @@ def convert_api_errors(
     remote_path: str | None = None, local_path: str | None = None
 ) -> Iterator[None]:
     """A context manager that catches and re-raises instances of :exc:`OSError` and
-    Google API exceptions as :exc:`bora.exceptions.CumulusApiError` or
+    Google API exceptions as :exc:`bora.exceptions.BoraApiError` or
     :exc:`ConnectionError`.
 
     :param remote_path: Remote path associated with the error.
@@ -219,12 +219,12 @@ def convert_api_errors(
         raise TokenRevokedError(
             "Authentication revoked",
             "Your Google account has been disconnected. "
-            "Run 'cumulus auth link -r' to re-link.",
+            "Run 'bora auth link -r' to re-link.",
         ) from exc
     except google.auth.exceptions.GoogleAuthError as exc:
         raise AuthError("Authentication error", str(exc)) from exc
     except HttpError as exc:
-        raise http_error_to_cumulus(
+        raise http_error_to_bora(
             exc.resp.status,
             extract_http_reason(exc),
             exc,
@@ -244,13 +244,13 @@ def convert_api_errors(
                 "Please check your internet connection and try again later.",
             )
         else:
-            raise os_to_cumulus_error(exc, remote_path, local_path)
+            raise os_to_bora_error(exc, remote_path, local_path)
 
 
-def os_to_cumulus_error(
+def os_to_bora_error(
     exc: OSError, remote_path: str | None = None, local_path: str | None = None
 ) -> LocalError:
-    """Converts a :exc:`OSError` to a :exc:`bora.exceptions.CumulusApiError` and
+    """Converts a :exc:`OSError` to a :exc:`bora.exceptions.BoraApiError` and
     tries to add a reasonably informative error title and message.
 
     :param exc: Original OSError.
@@ -259,7 +259,7 @@ def os_to_cumulus_error(
     :returns: Converted exception.
     """
     title = "Could not sync file or folder"
-    err_cls: type[CumulusApiError]
+    err_cls: type[BoraApiError]
 
     if isinstance(exc, PermissionError):
         err_cls = InsufficientPermissionsError  # subclass of SyncError
@@ -313,29 +313,29 @@ def os_to_cumulus_error(
         title = "Could not download file"
         text = "There is not enough space left on the selected drive."
     elif exc.errno == errno.ENOMEM:
-        err_cls = OutOfMemoryError  # subclass of CumulusApiError
+        err_cls = OutOfMemoryError  # subclass of BoraApiError
         text = "Out of memory. Please reduce the number of memory consuming processes."
     elif exc.errno is not None:
         err_cls = FileReadError
         text = f"Could not access file. Errno {exc.errno}: {os.strerror(exc.errno)}."
     else:
-        err_cls = CumulusApiError
+        err_cls = BoraApiError
         text = str(exc)
 
     local_path = local_path or exc.filename
 
-    cumulus_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
-    cumulus_exc.__cause__ = exc
+    bora_exc = err_cls(title, text, remote_path=remote_path, local_path=local_path)
+    bora_exc.__cause__ = exc
 
-    return cumulus_exc
+    return bora_exc
 
 
-def google_api_to_cumulus_error(
+def google_api_to_bora_error(
     exc: Exception,
     remote_path: str | None = None,
     local_path: str | None = None,
-) -> CumulusApiError:
-    """Converts a Google API exception to a :exc:`bora.exceptions.CumulusApiError`.
+) -> BoraApiError:
+    """Converts a Google API exception to a :exc:`bora.exceptions.BoraApiError`.
 
     .. note:: Not yet implemented. Will be completed in Phase 6.
 

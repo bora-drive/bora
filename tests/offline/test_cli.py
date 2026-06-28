@@ -5,7 +5,7 @@ from click.testing import CliRunner
 
 from bora.autostart import AutoStart
 from bora.cli import main
-from bora.daemon import MaestralProxy, Start, start_cumulus_daemon_process
+from bora.daemon import MaestralProxy, Start, start_bora_daemon_process
 from bora.logging import scoped_logger
 from bora.main import Maestral
 from bora.notify import level_name_to_number, level_number_to_name
@@ -66,12 +66,12 @@ def test_invalid_config() -> None:
         assert result.exit_code == 1, command
         assert (
             result.output == "! Configuration 'non-existent-config' does not exist. "
-            "Use 'cumulus config-files' to list all configurations.\n"
+            "Use 'bora config-files' to list all configurations.\n"
         )
 
 
 def test_start_already_running(config_name: str) -> None:
-    res = start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    res = start_bora_daemon_process(config_name, timeout=TEST_TIMEOUT)
 
     assert res is Start.Ok
 
@@ -83,7 +83,7 @@ def test_start_already_running(config_name: str) -> None:
 
 
 def test_stop(config_name: str) -> None:
-    res = start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    res = start_bora_daemon_process(config_name, timeout=TEST_TIMEOUT)
     assert res is Start.Ok
 
     runner = CliRunner()
@@ -162,7 +162,7 @@ def test_excluded_remove_raises_not_running_error(m: Maestral) -> None:
 
 
 def test_notify_level(config_name: str) -> None:
-    start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    start_bora_daemon_process(config_name, timeout=TEST_TIMEOUT)
     m = MaestralProxy(config_name)
 
     runner = CliRunner()
@@ -188,7 +188,7 @@ def test_notify_level(config_name: str) -> None:
 
 
 def test_notify_snooze(config_name: str) -> None:
-    start_cumulus_daemon_process(config_name, timeout=TEST_TIMEOUT)
+    start_bora_daemon_process(config_name, timeout=TEST_TIMEOUT)
     m = MaestralProxy(config_name)
 
     runner = CliRunner()
@@ -223,7 +223,7 @@ def test_log_level(m: Maestral) -> None:
 
 def test_log_show(m: Maestral) -> None:
     # log a message
-    logger = scoped_logger("cumulus", m.config_name)
+    logger = scoped_logger("bora", m.config_name)
     logger.info("Hello from pytest!")
     runner = CliRunner()
     result = runner.invoke(main, ["log", "show", "-c", m.config_name])
@@ -234,7 +234,7 @@ def test_log_show(m: Maestral) -> None:
 
 def test_log_clear(m: Maestral) -> None:
     # log a message
-    logger = scoped_logger("cumulus", m.config_name)
+    logger = scoped_logger("bora", m.config_name)
     logger.info("Hello from pytest!")
     runner = CliRunner()
     result = runner.invoke(main, ["log", "show", "-c", m.config_name])
@@ -250,7 +250,7 @@ def test_log_clear(m: Maestral) -> None:
     result = runner.invoke(main, ["log", "clear", "-c", m.config_name])
     assert result.exit_code == 0, result.output
 
-    logfile = get_log_path("cumulus", f"{m.config_name}.log")
+    logfile = get_log_path("bora", f"{m.config_name}.log")
     with open(logfile) as f:
         log_content = f.read()
 

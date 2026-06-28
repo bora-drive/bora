@@ -2,22 +2,22 @@
 This module defines Maestral's error classes. It should be kept free of memory heavy
 imports.
 
-All errors inherit from :exc:`CumulusApiError` which has title and message attributes
+All errors inherit from :exc:`BoraApiError` which has title and message attributes
 to display the error to the user. Errors which are related to syncing a specific
-file or folder inherit from :exc:`SyncError`, a subclass of :exc:`CumulusApiError`.
+file or folder inherit from :exc:`SyncError`, a subclass of :exc:`BoraApiError`.
 """
 
 from __future__ import annotations
 
 
-class CumulusApiError(Exception):
+class BoraApiError(Exception):
     """Base class for Maestral errors
 
-    CumulusApiError provides attributes that can be used to generate human-readable
+    BoraApiError provides attributes that can be used to generate human-readable
     error messages and metadata regarding affected file paths (if any).
 
     Errors originating from the remote API or the 'local API' both inherit from
-    CumulusApiError.
+    BoraApiError.
 
     :param title: A short description of the error type. This can be used in a CLI or
         GUI to give a short error summary.
@@ -76,7 +76,7 @@ class CumulusApiError(Exception):
 # ==== regular sync errors =============================================================
 
 
-class SyncError(CumulusApiError):
+class SyncError(BoraApiError):
     """Base class for recoverable sync issues."""
 
 
@@ -160,53 +160,53 @@ class SymlinkError(SyncError):
 # ==== errors which are not related to a specific sync event ===========================
 
 
-class ConnectionError(CumulusApiError):
+class ConnectionError(BoraApiError):
     """Raised when the connection to the remote server fails."""
 
 
 DropboxConnectionError = ConnectionError  # backward compat
 
 
-class CancelledError(CumulusApiError):
+class CancelledError(BoraApiError):
     """Raised when syncing is cancelled by the user."""
 
 
-class NotLinkedError(CumulusApiError):
+class NotLinkedError(BoraApiError):
     """Raised when no remote account is linked."""
 
 
-class InvalidDbidError(CumulusApiError):
+class InvalidDbidError(BoraApiError):
     """Raised when the given ID does not correspond to an existing account."""
 
 
-class KeyringAccessError(CumulusApiError):
+class KeyringAccessError(BoraApiError):
     """Raised when retrieving a saved auth token from the user keyring fails."""
 
 
-class NoSyncDirError(CumulusApiError):
+class NoSyncDirError(BoraApiError):
     """Raised when the local sync folder cannot be found."""
 
 
 NoDropboxDirError = NoSyncDirError  # backward compat
 
 
-class CacheDirError(CumulusApiError):
+class CacheDirError(BoraApiError):
     """Raised when creating the cache directory fails."""
 
 
-class InotifyError(CumulusApiError):
+class InotifyError(BoraApiError):
     """Raised when the local sync folder is too large to monitor with inotify."""
 
 
-class OutOfMemoryError(CumulusApiError):
+class OutOfMemoryError(BoraApiError):
     """Raised when there is insufficient memory to complete an operation."""
 
 
-class DatabaseError(CumulusApiError):
+class DatabaseError(BoraApiError):
     """Raised when reading or writing to the database fails."""
 
 
-class AuthError(CumulusApiError):
+class AuthError(BoraApiError):
     """Raised when authentication fails."""
 
 
@@ -221,34 +221,34 @@ class TokenRevokedError(AuthError):
     """Raised when authentication fails because the user's token has been revoked."""
 
 
-class CursorResetError(CumulusApiError):
+class CursorResetError(BoraApiError):
     """Raised when the cursor used for a longpoll or list-folder request has been
     invalidated. The server will very rarely invalidate a cursor. If this happens, a new
     cursor for the respective folder has to be obtained through files_list_folder. This
     may require re-syncing the entire sync folder."""
 
 
-class BadInputError(CumulusApiError):
+class BadInputError(BoraApiError):
     """Raised when an API request is made with bad input. This should not happen
     during syncing but only in case of manual API calls."""
 
 
-class BusyError(CumulusApiError):
+class BusyError(BoraApiError):
     """Raised when trying to perform an action which is only possible in the idle
     state and we cannot block or queue the job."""
 
 
-class UnsupportedFileTypeForDiff(CumulusApiError):
+class UnsupportedFileTypeForDiff(BoraApiError):
     """Raised when a diff for an unsupported file type was issued."""
 
 
-class SharedLinkError(CumulusApiError):
+class SharedLinkError(BoraApiError):
     """Raised when creating a shared link fails."""
 
 
-class PathRootError(CumulusApiError):
+class PathRootError(BoraApiError):
     """Raised when making an API call with an invalid path root header."""
 
 
-class UpdateCheckError(CumulusApiError):
+class UpdateCheckError(BoraApiError):
     """Raised when checking for updates fails."""

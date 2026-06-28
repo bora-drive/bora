@@ -18,7 +18,7 @@ from typing import Any, Callable, cast
 from desktop_notifier import Button, DesktopNotifier, Icon, Urgency
 
 # local imports
-from .config import CumulusConfig
+from .config import BoraConfig
 from .constants import APP_ICON_PATH, APP_NAME
 
 __all__ = [
@@ -29,7 +29,7 @@ __all__ = [
     "FILECHANGE",
     "level_name_to_number",
     "level_number_to_name",
-    "CumulusDesktopNotifier",
+    "BoraDesktopNotifier",
 ]
 
 logger = logging.getLogger("desktop_notifier")
@@ -95,7 +95,7 @@ def level_name_to_number(name: str) -> int:
         raise ValueError("Invalid level name")
 
 
-class CumulusDesktopNotifier:
+class BoraDesktopNotifier:
     """Desktop notification emitter for Maestral
 
     Desktop notifier with snooze functionality and variable notification levels. Must
@@ -107,7 +107,7 @@ class CumulusDesktopNotifier:
     """
 
     def __init__(self, config_name: str, event_loop: AbstractEventLoop) -> None:
-        self._conf = CumulusConfig(config_name)
+        self._conf = BoraConfig(config_name)
         self._snooze = 0.0
         self._loop = event_loop
 

@@ -23,17 +23,17 @@ T = TypeVar("T")
 
 def convert_api_errors(func: Callable[P, T]) -> Callable[P, T]:
     """
-    Decorator that catches a CumulusApiError and prints a formatted error message to
+    Decorator that catches a BoraApiError and prints a formatted error message to
     stdout before exiting. Calls ``sys.exit(1)`` after printing the error to stdout.
     """
 
-    from ..exceptions import CumulusApiError
+    from ..exceptions import BoraApiError
 
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         try:
             return func(*args, **kwargs)
-        except CumulusApiError as exc:
+        except BoraApiError as exc:
             warn(f"{exc.title}. {exc.message}")
             sys.exit(1)
 
@@ -51,12 +51,12 @@ def check_for_fatal_errors(m: MaestralProxy | Maestral) -> bool:
 
     import textwrap
 
-    cumulus_err_list = m.fatal_errors
+    bora_err_list = m.fatal_errors
 
-    if len(cumulus_err_list) > 0:
+    if len(bora_err_list) > 0:
         size = get_term_size()
 
-        err = cumulus_err_list[0]
+        err = bora_err_list[0]
         wrapped_msg = textwrap.fill(err.message, width=size.columns)
 
         click.echo("")
@@ -98,7 +98,7 @@ def inject_proxy(
 
             ctx = click.get_current_context()
 
-            config_name = ctx.params.pop("config_name", "cumulus")
+            config_name = ctx.params.pop("config_name", "bora")
             kwargs.pop("config_name", None)
 
             try:

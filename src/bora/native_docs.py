@@ -5,7 +5,7 @@ Google Docs, Sheets, Slides, etc. have MIME types under
 ``md5Checksum``, and cannot be synced as regular files. Drive shortcuts
 (``application/vnd.google-apps.shortcut``) are also non-syncable.
 
-Cumulus's MVP strategy: **skip** these items entirely. They are filtered
+Bora's MVP strategy: **skip** these items entirely. They are filtered
 out of change-feed results and listing results before the sync engine
 sees them.
 

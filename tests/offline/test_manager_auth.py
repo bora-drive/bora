@@ -28,7 +28,7 @@ def test_handle_sync_thread_errors_stops_on_token_revoked():
 
     with mgr._handle_sync_thread_errors(running=Event(), autostart=Event()):
         raise TokenRevokedError(
-            "Authentication revoked", "Run 'cumulus auth link -r' to re-link."
+            "Authentication revoked", "Run 'bora auth link -r' to re-link."
         )
 
     mgr.stop.assert_called_once()

@@ -20,7 +20,7 @@ from typing_extensions import Concatenate, ParamSpec
 # local imports
 from . import __url__, notify
 from .client import API_HEALTH_URL
-from .config import CumulusConfig, CumulusState, PersistentMutableSet
+from .config import BoraConfig, BoraState, PersistentMutableSet
 from .config.user import UserConfig
 from .constants import CONNECTED, CONNECTING, DISCONNECTED, IDLE, PAUSED, SYNCING
 from .exceptions import (
@@ -28,13 +28,13 @@ from .exceptions import (
     ConnectionError,
     CursorResetError,
     InotifyError,
-    CumulusApiError,
+    BoraApiError,
     NoSyncDirError,
     ServerError,
 )
 from .fsevents import Observer, ObserverType
 from .logging import scoped_logger
-from .notify import CumulusDesktopNotifier
+from .notify import BoraDesktopNotifier
 from .sync import SyncEngine
 from .utils.integration import check_connection, get_inotify_limits
 
@@ -118,12 +118,12 @@ class SyncManager:
     """Queue of remote paths which have been newly included in syncing."""
 
     def __init__(
-        self, sync: SyncEngine, desktop_notifier: CumulusDesktopNotifier | None = None
+        self, sync: SyncEngine, desktop_notifier: BoraDesktopNotifier | None = None
     ) -> None:
         self.sync = sync
         self.desktop_notifier = desktop_notifier
-        self._conf = CumulusConfig(self.sync.config_name)
-        self._state = CumulusState(self.sync.config_name)
+        self._conf = BoraConfig(self.sync.config_name)
+        self._state = BoraState(self.sync.config_name)
         self._logger = scoped_logger(__name__, self.sync.config_name)
 
         self._lock = RLock()
@@ -142,7 +142,7 @@ class SyncManager:
         self._connection_helper_running = True
         self.connection_helper = Thread(
             target=self.connection_monitor,
-            name="cumulus-connection-helper",
+            name="bora-connection-helper",
             daemon=True,
         )
         self.connection_helper.start()
@@ -199,7 +199,7 @@ class SyncManager:
                 self.startup_completed,
                 self.autostart,
             ),
-            name="cumulus-sync-startup",
+            name="bora-sync-startup",
         )
 
         if self._conf.get("sync", "download"):
@@ -211,7 +211,7 @@ class SyncManager:
                     self.startup_completed,
                     self.autostart,
                 ),
-                name="cumulus-download",
+                name="bora-download",
             )
             self.download_thread_added_folder = Thread(
                 target=self.download_worker_added_item,
@@ -221,7 +221,7 @@ class SyncManager:
                     self.startup_completed,
                     self.autostart,
                 ),
-                name="cumulus-folder-download",
+                name="bora-folder-download",
             )
 
         enable_upload = self._conf.get("sync", "upload")
@@ -236,13 +236,13 @@ class SyncManager:
                     self.startup_completed,
                     self.autostart,
                 ),
-                name="cumulus-upload",
+                name="bora-upload",
             )
 
             if not self.local_observer_thread:
                 try:
                     self.local_observer_thread = self._create_observer()
-                except CumulusApiError as exc:
+                except BoraApiError as exc:
                     self._logger.error(exc.title, exc_info=True)
                     if self.desktop_notifier:
                         self.desktop_notifier.notify(
@@ -266,14 +266,14 @@ class SyncManager:
 
     def _create_observer(self) -> ObserverType:
         local_observer_thread = Observer(timeout=40)
-        local_observer_thread.name = "cumulus-fsobserver"
+        local_observer_thread.name = "bora-fsobserver"
         local_observer_thread.schedule(
             self.sync.fs_events, self.sync.sync_path, recursive=True
         )
 
         for emitter in local_observer_thread.emitters:
             # there should be only a single emitter thread
-            emitter.name = "cumulus-fsemitter"
+            emitter.name = "bora-fsemitter"
 
         try:
             local_observer_thread.start()
@@ -321,7 +321,7 @@ class SyncManager:
                     "or restart Maestral to set up a new folder.",
                 )
             else:
-                raise CumulusApiError(
+                raise BoraApiError(
                     "Could not start watch of local directory",
                     exc.strerror or "Unknown error",
                 )
@@ -350,7 +350,7 @@ class SyncManager:
     def reset_sync_state(self) -> None:
         """Resets all saved sync state. Settings are not affected."""
         if self.running.is_set():
-            raise CumulusApiError(
+            raise BoraApiError(
                 "Cannot reset sync state while syncing", "Please try again when idle."
             )
         self.sync.reset_sync_state()
@@ -582,7 +582,7 @@ class SyncManager:
                 if self.desktop_notifier:
                     self.desktop_notifier.notify(
                         "Sync stopped",
-                        "Cumulus could not re-index Google Drive after repeated "
+                        "Bora could not re-index Google Drive after repeated "
                         "attempts. Please restart syncing.",
                         level=notify.ERROR,
                     )
@@ -594,7 +594,7 @@ class SyncManager:
             if self.desktop_notifier:
                 self.desktop_notifier.notify(
                     "Rebuilding index",
-                    "Cumulus was offline too long and will re-index "
+                    "Bora was offline too long and will re-index "
                     "Google Drive. Sync resumes automatically.",
                     level=notify.INFO,
                 )

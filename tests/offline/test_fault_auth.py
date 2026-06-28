@@ -24,7 +24,7 @@ Propagation path for a 401 HttpError during the change-feed poll
   sync.py:download_sync_cycle (for changes, cursor in changes_iter:)
     ↳ TokenRevokedError propagates out of the for-loop
     ↳ NOT caught anywhere in download_sync_cycle or apply_remote_changes —
-      TokenRevokedError is AuthError(CumulusApiError), NOT SyncError
+      TokenRevokedError is AuthError(BoraApiError), NOT SyncError
     ↳ _create_local_entry only catches SyncError (per-item) — unreachable
       for a 401 on the feed-fetch level (which happens BEFORE apply)
   → download_sync_cycle raises TokenRevokedError (FATAL-CLEAN)
@@ -191,7 +191,7 @@ def test_scenario_a1_unit_401_raises_token_revoked_error():
 
     Confirmed by reconnaissance: 401 is NOT in RETRYABLE_HTTP_STATUS, so
     _retry_transient re-raises immediately (no retries); the per-status
-    mapping in http_error_to_cumulus maps 401 → TokenRevokedError.
+    mapping in http_error_to_bora maps 401 → TokenRevokedError.
     """
     fake = FakeDrive()
     cache = PathIDCache(Database(sqlite3.connect(":memory:")))
@@ -212,7 +212,7 @@ def test_scenario_a1_unit_401_raises_token_revoked_error():
     with pytest.raises(TokenRevokedError) as excinfo:
         client.list_remote_changes(start)
 
-    # Verify it is the specific TokenRevokedError (not just AuthError/CumulusApiError).
+    # Verify it is the specific TokenRevokedError (not just AuthError/BoraApiError).
     assert isinstance(excinfo.value, TokenRevokedError)
     assert isinstance(excinfo.value, AuthError)
     # The message references re-linking.
@@ -385,8 +385,8 @@ def test_scenario_a4_teeth_401_not_swallowed_as_sync_error(sync_engine: SyncEngi
     drop the auth error and corrupt state.
 
     Proof by type check:
-    - TokenRevokedError is AuthError(CumulusApiError) — NOT SyncError.
-    - _create_local_entry catches `except SyncError`, not `except CumulusApiError`.
+    - TokenRevokedError is AuthError(BoraApiError) — NOT SyncError.
+    - _create_local_entry catches `except SyncError`, not `except BoraApiError`.
     - Therefore TokenRevokedError propagates fatally.
 
     The test arm-and-assert structure confirms:

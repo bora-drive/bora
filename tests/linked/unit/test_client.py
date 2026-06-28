@@ -1,6 +1,6 @@
 """Linked client tests — ported to Google Drive (Stage 7a, Task D4).
 
-Tests run against a real Google account when CUMULUS_TEST_REFRESH_TOKEN is
+Tests run against a real Google account when BORA_TEST_REFRESH_TOKEN is
 set; they skip cleanly when the variable is absent.
 
 Dropbox-only features dropped:

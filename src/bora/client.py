@@ -1,4 +1,4 @@
-"""Google Drive API client for the Cumulus sync engine.
+"""Google Drive API client for the Bora sync engine.
 
 Implemented (Stage 3): authentication/linking, account info, file/folder
 metadata, directory listing (non-recursive and recursive bootstrap),
@@ -43,7 +43,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from . import changes, oauth
 from .changes import FILE_FIELDS, parse_drive_time, to_file_metadata, to_folder_metadata
-from .config import CumulusState
+from .config import BoraState
 from .native_docs import is_google_folder, is_google_native
 from .path_cache import PathIDCache
 from .path_codec import compose_path, fold_path
@@ -74,7 +74,7 @@ from .errorhandling import (
 )
 from .exceptions import (
     CancelledError,
-    CumulusApiError,
+    BoraApiError,
     CursorResetError,
     DataCorruptionError,
     NotFoundError,
@@ -170,7 +170,7 @@ class GoogleDriveClient:
 
     All Google API exceptions, :exc:`OSError` from the local file system, and
     connection errors will be converted to
-    :exc:`bora.exceptions.CumulusApiError`.
+    :exc:`bora.exceptions.BoraApiError`.
 
     :param config_name: Name of the config to use.
     :param cred_storage: Credential storage instance.
@@ -193,7 +193,7 @@ class GoogleDriveClient:
         self.config_name = config_name
         self._cred_storage = cred_storage
         self._path_cache = path_cache
-        self._state = CumulusState(config_name)
+        self._state = BoraState(config_name)
         self._timeout = timeout
         self._cached_account_info: FullAccount | None = None
         self._cached_space_usage: PersonalSpaceUsage | None = None
@@ -375,7 +375,7 @@ class GoogleDriveClient:
         if not self.linked:
             raise NotLinkedError(
                 "Not linked",
-                "Run 'cumulus auth link' to authorize Cumulus.",
+                "Run 'bora auth link' to authorize Bora.",
             )
         return build(
             "drive", "v3",
@@ -513,7 +513,7 @@ class GoogleDriveClient:
             if not self.linked:
                 raise NotLinkedError(
                     "Not linked",
-                    "Run 'cumulus auth link' to authorize Cumulus.",
+                    "Run 'bora auth link' to authorize Bora.",
                 )
             self._cached_account_info = self._fetch_account_info_for_creds(
                 self._credentials
@@ -597,7 +597,7 @@ class GoogleDriveClient:
         if file_id is None:
             raise NotFoundError(
                 "Not found",
-                f"No item at '{remote_path}' is known to Cumulus.",
+                f"No item at '{remote_path}' is known to Bora.",
                 remote_path=remote_path,
             )
         # Recover the true cased path from the cache: `remote_path` is only a
@@ -637,7 +637,7 @@ class GoogleDriveClient:
         if file_id is None:
             raise NotFoundError(
                 "Not found",
-                f"No item at '{remote_path}' is known to Cumulus.",
+                f"No item at '{remote_path}' is known to Bora.",
                 remote_path=remote_path,
             )
         raw: list[dict[str, Any]] = []
@@ -715,7 +715,7 @@ class GoogleDriveClient:
     ) -> FileMetadata:
         """Downloads a file from Google Drive to *local_path*.
 
-        Downloads to a ``.cumulus-part`` sidecar, verifies the MD5
+        Downloads to a ``.bora-part`` sidecar, verifies the MD5
         against Drive's ``md5Checksum``, then atomically renames into
         place. *sync_event*, if given, has ``.completed`` updated after
         each chunk.
@@ -735,10 +735,10 @@ class GoogleDriveClient:
         if file_id is None:
             raise NotFoundError(
                 "Not found",
-                f"No item at '{remote_path}' is known to Cumulus.",
+                f"No item at '{remote_path}' is known to Bora.",
                 remote_path=remote_path,
             )
-        tmp_path = local_path + ".cumulus-part"
+        tmp_path = local_path + ".bora-part"
         with convert_api_errors(remote_path=remote_path, local_path=local_path):
             meta_file = self._retry_transient(
                 lambda: self._get_service()
@@ -781,7 +781,7 @@ class GoogleDriveClient:
                         raise DataCorruptionError(
                             "Download failed",
                             "The downloaded file is corrupt (MD5 mismatch). "
-                            "Cumulus will retry.",
+                            "Bora will retry.",
                             remote_path=remote_path,
                             local_path=local_path,
                         )
@@ -839,7 +839,7 @@ class GoogleDriveClient:
 
     def remove_batch(
         self, entries: Sequence[tuple[str, str | None]], batch_size: int = 100
-    ) -> list[FileMetadata | FolderMetadata | CumulusApiError]:
+    ) -> list[FileMetadata | FolderMetadata | BoraApiError]:
         """Deletes multiple items in a batch.
 
         .. note:: Implementation should use Google Drive's batch endpoint
@@ -881,7 +881,7 @@ class GoogleDriveClient:
 
     def make_dir_batch(
         self, remote_paths: list[str]
-    ) -> list[FolderMetadata | CumulusApiError]:
+    ) -> list[FolderMetadata | BoraApiError]:
         """Creates multiple folders in a batch.
 
         .. note:: Implementation should use Google Drive's batch endpoint
@@ -996,7 +996,7 @@ class GoogleDriveClient:
         if parent_id is None:
             raise NotFoundError(
                 "Not found",
-                f"No folder at '{remote_path}' is known to Cumulus.",
+                f"No folder at '{remote_path}' is known to Bora.",
                 remote_path=remote_path,
             )
         query = f"'{parent_id}' in parents"
@@ -1159,7 +1159,7 @@ class GoogleDriveClient:
         if root_folder_id is None:
             raise NotFoundError(
                 "Not found",
-                f"No folder at '{remote_path}' is known to Cumulus.",
+                f"No folder at '{remote_path}' is known to Bora.",
                 remote_path=remote_path,
             )
         queue: collections.deque[tuple[str, str]] = collections.deque(
@@ -1252,7 +1252,7 @@ class GoogleDriveClient:
                     raise CursorResetError(
                         "Sync cursor reset",
                         "The saved Google Drive change token is no longer "
-                        "valid (Cumulus was offline too long). The index "
+                        "valid (Bora was offline too long). The index "
                         "will be rebuilt.",
                     ) from exc
                 raise
@@ -1274,7 +1274,7 @@ class GoogleDriveClient:
         Delegates to :func:`bora.changes.iter_remote_changes`, which
         classifies each change, resolves paths, mutates the path cache,
         and strips Google-native documents. HTTP errors raised mid-stream
-        are converted to Cumulus exceptions.
+        are converted to Bora exceptions.
 
         *resolve_deleted_path* is an optional fallback that maps a fileId to
         its cased path when the path cache has already evicted it (the engine

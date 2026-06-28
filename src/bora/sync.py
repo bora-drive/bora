@@ -62,7 +62,7 @@ from watchdog.events import (
 # local imports
 from . import notify
 from .client import GoogleDriveClient
-from .config import CumulusConfig, CumulusState
+from .config import BoraConfig, BoraState
 from .constants import (
     EXCLUDED_DIR_NAMES,
     EXCLUDED_FILE_NAMES,
@@ -81,7 +81,7 @@ from .core import (
 from .database.core import Database
 from .database.orm import Manager
 from .database.query import AllQuery, AndQuery, MatchQuery, PathTreeQuery, Query
-from .errorhandling import convert_api_errors, os_to_cumulus_error
+from .errorhandling import convert_api_errors, os_to_bora_error
 from .exceptions import (
     CacheDirError,
     CancelledError,
@@ -268,7 +268,7 @@ class FSEventHandler(FileSystemEventHandler):
         :attr:`ignore_timeout` sec after leaving then context and then discarded. This
         accounts for possible delays in the emission of local file system events.
 
-        This context manager is used to filter out file system events caused by cumulus
+        This context manager is used to filter out file system events caused by bora
         itself, for instance during a download or when moving a conflict.
 
         :Example:
@@ -375,7 +375,7 @@ class FSEventHandler(FileSystemEventHandler):
             return
 
         # Ignore moves onto itself, they may be erroneously emitted on older versions of
-        # macOS. See https://github.com/samschott/cumulus/issues/671.
+        # macOS. See https://github.com/samschott/bora/issues/671.
         if is_moved(event) and event.src_path == event.dest_path:
             return
 
@@ -541,15 +541,15 @@ class SyncEngine:
     def __init__(
         self,
         client: GoogleDriveClient,
-        desktop_notifier: notify.CumulusDesktopNotifier | None = None,
+        desktop_notifier: notify.BoraDesktopNotifier | None = None,
     ) -> None:
         self.client = client
         self.config_name = self.client.config_name
         self.fs_events = FSEventHandler()
         self._logger = scoped_logger(__name__, self.config_name)
 
-        self._conf = CumulusConfig(self.config_name)
-        self._state = CumulusState(self.config_name)
+        self._conf = BoraConfig(self.config_name)
+        self._state = BoraState(self.config_name)
         self.reload_cached_config()
 
         self.desktop_notifier = desktop_notifier
@@ -570,7 +570,7 @@ class SyncEngine:
         self.activity = ActivityTree()
 
         # Initialize SQLite database.
-        self._db_path = get_data_path("cumulus", f"{self.config_name}.db")
+        self._db_path = get_data_path("bora", f"{self.config_name}.db")
 
         if not exists(self._db_path):
             # Reset the sync state if DB is missing.
@@ -679,7 +679,7 @@ class SyncEngine:
     @property
     def file_cache_path(self) -> str:
         """Path to cache folder for temporary files (read only). The cache folder
-        '.cumulus.cache' is located inside the local sync folder to prevent file
+        '.bora.cache' is located inside the local sync folder to prevent file
         transfer between different partitions or drives during sync."""
         return self._file_cache_path
 
@@ -1152,7 +1152,7 @@ class SyncEngine:
         except OSError as err:
             if err.errno == errno.ENAMETOOLONG:
                 return None
-            raise os_to_cumulus_error(err)
+            raise os_to_bora_error(err)
 
         if S_ISDIR(stat.st_mode):
             return "folder"
@@ -1703,7 +1703,7 @@ class SyncEngine:
     def _database_access(self, raise_error: bool = True) -> Iterator[None]:
         """
         A context manager to synchronises access to the SQLite database. Catches
-        exceptions raised by sqlite3 and converts them to a CumulusApiError if we know
+        exceptions raised by sqlite3 and converts them to a BoraApiError if we know
         how to handle them.
 
         :param raise_error: Whether errors should be raised or logged.
@@ -1760,7 +1760,7 @@ class SyncEngine:
         res = do_parallel(
             self._sync_event_from_fs_event,
             fs_events,
-            thread_name_prefix="cumulus-local-indexer",
+            thread_name_prefix="bora-local-indexer",
         )
         return list(res)
 
@@ -1790,7 +1790,7 @@ class SyncEngine:
                 if err.filename == self.sync_path:
                     self.ensure_sync_folder_present()
 
-                raise os_to_cumulus_error(err)
+                raise os_to_bora_error(err)
 
             events = self._clean_local_events(events)
 
@@ -2041,7 +2041,7 @@ class SyncEngine:
             self._create_remote_entry,
             deleted,
             on_progress=lambda x, y: self._logger.info(f"Deleting {x}/{y}"),
-            thread_name_prefix="cumulus-upload-pool",
+            thread_name_prefix="bora-upload-pool",
         )
         results.extend(res)
 
@@ -2059,7 +2059,7 @@ class SyncEngine:
                 self._create_remote_entry,
                 other[level],
                 on_progress=lambda x, y: self._logger.info(f"Syncing ↑ {x}/{y}"),
-                thread_name_prefix="cumulus-upload-pool",
+                thread_name_prefix="bora-upload-pool",
             )
             results.extend(res)
 
@@ -2460,7 +2460,7 @@ class SyncEngine:
 
         :param event: SyncEvent for local moved event.
         :returns: Metadata for created remote item at destination.
-        :raises CumulusApiError: For any issues when syncing the item.
+        :raises BoraApiError: For any issues when syncing the item.
         """
         check_change_type(event, {ChangeType.Moved})
         check_encoding(event.local_path)
@@ -2551,7 +2551,7 @@ class SyncEngine:
 
         :param event: SyncEvent corresponding to local created event.
         :returns: Metadata for created item or None if no remote item is created.
-        :raises CumulusApiError: For any issues when syncing the item.
+        :raises BoraApiError: For any issues when syncing the item.
         :raises ValueError: If the ChangeType is not Added or Modified.
         """
         check_change_type(event, {ChangeType.Added, ChangeType.Modified})
@@ -2641,7 +2641,7 @@ class SyncEngine:
 
         :param event: SyncEvent corresponding to local created event.
         :returns: Metadata for created item or None if no remote item is created.
-        :raises CumulusApiError: For any issues when syncing the item.
+        :raises BoraApiError: For any issues when syncing the item.
         """
         check_change_type(event, {ChangeType.Added})
         check_encoding(event.local_path)
@@ -2671,7 +2671,7 @@ class SyncEngine:
                     )
 
                     if err:
-                        raise os_to_cumulus_error(err)
+                        raise os_to_bora_error(err)
 
                     return SyncStatus.Skipped
             else:
@@ -2708,7 +2708,7 @@ class SyncEngine:
 
         :param event: SyncEvent for local deletion.
         :returns: Metadata for deleted item or None if no remote item is deleted.
-        :raises CumulusApiError: For any issues when syncing the item.
+        :raises BoraApiError: For any issues when syncing the item.
         """
         check_change_type(event, {ChangeType.Removed})
         try:
@@ -3215,7 +3215,7 @@ class SyncEngine:
                 self._create_local_entry,
                 deleted[level],
                 on_progress=lambda x, y: self._logger.info(f"Deleting {x}/{y}"),
-                thread_name_prefix="cumulus-download-pool",
+                thread_name_prefix="bora-download-pool",
             )
             results.extend(res)
 
@@ -3228,7 +3228,7 @@ class SyncEngine:
                 self._create_local_entry,
                 folders[level],
                 on_progress=lambda x, y: self._logger.info(f"Creating folder {x}/{y}"),
-                thread_name_prefix="cumulus-download-pool",
+                thread_name_prefix="bora-download-pool",
             )
             results.extend(res)
 
@@ -3237,7 +3237,7 @@ class SyncEngine:
             self._create_local_entry,
             files,
             on_progress=lambda x, y: self._logger.info(f"Syncing ↓ {x}/{y}"),
-            thread_name_prefix="cumulus-download-pool",
+            thread_name_prefix="bora-download-pool",
         )
         results.extend(res)
 
@@ -3543,7 +3543,7 @@ class SyncEngine:
         except (FileNotFoundError, NotADirectoryError):
             return -1.0
         except OSError as exc:
-            raise os_to_cumulus_error(exc, local_path=local_path)
+            raise os_to_bora_error(exc, local_path=local_path)
 
     def _clean_remote_changes(self, changes: ListFolderResult) -> ListFolderResult:
         """
@@ -3612,7 +3612,7 @@ class SyncEngine:
     def _create_local_entry(self, event: SyncEvent) -> SyncEvent:
         """
         Applies a file / folder change from the remote servers to the local sync folder.
-        Any :exc:`bora.exception.CumulusApiError` will be caught and logged as
+        Any :exc:`bora.exception.BoraApiError` will be caught and logged as
         appropriate. Entries in the local index are created after successful completion.
 
         :param event: remote metadata.
@@ -3871,7 +3871,7 @@ class SyncEngine:
             status = SyncStatus.Skipped
         except OSError as err:
             self.ensure_sync_folder_present()
-            raise os_to_cumulus_error(err, remote_path=event.remote_path)
+            raise os_to_bora_error(err, remote_path=event.remote_path)
 
         self.update_index_from_sync_event(event)
 
@@ -3915,7 +3915,7 @@ class SyncEngine:
             self._logger.debug('Deletion failed: "%s" not found', event.remote_path)
             return SyncStatus.Skipped
         else:
-            raise os_to_cumulus_error(exc, remote_path=event.remote_path)
+            raise os_to_bora_error(exc, remote_path=event.remote_path)
 
     def _apply_remote_move(self, event: SyncEvent) -> bool:
         """

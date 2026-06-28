@@ -47,11 +47,11 @@ def test_token_errors_inherit_from_auth_error():
     assert issubclass(TokenRevokedError, AuthError)
 
 
-def test_cumulus_api_error_uses_remote_path():
-    """CumulusApiError should accept remote_path instead of dbx_path."""
-    from bora.exceptions import CumulusApiError
+def test_bora_api_error_uses_remote_path():
+    """BoraApiError should accept remote_path instead of dbx_path."""
+    from bora.exceptions import BoraApiError
 
-    err = CumulusApiError(
+    err = BoraApiError(
         "title",
         "msg",
         remote_path="/test",
@@ -65,11 +65,11 @@ def test_cumulus_api_error_uses_remote_path():
     assert err.local_path_from == "/local/old"
 
 
-def test_cumulus_api_error_dbx_path_compat():
+def test_bora_api_error_dbx_path_compat():
     """Old dbx_path kwargs should still work as aliases."""
-    from bora.exceptions import CumulusApiError
+    from bora.exceptions import BoraApiError
 
-    err = CumulusApiError("title", "msg", dbx_path="/compat", dbx_path_from="/old")
+    err = BoraApiError("title", "msg", dbx_path="/compat", dbx_path_from="/old")
     assert err.remote_path == "/compat"
     assert err.remote_path_from == "/old"
     # Old attribute names should also work
@@ -209,13 +209,13 @@ def test_bora_cli_entry_point():
     assert "bora.cli" in scripts["bora"]
 
 
-def test_cumulus_constants():
-    """APP_NAME should be Cumulus."""
+def test_bora_constants():
+    """APP_NAME should be Bora."""
     from bora.constants import APP_NAME
-    assert APP_NAME == "Cumulus"
+    assert APP_NAME == "Bora"
 
 
-def test_cumulus_config_dir():
-    """Config directory should use 'cumulus' not 'maestral'."""
+def test_bora_config_dir():
+    """Config directory should use 'bora' not 'maestral'."""
     from bora.config.main import CONFIG_DIR_NAME
-    assert CONFIG_DIR_NAME == "cumulus"
+    assert CONFIG_DIR_NAME == "bora"

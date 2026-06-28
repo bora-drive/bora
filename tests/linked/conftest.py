@@ -13,12 +13,12 @@ from bora.path_cache import PathIDCache
 
 from .lock import DriveTestLock
 
-TEST_CONFIG = "cumulus-test-config"
-LOCK_NAME = ".cumulus-test.lock"
+TEST_CONFIG = "bora-test-config"
+LOCK_NAME = ".bora-test.lock"
 
-_HAS_CREDS = bool(os.environ.get("CUMULUS_TEST_REFRESH_TOKEN"))
+_HAS_CREDS = bool(os.environ.get("BORA_TEST_REFRESH_TOKEN"))
 requires_account = pytest.mark.skipif(
-    not _HAS_CREDS, reason="set CUMULUS_TEST_REFRESH_TOKEN to run linked tests"
+    not _HAS_CREDS, reason="set BORA_TEST_REFRESH_TOKEN to run linked tests"
 )
 
 
@@ -48,10 +48,10 @@ def _make_client(config_name: str) -> tuple[GoogleDriveClient, CredentialStorage
 @pytest.fixture(scope="session", autouse=True)
 def test_lock():
     if not _HAS_CREDS:
-        pytest.skip("no CUMULUS_TEST_REFRESH_TOKEN")
+        pytest.skip("no BORA_TEST_REFRESH_TOKEN")
     c, cred_storage = _make_client(TEST_CONFIG)
-    refresh_token = os.environ["CUMULUS_TEST_REFRESH_TOKEN"]
-    access_token = os.environ.get("CUMULUS_TEST_ACCESS_TOKEN")
+    refresh_token = os.environ["BORA_TEST_REFRESH_TOKEN"]
+    access_token = os.environ.get("BORA_TEST_ACCESS_TOKEN")
     res = c.link(refresh_token=refresh_token, access_token=access_token)
     if res > 0:
         raise AuthError(f"linking test account failed (code {res})")

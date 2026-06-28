@@ -38,10 +38,10 @@ PASTE_REDIRECT_URI = "http://localhost:8080"
 
 
 def load_client_config() -> dict[str, Any]:
-    """Resolve client_secret.json from CUMULUS_CLIENT_SECRET_PATH (if set)
+    """Resolve client_secret.json from BORA_CLIENT_SECRET_PATH (if set)
     or the bundled package resource. Raises AuthError on missing/malformed.
     """
-    override = os.environ.get("CUMULUS_CLIENT_SECRET_PATH")
+    override = os.environ.get("BORA_CLIENT_SECRET_PATH")
     try:
         if override:
             with open(override, encoding="utf-8") as f:
@@ -53,7 +53,7 @@ def load_client_config() -> dict[str, Any]:
         raise AuthError(
             "Client credentials not found",
             f"Expected client_secret.json at: {override or '<bundled resource>'}. "
-            "This is a Cumulus packaging defect — please file a bug.",
+            "This is a Bora packaging defect — please file a bug.",
         ) from exc
     except json.JSONDecodeError as exc:
         raise AuthError(
@@ -161,7 +161,7 @@ def run_local_flow(open_browser: bool = True, port: int = 8080) -> Credentials:
     predictable for 'ssh -L 8080:localhost:8080 <host>'.
 
     Raises AuthError if the port is already bound; the user can free the
-    port or fall back to `cumulus auth link --no-local-server`.
+    port or fall back to `bora auth link --no-local-server`.
     """
     flow = InstalledAppFlow.from_client_config(
         load_client_config(),
@@ -179,7 +179,7 @@ def run_local_flow(open_browser: bool = True, port: int = 8080) -> Credentials:
             f"Port {port} in use",
             f"Could not bind localhost:{port} for the OAuth callback ({exc}). "
             "Either free the port and retry, or run "
-            "'cumulus auth link --no-local-server' to use the paste-the-URL flow.",
+            "'bora auth link --no-local-server' to use the paste-the-URL flow.",
         ) from exc
 
 

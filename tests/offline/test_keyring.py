@@ -6,7 +6,7 @@ from keyring.backends.SecretService import Keyring as SecretServiceKeyring
 from keyring.errors import KeyringLocked
 from keyrings.alt.file import PlaintextKeyring
 
-from bora.config import CumulusConfig, remove_configuration
+from bora.config import BoraConfig, remove_configuration
 from bora.exceptions import KeyringAccessError
 from bora.keyring import CredentialStorage
 
@@ -23,7 +23,7 @@ def cred_storage():
 
 def test_unlinked_state(cred_storage: CredentialStorage) -> None:
     """Test unlinked state"""
-    conf = CumulusConfig("test-config")
+    conf = BoraConfig("test-config")
 
     assert not cred_storage.loaded
     assert cred_storage.account_id is None
@@ -36,7 +36,7 @@ def test_unlinked_state(cred_storage: CredentialStorage) -> None:
 
 def test_save_creds(cred_storage: CredentialStorage) -> None:
     """Test linked state"""
-    conf = CumulusConfig("test-config")
+    conf = BoraConfig("test-config")
 
     cred_storage.save_creds("account_id", "token")
 
@@ -65,7 +65,7 @@ def test_load_creds(cred_storage: CredentialStorage) -> None:
 
 def test_delete_creds(cred_storage: CredentialStorage) -> None:
     """Test resetting state on `delete_creds`"""
-    conf = CumulusConfig("test-config")
+    conf = BoraConfig("test-config")
 
     cred_storage.save_creds("account_id", "token")
     cred_storage.delete_creds()
@@ -80,7 +80,7 @@ def test_delete_creds(cred_storage: CredentialStorage) -> None:
 
 
 def test_plaintext_fallback(cred_storage: CredentialStorage) -> None:
-    conf = CumulusConfig("test-config")
+    conf = BoraConfig("test-config")
 
     cred_storage.set_keyring_backend(SecretServiceKeyring())
 

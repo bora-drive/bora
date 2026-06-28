@@ -60,16 +60,16 @@ __all__ = [
     "Stop",
     "Start",
     "Lock",
-    "cumulus_lock",
-    "get_cumulus_pid",
+    "bora_lock",
+    "get_bora_pid",
     "sockpath_for_config",
     "lockpath_for_config",
     "wait_for_startup",
     "is_running",
     "freeze_support",
-    "start_cumulus_daemon",
-    "start_cumulus_daemon_process",
-    "stop_cumulus_daemon_process",
+    "start_bora_daemon",
+    "start_bora_daemon_process",
+    "stop_bora_daemon_process",
     "MaestralProxy",
     "CommunicationError",
 ]
@@ -97,11 +97,11 @@ def freeze_support() -> None:
     parsed_args, _ = parser.parse_known_args()
 
     if parsed_args.c:
-        template = r'.*start_cumulus_daemon\("(?P<config_name>\S+)"\).*'
+        template = r'.*start_bora_daemon\("(?P<config_name>\S+)"\).*'
         match = re.match(template, parsed_args.c)
 
         if match:
-            start_cumulus_daemon(match["config_name"])
+            start_bora_daemon(match["config_name"])
             sys.exit()
 
 
@@ -277,7 +277,7 @@ def _send_signal(pid: int, sig: int) -> None:
         pass
 
 
-def cumulus_lock(config_name: str) -> Lock:
+def bora_lock(config_name: str) -> Lock:
     """
     Returns an inter-process and inter-thread lock for Maestral. This is a wrapper
     around :class:`Lock` which fills out the appropriate lockfile path for the given
@@ -287,7 +287,7 @@ def cumulus_lock(config_name: str) -> Lock:
     :returns: Lock instance for the config name
     """
     name = f"{config_name}.lock"
-    path = get_runtime_path("cumulus")
+    path = get_runtime_path("bora")
     return Lock.singleton(os.path.join(path, name))
 
 
@@ -299,7 +299,7 @@ def sockpath_for_config(config_name: str) -> str:
     :param config_name: The name of the Maestral configuration.
     :returns: Socket path.
     """
-    return get_runtime_path("cumulus", f"{config_name}.sock")
+    return get_runtime_path("bora", f"{config_name}.sock")
 
 
 def lockpath_for_config(config_name: str) -> str:
@@ -310,17 +310,17 @@ def lockpath_for_config(config_name: str) -> str:
     :param config_name: The name of the Maestral configuration.
     :returns: Path of lock file to use.
     """
-    return get_runtime_path("cumulus", f"{config_name}.lock")
+    return get_runtime_path("bora", f"{config_name}.lock")
 
 
-def get_cumulus_pid(config_name: str) -> int | None:
+def get_bora_pid(config_name: str) -> int | None:
     """
     Returns the PID of the daemon if it is running, ``None`` otherwise.
 
     :param config_name: The name of the Maestral configuration.
     :returns: The daemon's PID.
     """
-    return cumulus_lock(config_name).locking_pid()
+    return bora_lock(config_name).locking_pid()
 
 
 def is_running(config_name: str) -> bool:
@@ -330,12 +330,12 @@ def is_running(config_name: str) -> bool:
     :param config_name: The name of the Maestral configuration.
     :returns: Whether the daemon is running.
     """
-    return cumulus_lock(config_name).locked()
+    return bora_lock(config_name).locked()
 
 
 def wait_for_startup(config_name: str, timeout: float = 30) -> None:
     """
-    Waits until we can communicate with the cumulus daemon for ``config_name``.
+    Waits until we can communicate with the bora daemon for ``config_name``.
 
     :param config_name: Configuration to connect to.
     :param timeout: Timeout it seconds until we raise an error.
@@ -343,13 +343,13 @@ def wait_for_startup(config_name: str, timeout: float = 30) -> None:
         given timeout.
     """
     sock_name = sockpath_for_config(config_name)
-    cumulus_daemon = Proxy(URI.format(config_name, "./u:" + sock_name))
+    bora_daemon = Proxy(URI.format(config_name, "./u:" + sock_name))
 
     t0 = time.time()
 
     while True:
         try:
-            cumulus_daemon._pyroBind()
+            bora_daemon._pyroBind()
             return
         except Exception as exc:
             if time.time() - t0 > timeout:
@@ -357,14 +357,14 @@ def wait_for_startup(config_name: str, timeout: float = 30) -> None:
             else:
                 time.sleep(0.2)
         finally:
-            cumulus_daemon._pyroRelease()
+            bora_daemon._pyroRelease()
 
 
 # ==== main functions to manage daemon =================================================
 
 
-def start_cumulus_daemon(
-    config_name: str = "cumulus", log_to_stderr: bool = False
+def start_bora_daemon(
+    config_name: str = "bora", log_to_stderr: bool = False
 ) -> None:
     """
     Starts the Maestral daemon with event loop in the current thread.
@@ -402,7 +402,7 @@ def start_cumulus_daemon(
     dlogger.debug("Environment:\n%s", pformat(os.environ.copy()))
 
     # Acquire PID lock file.
-    lock = cumulus_lock(config_name)
+    lock = bora_lock(config_name)
 
     if lock.acquire():
         dlogger.debug("Acquired daemon lock: %r", lock.path)
@@ -459,11 +459,11 @@ def start_cumulus_daemon(
         except (FileNotFoundError, NotADirectoryError):
             pass
 
-        # Expose cumulus as Pyro server.
+        # Expose bora as Pyro server.
         dlogger.debug("Creating Pyro daemon")
 
         shutdown_future = loop.create_future()
-        cumulus_daemon = expose(Maestral)(
+        bora_daemon = expose(Maestral)(
             config_name,
             log_to_stderr=log_to_stderr,
             event_loop=loop,
@@ -473,7 +473,7 @@ def start_cumulus_daemon(
         dlogger.debug("Starting event loop")
 
         with Daemon(unixsocket=sockpath) as daemon:
-            daemon.register(cumulus_daemon, f"bora.{config_name}")
+            daemon.register(bora_daemon, f"bora.{config_name}")
 
             # Reduce Pyro's housekeeping frequency from 2 sec to 20 sec.
             # This avoids constantly waking the CPU when we are idle.
@@ -486,7 +486,7 @@ def start_cumulus_daemon(
             # Handle sigterm gracefully.
             signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
             for s in signals:
-                loop.add_signal_handler(s, cumulus_daemon.shutdown_daemon)
+                loop.add_signal_handler(s, bora_daemon.shutdown_daemon)
 
             loop.run_until_complete(shutdown_future)
 
@@ -505,11 +505,11 @@ def start_cumulus_daemon(
         lock.release()
 
 
-def start_cumulus_daemon_process(
-    config_name: str = "cumulus", timeout: float = 30
+def start_bora_daemon_process(
+    config_name: str = "bora", timeout: float = 30
 ) -> Start:
     """
-    Starts the Maestral daemon in a new process by calling :func:`start_cumulus_daemon`.
+    Starts the Maestral daemon in a new process by calling :func:`start_bora_daemon`.
 
     Startup is race free: there will never be more than one daemon running for the same
     config name. This function will use :obj:`sys.executable` as a Python executable to
@@ -531,7 +531,7 @@ def start_cumulus_daemon_process(
     # Protect against injection.
     cc = quote(config_name).strip("'")
 
-    script = f'import bora.daemon; bora.daemon.start_cumulus_daemon("{cc}")'
+    script = f'import bora.daemon; bora.daemon.start_bora_daemon("{cc}")'
 
     env = os.environ.copy()
     env.update(ENV)
@@ -562,10 +562,10 @@ def start_cumulus_daemon_process(
         return Start.Ok
 
 
-def stop_cumulus_daemon_process(
-    config_name: str = "cumulus", timeout: float = 10
+def stop_bora_daemon_process(
+    config_name: str = "bora", timeout: float = 10
 ) -> Stop:
-    """Stops a cumulus daemon process by finding its PID and shutting it down.
+    """Stops a bora daemon process by finding its PID and shutting it down.
 
     This function first tries to shut down Maestral gracefully. If this fails and we
     know its PID, it will send SIGTERM. If that fails as well, it will send SIGKILL to
@@ -580,7 +580,7 @@ def stop_cumulus_daemon_process(
     if not is_running(config_name):
         return Stop.NotRunning
 
-    pid = get_cumulus_pid(config_name)
+    pid = get_bora_pid(config_name)
 
     if not pid:
         # Cannot send SIGTERM to process if we don't know its pid.
@@ -634,7 +634,7 @@ class MaestralProxy(ContextManager["MaestralProxy"]):
 
     _m: Maestral | Proxy
 
-    def __init__(self, config_name: str = "cumulus", fallback: bool = False) -> None:
+    def __init__(self, config_name: str = "bora", fallback: bool = False) -> None:
         self._config_name = config_name
         self._is_fallback = False
 

@@ -67,7 +67,7 @@ def _md5(data: bytes) -> str:
 # instances. That makes them vulnerable to contamination: a run killed before
 # teardown (e.g. a slow test aborted mid-flight, or run as a background job that
 # is terminated) leaves both this dir AND a partial index/state DB under
-# get_data_path("cumulus", "<config>*"), which the next run inherits ->
+# get_data_path("bora", "<config>*"), which the next run inherits ->
 # FileExistsError at os.mkdir, or a wrong index_count from stale index rows.
 _CONFIG_NAME = "load-initial-sync-config"
 _LOCAL_DIR_NAME = "load_initial_sync_dir"
@@ -89,7 +89,7 @@ def _purge_load_state(local_dir: str) -> None:
 def sync_engine():
     local_dir = osp.join(get_home_dir(), _LOCAL_DIR_NAME)
     # Defensive pre-clean: purge any leftovers from a prior run that was killed
-    # before its teardown (see the module note above). get_data_path("cumulus")
+    # before its teardown (see the module note above). get_data_path("bora")
     # is created on demand, so remove_configuration's listdir is safe here.
     _purge_load_state(local_dir)
     os.mkdir(local_dir)
@@ -158,7 +158,7 @@ def build_tree(
         parent_path = path_by_index[fidx]
         name = f"file-{k}.txt"
         path = f"{parent_path}/{name}"
-        content = f"cumulus-load-test file {k} unique-payload".encode()
+        content = f"bora-load-test file {k} unique-payload".encode()
         fake._insert(name, parent_id, "text/plain", content)
         expected_files[path] = _md5(content)
 
