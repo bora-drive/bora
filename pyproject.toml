@@ -112,6 +112,10 @@ target-version = ["py310", "py311", "py312", "py313"]
 profile = "black"
 
 [tool.pytest.ini_options]
+# Benchmarks are disabled by default so a plain `pytest` run never executes
+# pytest-benchmark timing loops (which take many minutes). Opt back in
+# explicitly with `pytest --benchmark-enable` when you want to measure.
+addopts = "--benchmark-disable"
 markers = [
     "load: slow, large-scale load/correctness tests (deselect with -m 'not load')",
 ]
