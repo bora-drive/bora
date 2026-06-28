@@ -124,6 +124,34 @@ deviations doc or an inline checklist) that the rest of the stage executes
 against. The review may legitimately conclude "no new blockers" for some
 dimensions — that is a valid, recorded result.
 
+**W0 ran 2026-06-28; outcome recorded in §7.** It found two confirmed release
+blockers, both addressed by the new workstream **W0.5** below; everything else
+was clean or folded into W1/W5/W6 as minor items.
+
+### W0.5 — Release blockers from the W0 review
+
+1. **Cut the `sharelink` command group** (Blocker 1). `sharelink
+   create|revoke|list` call `_not_implemented()` (`client.py`), which raises
+   `NotImplementedError` — uncaught by `convert_api_errors` (`cli/common.py`),
+   so they crash with a raw traceback. The CLI options (`--password`,
+   `--expiry`, `LinkAudience`/`LinkAccessLevel`) are Dropbox shared-link
+   semantics that do not map to Drive. **Decision: remove the `sharelink`
+   group from the CLI for v0.1.0** and remove its now-unused client stub
+   methods (`create_shared_link`, `revoke_shared_link`, `list_shared_links`).
+   Audit `share_dir` (`client.py:885`, also a stub) for reachability from the
+   sync path; if unreachable, remove it too, otherwise leave it but ensure it
+   cannot crash a sync. Real Drive sharing is **deferred** (see §4.1). The
+   user-facing differences doc (W3) notes "shared links not yet supported."
+
+2. **Persist account info to state** (Blocker 2). `status`, `auth status`, and
+   `config-files` read `email`/`type`/`usage` from the `account` state section,
+   but the Drive port fetches account info via `about.get` into an in-memory
+   cache only and never writes those keys (upstream wrote them in
+   `get_account_info`/`get_space_usage`). Fix: when account info / space usage
+   is fetched, persist `email`, `type` (e.g. "personal"), and a formatted
+   `usage` string to the `account` state section so the CLI displays them.
+   Add/extend a test asserting the state keys are written after a fetch.
+
 ### W1 — Full rename to Bora
 
 - `git mv src/cumulus src/bora`; update every `from cumulus`/`import cumulus`
@@ -144,6 +172,9 @@ dimensions — that is a valid, recorded result.
   Bora to get a new access token").
 - Delete stale build artifacts `src/maestral.egg-info/` and
   `src/cumulus.egg-info/`.
+- W0 minor items: rename the leftover `dbid` var/label in `auth status`
+  (`cli/cli_core.py:461`) to a Drive-appropriate "Remote ID"; clean the
+  `models.py:110` docstring reference to the removed `dropbox.files.Metadata`.
 - Preserve everything in §2.1; do not touch §2.2.
 
 ### W2 — Alias removal
@@ -192,6 +223,8 @@ green after migration.
 
 ### W5 — Packaging polish
 
+- Add `oauthlib` to `dependencies` (imported directly at `client.py:37` but
+  currently only resolved transitively via google-auth-oauthlib — W0 finding).
 - `pip install .` in a clean venv; `bora --help` and a no-network CLI
   walkthrough (`bora --version`, `bora config-files`, etc. — read-only
   commands) succeed.
@@ -226,6 +259,14 @@ that must be run by a human / off-VM:
 - Any new sync-engine behavior or bug fixes beyond what W0 surfaces as a
   genuine release blocker.
 
+### 4.1 Deferred to a later version (post-v0.1.0 backlog)
+
+- **Drive sharing API** — re-introduce `sharelink` (create/revoke/list) built
+  on Drive's permissions API (`permissions().create` → `webViewLink`, revoke,
+  list), with CLI options modeled on Drive's sharing model rather than
+  Dropbox's link semantics, and live validation. Cut from v0.1.0 per the W0
+  decision (§7); the differences doc notes it is unsupported for now.
+
 ## 5. Definition of done
 
 1. Spec + plan committed under `docs/superpowers/`.
@@ -252,3 +293,29 @@ that must be run by a human / off-VM:
 | Sweeping `cumulus` in historical superpowers docs rewrites the record | Scoped out (§2.2); only shipped/forward-looking surfaces are renamed |
 | Sphinx autoapi silently emits empty docs if `autoapi_dirs` wrong | W3 builds docs and checks for broken references as an acceptance gate |
 | Alias removal misses an internal call-site | W2 migrates call-sites then runs the full suite; mypy strict catches unresolved names |
+
+## 7. W0 review outcome (recorded 2026-06-28)
+
+Ran against branch HEAD (`fb5834a`) via three audits (CLI completeness,
+import/dependency integrity) plus a direct CLI smoke. Offline baseline
+known-green at `afde90c` (648 passed). No account currently linked.
+
+**Verdict: 2 confirmed release blockers (both handled in W0.5); no leftover
+Dropbox SDK; all 25 modules import; all resources present; 22/24 CLI commands
+correctly wired to working Drive/local code paths.**
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | 🔴 blocker | `sharelink create/revoke/list` are stubs that raise uncaught `NotImplementedError`; Dropbox-only link semantics | **Cut** for v0.1.0 (W0.5-1); sharing deferred (§4.1) |
+| 2 | 🔴 blocker | account `email`/`type`/`usage` never persisted to state → `status`/`auth status`/`config-files` show `--` when linked | **Fix** — persist on fetch (W0.5-2) |
+| 3 | 🟡 minor | `oauthlib` imported directly but only transitively declared | Add to `dependencies` (W5) |
+| 4 | 🟡 minor | stale `src/maestral.egg-info/` lists a `dropbox` requirement | Delete (W1) |
+| 5 | 🟡 minor | `models.py:110` docstring references removed `dropbox.files.Metadata` | Clean up (W1) |
+| 6 | 🟡 minor | `auth status` `dbid` var/"Remote ID" label leftover | Rename in sweep (W1) |
+| 7 | 🟡 note | live `client_secret.json` committed (expected for installed-app flow) | Flag rotation in checklist (W6/D5) |
+
+Confirmed-OK (no action): revisions/`diff`/`restore` (real Drive revision
+download+reupload), `auth link`/`unlink`/`status` OAuth flow, `ls` with Drive
+`shared` field, selective-sync, `activity`/`history`/`filestatus`, daemon
+lifecycle, `config`/`log`/`notify`/`bandwidth-limit`/`autostart`/`move-dir`/
+`rebuild-index`/`completion`. No leftover Dropbox SDK import or call anywhere.
