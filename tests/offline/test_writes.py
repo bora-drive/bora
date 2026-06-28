@@ -1,4 +1,4 @@
-"""Offline unit tests for cumulus.writes._WriteHelper.
+"""Offline unit tests for bora.writes._WriteHelper.
 
 Two layers of coverage:
   1. Mock-service tests (original): inject a chained MagicMock at
@@ -18,20 +18,20 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from cumulus.changes import parse_drive_time
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.core import FileMetadata, WriteMode
-from cumulus.database.core import Database
-from cumulus.exceptions import (
+from bora.changes import parse_drive_time
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.core import FileMetadata, WriteMode
+from bora.database.core import Database
+from bora.exceptions import (
     BadInputError,
     CumulusApiError,
     DataChangedError,
     FolderConflictError,
     NotFoundError,
 )
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 
 _CONFIG = "test-config-writes-offline"
 
@@ -455,7 +455,7 @@ def test_upload_add_creates_new_file(client, cache):
         "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     result = client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
 
@@ -475,8 +475,8 @@ def test_upload_add_existing_without_autorename_raises_file_conflict(client, cac
               parent_id="ROOT", name="hello.txt", is_folder=False)
     local = _write_tempfile(b"x")
     client._get_service = Mock(return_value=fake_service())
-    from cumulus.core import WriteMode
-    from cumulus.exceptions import FileConflictError
+    from bora.core import WriteMode
+    from bora.exceptions import FileConflictError
 
     with pytest.raises(FileConflictError):
         client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
@@ -498,7 +498,7 @@ def test_upload_add_existing_with_autorename_picks_unique_name(client, cache):
         "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add, autorename=True)
 
@@ -525,7 +525,7 @@ def test_upload_update_existing(client, cache):
         "headRevisionId": "rev2",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Update)
 
@@ -539,7 +539,7 @@ def test_upload_update_existing(client, cache):
 def test_upload_update_missing_raises_not_found(client, cache):
     local = _write_tempfile(b"x")
     client._get_service = Mock(return_value=fake_service())
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     with pytest.raises(NotFoundError):
         client._writes.upload(local, "/nope.txt", write_mode=WriteMode.Update)
@@ -559,7 +559,7 @@ def test_upload_overwrite_creates_when_missing(client, cache):
         "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Overwrite)
 
@@ -582,7 +582,7 @@ def test_upload_overwrite_updates_when_existing(client, cache):
         "headRevisionId": "rev2",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Overwrite)
 
@@ -603,8 +603,8 @@ def test_upload_md5_mismatch_raises_data_corruption(client, cache):
         "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
-    from cumulus.exceptions import DataCorruptionError
+    from bora.core import WriteMode
+    from bora.exceptions import DataCorruptionError
 
     with pytest.raises(DataCorruptionError):
         client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
@@ -624,10 +624,10 @@ def test_upload_missing_md5_warns_and_succeeds(client, cache, caplog):
         "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
     import logging as _logging
 
-    with caplog.at_level(_logging.WARNING, logger="cumulus.writes"):
+    with caplog.at_level(_logging.WARNING, logger="bora.writes"):
         result = client._writes.upload(
             local, "/hello.txt", write_mode=WriteMode.Add
         )
@@ -645,7 +645,7 @@ def test_upload_update_rev_mismatch_raises_data_changed(client, cache):
         "headRevisionId": "rev-new",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     with pytest.raises(DataChangedError):
         client._writes.upload(
@@ -670,7 +670,7 @@ def test_upload_decodes_name_segment(client, cache):
         "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     client._writes.upload(local, "/a%2Fb", write_mode=WriteMode.Add)
 
@@ -704,10 +704,10 @@ def test_upload_simple_at_threshold(client, cache):
         "size": str(size), "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.core import WriteMode
+    from bora.core import WriteMode
 
     # Patch MediaFileUpload to capture the resumable flag.
-    with patch("cumulus.writes.MediaFileUpload") as mfu:
+    with patch("bora.writes.MediaFileUpload") as mfu:
         mfu.return_value = Mock()
         client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
     assert mfu.call_args.kwargs.get("resumable") is False
@@ -744,8 +744,8 @@ def test_upload_resumable_above_threshold(client, cache):
     svc.files.return_value.create.return_value = request
     client._get_service = Mock(return_value=svc)
 
-    from cumulus.core import WriteMode
-    with patch("cumulus.writes.MediaFileUpload") as mfu:
+    from bora.core import WriteMode
+    with patch("bora.writes.MediaFileUpload") as mfu:
         mfu.return_value = Mock()
         client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
 
@@ -770,10 +770,10 @@ def test_upload_resumable_storage_quota_exceeded(client, cache, make_http_error)
     # Disable retry sleep.
     client._retry_transient = lambda fn: fn()
 
-    from cumulus.core import WriteMode
-    from cumulus.exceptions import InsufficientSpaceError
+    from bora.core import WriteMode
+    from bora.exceptions import InsufficientSpaceError
 
-    with patch("cumulus.writes.MediaFileUpload") as mfu:
+    with patch("bora.writes.MediaFileUpload") as mfu:
         mfu.return_value = Mock()
         with pytest.raises(InsufficientSpaceError):
             client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
@@ -805,8 +805,8 @@ def test_upload_resumable_progress_reported(client, cache):
     client._get_service = Mock(return_value=svc)
 
     sync_event = Mock()
-    from cumulus.core import WriteMode
-    with patch("cumulus.writes.MediaFileUpload") as mfu:
+    from bora.core import WriteMode
+    with patch("bora.writes.MediaFileUpload") as mfu:
         mfu.return_value = Mock()
         client._writes.upload(
             local, "/big.bin",
@@ -832,10 +832,10 @@ def test_upload_resumable_shutdown_aborts(client, cache):
     # First .is_set() check: False (proceed). Second: True (abort).
     client._poll_event.is_set = Mock(side_effect=[False, True])
 
-    from cumulus.core import WriteMode
-    from cumulus.exceptions import CancelledError
+    from bora.core import WriteMode
+    from bora.exceptions import CancelledError
 
-    with patch("cumulus.writes.MediaFileUpload") as mfu:
+    with patch("bora.writes.MediaFileUpload") as mfu:
         mfu.return_value = Mock()
         with pytest.raises(CancelledError):
             client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
@@ -866,7 +866,7 @@ def _batch_request_double(responses_per_id: dict):
 
 
 def test_make_dir_batch_creates_each_folder(client, cache):
-    from cumulus.writes import _FOLDER_MIME
+    from bora.writes import _FOLDER_MIME
     svc = fake_service()
     responses = {
         "0": {"id": "DA", "name": "a", "mimeType": _FOLDER_MIME},
@@ -887,7 +887,7 @@ def test_make_dir_batch_creates_each_folder(client, cache):
 
 
 def test_make_dir_batch_chunks_at_100(client, cache):
-    from cumulus.writes import _FOLDER_MIME
+    from bora.writes import _FOLDER_MIME
     svc = fake_service()
     batches = []
 
@@ -915,7 +915,7 @@ def test_make_dir_batch_chunks_at_100(client, cache):
 
 
 def test_make_dir_batch_exactly_100_is_single_batch(client, cache):
-    from cumulus.writes import _FOLDER_MIME
+    from bora.writes import _FOLDER_MIME
     svc = fake_service()
     batches = []
 
@@ -942,7 +942,7 @@ def test_make_dir_batch_exactly_100_is_single_batch(client, cache):
 def test_make_dir_batch_handles_mixed_success_and_error(
     client, cache, make_http_error,
 ):
-    from cumulus.writes import _FOLDER_MIME
+    from bora.writes import _FOLDER_MIME
     svc = fake_service()
     err = make_http_error(404, reason="notFound")
     responses = {
@@ -967,7 +967,7 @@ def test_make_dir_batch_handles_mixed_success_and_error(
 
 
 def test_make_dir_batch_counts_subrequests(client, cache):
-    from cumulus.writes import _FOLDER_MIME
+    from bora.writes import _FOLDER_MIME
     svc = fake_service()
     responses = {
         "0": {"id": "DA", "name": "a", "mimeType": _FOLDER_MIME},
@@ -1119,7 +1119,7 @@ def test_restore_native_doc_raises_unsupported(client, cache):
         "mimeType": "application/vnd.google-apps.document",
     }
     client._get_service = Mock(return_value=svc)
-    from cumulus.exceptions import UnsupportedFileError
+    from bora.exceptions import UnsupportedFileError
 
     with pytest.raises(UnsupportedFileError):
         client._writes.restore("/notes.gdoc", "rev1")
@@ -1593,8 +1593,8 @@ def test_fake_make_dir_conflict_stale_cache_entry_evicted(client_on_fake):
     stale_id = "stale-id"
     # We bypass path_cache.set (which would reject stale_id because real_id
     # already maps the fold) by inserting directly via the ORM.
-    from cumulus.path_cache import PathCacheEntry
-    from cumulus.path_codec import fold_path
+    from bora.path_cache import PathCacheEntry
+    from bora.path_codec import fold_path
     client._path_cache._table.update(
         PathCacheEntry(
             file_id=stale_id,
@@ -1888,7 +1888,7 @@ def test_fake_upload_update_rev_audit_failure_is_swallowed(
 
     local = tmp_path / "doc.txt"
     local.write_bytes(b"v2-ours")
-    with caplog.at_level(_logging.WARNING, logger="cumulus.writes"):
+    with caplog.at_level(_logging.WARNING, logger="bora.writes"):
         result = client._writes.upload(
             str(local), "/doc.txt", write_mode=WriteMode.Update, update_rev=rev1
         )
@@ -1961,7 +1961,7 @@ def test_fake_upload_update_coalesced_head_creates_no_conflicted_copy(
 
     local = tmp_path / "doc.txt"
     local.write_bytes(b"v1-coalesced")
-    with caplog.at_level(_logging.WARNING, logger="cumulus.writes"):
+    with caplog.at_level(_logging.WARNING, logger="bora.writes"):
         result = client._writes.upload(
             str(local), "/doc.txt", write_mode=WriteMode.Update, update_rev=rev1
         )
@@ -1985,9 +1985,9 @@ def test_fake_upload_quota_exceeded_raises_insufficient_space(client_on_fake, tm
     """Injecting a 403/storageQuotaExceeded via fail_next on 'files.create'
     causes upload() to raise InsufficientSpaceError (not the raw HttpError).
 
-    Confirmed exception class: cumulus.exceptions.InsufficientSpaceError
+    Confirmed exception class: bora.exceptions.InsufficientSpaceError
     """
-    from cumulus.exceptions import InsufficientSpaceError
+    from bora.exceptions import InsufficientSpaceError
 
     client = client_on_fake.client
     fake = client_on_fake.fake
@@ -2010,9 +2010,9 @@ def test_fake_upload_resumable_quota_exceeded(client_on_fake, tmp_path):
     """Injecting storageQuotaExceeded into the resumable path (files.create
     key is used by _ResumableRequest) raises InsufficientSpaceError.
 
-    Confirmed exception class: cumulus.exceptions.InsufficientSpaceError
+    Confirmed exception class: bora.exceptions.InsufficientSpaceError
     """
-    from cumulus.exceptions import InsufficientSpaceError
+    from bora.exceptions import InsufficientSpaceError
 
     client = client_on_fake.client
     fake = client_on_fake.fake
@@ -2037,7 +2037,7 @@ def test_fake_remove_412_condition_not_met_raises_data_changed(client_on_fake):
     Note: remove() without parent_rev does not check preconditions beforehand;
     the 412 from the update call itself is converted by convert_api_errors.
 
-    Confirmed exception class: cumulus.exceptions.DataChangedError
+    Confirmed exception class: bora.exceptions.DataChangedError
     """
     client = client_on_fake.client
     fake = client_on_fake.fake
@@ -2061,7 +2061,7 @@ def test_fake_move_412_condition_not_met_raises_data_changed(client_on_fake):
     """Injecting a 412/conditionNotMet on move's files.update raises
     DataChangedError.
 
-    Confirmed exception class: cumulus.exceptions.DataChangedError
+    Confirmed exception class: bora.exceptions.DataChangedError
     """
     client = client_on_fake.client
     fake = client_on_fake.fake
@@ -2206,7 +2206,7 @@ def test_create_retry_409_resolves_batch_callback(client_on_fake):
 
     results = client._writes.make_dir_batch(["/batchdir"])
 
-    from cumulus.exceptions import CumulusApiError
+    from bora.exceptions import CumulusApiError
     assert not isinstance(results[0], CumulusApiError), f"unexpected error: {results[0]}"
     assert results[0].id == next_id
 

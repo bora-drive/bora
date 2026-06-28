@@ -1,10 +1,10 @@
-"""Unit tests for cumulus.native_docs."""
+"""Unit tests for bora.native_docs."""
 
 from __future__ import annotations
 
 import pytest
 
-from cumulus.native_docs import (
+from bora.native_docs import (
     GOOGLE_FOLDER_MIME_TYPE,
     GOOGLE_SHORTCUT_MIME_TYPE,
     filter_native_docs,

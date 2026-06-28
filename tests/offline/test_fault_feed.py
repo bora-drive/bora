@@ -15,18 +15,18 @@ from unittest.mock import Mock
 import pytest
 from googleapiclient.errors import HttpError
 
-from cumulus.changes import iter_remote_changes
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.core import FileMetadata, FullAccount
-from cumulus.database.core import Database
-from cumulus.exceptions import ServerError
-from cumulus.keyring import CredentialStorage
-from cumulus.models import IndexEntry, ItemType
-from cumulus.path_cache import PathIDCache
-from cumulus.sync import SyncEngine
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import delete
+from bora.changes import iter_remote_changes
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.core import FileMetadata, FullAccount
+from bora.database.core import Database
+from bora.exceptions import ServerError
+from bora.keyring import CredentialStorage
+from bora.models import IndexEntry, ItemType
+from bora.path_cache import PathIDCache
+from bora.sync import SyncEngine
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error
 
 # ---------------------------------------------------------------------------
@@ -424,7 +424,7 @@ def test_fail_after_redeliver_idempotent_end_to_end(sync_engine: SyncEngine):
     times.  We arm fail_after with count=5 (matching the retry budget) so all
     retry attempts fail and the exception finally propagates.
     """
-    from cumulus.client import _MAX_RETRY_ATTEMPTS
+    from bora.client import _MAX_RETRY_ATTEMPTS
 
     data = b"retry-idempotent content"
 

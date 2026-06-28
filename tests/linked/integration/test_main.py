@@ -33,16 +33,16 @@ import time
 
 import pytest
 
-from cumulus.constants import IDLE, FileStatus
-from cumulus.core import FileMetadata, WriteMode
-from cumulus.exceptions import (
+from bora.constants import IDLE, FileStatus
+from bora.core import FileMetadata, WriteMode
+from bora.exceptions import (
     InotifyError,
     NotFoundError,
     SyncError,
     UnsupportedFileTypeForDiff,
 )
-from cumulus.main import Maestral
-from cumulus.utils.integration import get_inotify_limits
+from bora.main import Maestral
+from bora.utils.integration import get_inotify_limits
 
 from tests.linked.conftest import requires_account, wait_until
 

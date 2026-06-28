@@ -47,7 +47,7 @@ def load_client_config() -> dict[str, Any]:
             with open(override, encoding="utf-8") as f:
                 return json.load(f)
         return json.loads(
-            files("cumulus.resources").joinpath("client_secret.json").read_text()
+            files("bora.resources").joinpath("client_secret.json").read_text()
         )
     except (FileNotFoundError, ModuleNotFoundError) as exc:
         raise AuthError(

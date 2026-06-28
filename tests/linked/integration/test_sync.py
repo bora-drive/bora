@@ -51,9 +51,9 @@ from watchdog.events import (
     FileDeletedEvent,
 )
 
-from cumulus.core import FileMetadata, FolderMetadata, WriteMode
-from cumulus.errorhandling import convert_api_errors
-from cumulus.exceptions import (
+from bora.core import FileMetadata, FolderMetadata, WriteMode
+from bora.errorhandling import convert_api_errors
+from bora.exceptions import (
     FolderConflictError,
     InsufficientPermissionsError,
     NoSyncDirError,
@@ -62,10 +62,10 @@ from cumulus.exceptions import (
     SymlinkError,
     SyncError,
 )
-from cumulus.main import Maestral
-from cumulus.models import SyncDirection, SyncEvent
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import (
+from bora.main import Maestral
+from bora.models import SyncDirection, SyncEvent
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import (
     delete,
     fs_max_lengths_for_path,
     get_symlink_target,

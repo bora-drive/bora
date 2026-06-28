@@ -8,7 +8,7 @@ Key responsibilities:
 * **Path encoding** — Drive accepts characters in ``name`` (slash, control
   chars, Windows-reserved punctuation) that don't survive a filesystem
   path round-trip. The cache stores ``remote_path`` in URL-encoded form
-  (via ``cumulus.path_codec``); the ``name`` column stores the raw Drive
+  (via ``bora.path_codec``); the ``name`` column stores the raw Drive
   name as-is for upload purposes.
 * **Case-fold lookup key** — ``remote_path_fold`` holds
   ``fold_path(remote_path)`` (NFC + casefold per name component). This
@@ -69,14 +69,14 @@ class PathCacheEntry(Model):
     remote_path = NonNullColumn(SqlPath(), index=True)
     """URL-encoded virtual path, e.g. ``/Documents/2024%2F05 report.pdf``.
 
-    Encoded via :func:`cumulus.path_codec.encode_name` per name component.
+    Encoded via :func:`bora.path_codec.encode_name` per name component.
     The encoding makes the path safe to use as a filesystem path segment
     even when Drive ``name`` fields contain ``/``, control chars, or
     Windows-reserved punctuation."""
 
     remote_path_fold = NonNullColumn(SqlPath(), index=True)
     """Case-fold lookup key, computed as
-    :func:`cumulus.path_codec.fold_path` (NFC + casefold per component).
+    :func:`bora.path_codec.fold_path` (NFC + casefold per component).
 
     This is *not* a simple lowercase form — Drive's case-insensitive
     semantics use Unicode collation (closer to Python's ``str.casefold``
@@ -101,7 +101,7 @@ class PathCacheEntry(Model):
 class PathIDCache:
     """Bidirectional path ↔ file-ID mapping backed by SQLite.
 
-    :param db: An open :class:`~cumulus.database.core.Database` instance
+    :param db: An open :class:`~bora.database.core.Database` instance
         (the same one ``SyncEngine`` uses).
     """
 
@@ -192,7 +192,7 @@ class PathIDCache:
         """Insert or update a cache entry.
 
         :param remote_path: encoded path (use
-            :func:`cumulus.path_codec.compose_path` to derive from a Drive
+            :func:`bora.path_codec.compose_path` to derive from a Drive
             change event's parent + name).
         :param name: raw Drive ``name`` (un-encoded).
 

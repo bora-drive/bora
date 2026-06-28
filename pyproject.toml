@@ -3,7 +3,7 @@ requires = ["setuptools>=61.2", "build"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cumulus"
+name = "bora"
 version = "0.1.0"
 authors = [{ name = "Sam Schott", email = "sam.schott@outlook.com" }]
 license = { text = "MIT" }
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3 :: Only",
 ]
-urls = { Homepage = "https://github.com/user/cumulus" }
+urls = { Homepage = "https://bora.tools" }
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.2.0",
@@ -50,8 +50,8 @@ content-type = "text/markdown"
 
 [project.optional-dependencies]
 gui = [
-    "cumulus-qt>=0.1.0;sys_platform=='linux'",
-    "cumulus-cocoa>=0.1.0;sys_platform=='darwin'",
+    "bora-qt>=0.1.0;sys_platform=='linux'",
+    "bora-cocoa>=0.1.0;sys_platform=='darwin'",
 ]
 syslog = ["systemd-python"]
 lint = [
@@ -79,17 +79,17 @@ docs = [
 ]
 dev = [
     "bump2version",
-    "cumulus[lint,test]",
+    "bora[lint,test]",
 ]
 
 [project.scripts]
-cumulus = "cumulus.cli:main"
+bora = "bora.cli:main"
 
 [tool.setuptools.data-files]
-"share/icons/hicolor/512x512/apps" = ["src/cumulus/resources/maestral.png"]
+"share/icons/hicolor/512x512/apps" = ["src/bora/resources/maestral.png"]
 
 [tool.setuptools.package-data]
-cumulus = ["resources/*.json", "resources/*.png", "py.typed"]
+bora = ["resources/*.json", "resources/*.png", "py.typed"]
 
 [tool.flake8]
 ignore = "E203,E501,E704,W503,H306"

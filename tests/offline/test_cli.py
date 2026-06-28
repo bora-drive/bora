@@ -3,13 +3,13 @@ from unittest import mock
 
 from click.testing import CliRunner
 
-from cumulus.autostart import AutoStart
-from cumulus.cli import main
-from cumulus.daemon import MaestralProxy, Start, start_cumulus_daemon_process
-from cumulus.logging import scoped_logger
-from cumulus.main import Maestral
-from cumulus.notify import level_name_to_number, level_number_to_name
-from cumulus.utils.appdirs import get_log_path
+from bora.autostart import AutoStart
+from bora.cli import main
+from bora.daemon import MaestralProxy, Start, start_cumulus_daemon_process
+from bora.logging import scoped_logger
+from bora.main import Maestral
+from bora.notify import level_name_to_number, level_number_to_name
+from bora.utils.appdirs import get_log_path
 
 TEST_TIMEOUT = 60
 
@@ -257,7 +257,7 @@ def test_log_clear(m: Maestral) -> None:
     assert log_content == ""
 
 
-from cumulus.cli.cli_core import _local_server_dialog
+from bora.cli.cli_core import _local_server_dialog
 
 
 def test_local_server_dialog_invokes_run_local_flow_and_passes_refresh_token():
@@ -269,7 +269,7 @@ def test_local_server_dialog_invokes_run_local_flow_and_passes_refresh_token():
     fake_creds.refresh_token = "rt-from-loopback"
 
     with mock.patch(
-        "cumulus.cli.cli_core.oauth.run_local_flow",
+        "bora.cli.cli_core.oauth.run_local_flow",
         return_value=fake_creds,
     ):
         res = _local_server_dialog(m)
@@ -287,7 +287,7 @@ def test_local_server_dialog_returns_1_when_creds_lack_refresh_token():
     fake_creds.refresh_token = None  # consent skipped; refresh_token missing.
 
     with mock.patch(
-        "cumulus.cli.cli_core.oauth.run_local_flow",
+        "bora.cli.cli_core.oauth.run_local_flow",
         return_value=fake_creds,
     ):
         res = _local_server_dialog(m)
@@ -296,7 +296,7 @@ def test_local_server_dialog_returns_1_when_creds_lack_refresh_token():
     m.link.assert_not_called()
 
 
-from cumulus.cli.cli_core import (
+from bora.cli.cli_core import (
     _paste_redirect_dialog,
     _parse_redirect_url_or_code,
 )
@@ -327,7 +327,7 @@ def test_paste_redirect_dialog_calls_link_with_parsed_code(monkeypatch):
 
     # Simulate user pasting the full redirect URL.
     monkeypatch.setattr(
-        "cumulus.cli.cli_core.prompt",
+        "bora.cli.cli_core.prompt",
         lambda _: "http://localhost:8080/?code=4/abc&state=x",
     )
 
@@ -341,14 +341,14 @@ def test_paste_redirect_dialog_returns_1_on_empty_parse(monkeypatch):
     m.get_auth_url = mock.Mock(return_value="https://accounts.google.com/auth")
     m.link = mock.Mock()
 
-    monkeypatch.setattr("cumulus.cli.cli_core.prompt", lambda _: "")
+    monkeypatch.setattr("bora.cli.cli_core.prompt", lambda _: "")
 
     res = _paste_redirect_dialog(m)
     m.link.assert_not_called()
     assert res == 1
 
 
-from cumulus.cli.cli_core import auth_link
+from bora.cli.cli_core import auth_link
 
 
 def _make_proxy_mock(*, pending_link: bool = True, config_name: str = "test-cli"):
@@ -374,14 +374,14 @@ def test_auth_link_uses_local_server_dialog_by_default(monkeypatch):
         called.append("paste")
         return 0
 
-    monkeypatch.setattr("cumulus.cli.cli_core._local_server_dialog", _fake_local)
-    monkeypatch.setattr("cumulus.cli.cli_core._paste_redirect_dialog", _fake_paste)
+    monkeypatch.setattr("bora.cli.cli_core._local_server_dialog", _fake_local)
+    monkeypatch.setattr("bora.cli.cli_core._paste_redirect_dialog", _fake_paste)
     monkeypatch.setattr(
-        "cumulus.cli.cli_core._report_link_result",
+        "bora.cli.cli_core._report_link_result",
         lambda m, res: None,
     )
     monkeypatch.setattr(
-        "cumulus.daemon.MaestralProxy",
+        "bora.daemon.MaestralProxy",
         lambda config_name, fallback: m_proxy,
     )
 
@@ -397,19 +397,19 @@ def test_auth_link_uses_paste_redirect_when_flag_set(monkeypatch):
 
     called = []
     monkeypatch.setattr(
-        "cumulus.cli.cli_core._local_server_dialog",
+        "bora.cli.cli_core._local_server_dialog",
         lambda m: called.append("local") or 0,
     )
     monkeypatch.setattr(
-        "cumulus.cli.cli_core._paste_redirect_dialog",
+        "bora.cli.cli_core._paste_redirect_dialog",
         lambda m: called.append("paste") or 0,
     )
     monkeypatch.setattr(
-        "cumulus.cli.cli_core._report_link_result",
+        "bora.cli.cli_core._report_link_result",
         lambda m, res: None,
     )
     monkeypatch.setattr(
-        "cumulus.daemon.MaestralProxy",
+        "bora.daemon.MaestralProxy",
         lambda config_name, fallback: m_proxy,
     )
 
@@ -424,7 +424,7 @@ def test_sharelink_command_removed():
     """sharelink is cut for v0.1.0 (Drive sharing deferred); it must not be
     registered, so invoking it errors as an unknown command."""
     from click.testing import CliRunner
-    from cumulus.cli.cli_main import main
+    from bora.cli.cli_main import main
 
     result = CliRunner().invoke(main, ["sharelink", "list"])
     assert result.exit_code != 0

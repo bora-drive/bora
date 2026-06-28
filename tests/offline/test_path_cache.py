@@ -1,4 +1,4 @@
-"""Unit tests for cumulus.path_cache.PathIDCache."""
+"""Unit tests for bora.path_cache.PathIDCache."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import sqlite3
 
 import pytest
 
-from cumulus.database.core import Database
-from cumulus.path_cache import PathIDCache
+from bora.database.core import Database
+from bora.path_cache import PathIDCache
 
 
 def make_cache(root_id: str = "ROOT") -> PathIDCache:
@@ -428,7 +428,7 @@ class TestResolvePath:
 
 from unittest.mock import patch  # noqa: E402
 
-from cumulus.database.orm import Manager  # noqa: E402
+from bora.database.orm import Manager  # noqa: E402
 
 
 def make_drive_item(
@@ -583,8 +583,8 @@ class TestPopulateAtomicity:
 
 import threading  # noqa: E402
 
-from cumulus.path_codec import compose_path as _compose_path  # noqa: E402
-from cumulus.path_codec import fold_path as _fold_path  # noqa: E402
+from bora.path_codec import compose_path as _compose_path  # noqa: E402
+from bora.path_codec import fold_path as _fold_path  # noqa: E402
 
 
 def _assert_invariants(cache: PathIDCache) -> None:

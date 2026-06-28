@@ -1,10 +1,10 @@
-"""Unit tests for cumulus.path_codec."""
+"""Unit tests for bora.path_codec."""
 
 from __future__ import annotations
 
 import pytest
 
-from cumulus.path_codec import (
+from bora.path_codec import (
     compose_path,
     decode_name,
     decode_path,

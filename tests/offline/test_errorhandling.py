@@ -1,4 +1,4 @@
-"""Unit tests for cumulus.errorhandling — HTTP and OSError mapping.
+"""Unit tests for bora.errorhandling — HTTP and OSError mapping.
 
 The auth-library exception mapping (RefreshError / GoogleAuthError) is
 covered separately in test_errorhandling_auth.py.
@@ -10,13 +10,13 @@ import errno
 
 import pytest
 
-from cumulus.errorhandling import (
+from bora.errorhandling import (
     convert_api_errors,
     extract_http_reason,
     http_error_to_cumulus,
     os_to_cumulus_error,
 )
-from cumulus.exceptions import (
+from bora.exceptions import (
     BadInputError,
     ConnectionError,
     CumulusApiError,
@@ -110,8 +110,8 @@ def test_os_error_enospc_maps_to_insufficient_space():
 
 
 def test_os_error_enametoolong_reports_limits_in_correct_order():
-    from cumulus.exceptions import PathError
-    from cumulus.utils.path import fs_max_lengths_for_path
+    from bora.exceptions import PathError
+    from bora.utils.path import fs_max_lengths_for_path
 
     # fs_max_lengths_for_path returns (max_path, max_name) in that order.
     max_path, max_name = fs_max_lengths_for_path("/")
@@ -129,8 +129,8 @@ def test_os_error_enametoolong_reports_limits_in_correct_order():
 
 
 def test_http_error_412_condition_not_met_maps_to_data_changed(make_http_error):
-    from cumulus.errorhandling import http_error_to_cumulus
-    from cumulus.exceptions import DataChangedError
+    from bora.errorhandling import http_error_to_cumulus
+    from bora.exceptions import DataChangedError
 
     exc = make_http_error(412, reason="conditionNotMet")
     out = http_error_to_cumulus(412, "conditionNotMet", exc, remote_path="/foo.txt")
@@ -139,8 +139,8 @@ def test_http_error_412_condition_not_met_maps_to_data_changed(make_http_error):
 
 
 def test_http_error_412_other_reason_falls_through(make_http_error):
-    from cumulus.errorhandling import http_error_to_cumulus
-    from cumulus.exceptions import DataChangedError
+    from bora.errorhandling import http_error_to_cumulus
+    from bora.exceptions import DataChangedError
 
     # Any 412 should map to DataChangedError regardless of sub-reason.
     exc = make_http_error(412, reason="")

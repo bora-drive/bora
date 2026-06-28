@@ -6,11 +6,11 @@ from unittest import mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient, _PasteFlowState
-from cumulus.config import remove_configuration
-from cumulus.database.core import Database
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient, _PasteFlowState
+from bora.config import remove_configuration
+from bora.database.core import Database
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def test_linked_is_false_when_blob_lacks_refresh_token(client, cred_storage):
 
 def test_linked_caches_loaded_credentials(client, cred_storage, monkeypatch):
     monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
-    from cumulus import oauth
+    from bora import oauth
     base = oauth.credentials_from_refresh_token("rt-1")
     oauth.save_credentials(cred_storage, base, account_id="perm-1")
 
@@ -54,7 +54,7 @@ def test_linked_caches_loaded_credentials(client, cred_storage, monkeypatch):
         m_load.assert_not_called()
 
 
-from cumulus.exceptions import NotLinkedError
+from bora.exceptions import NotLinkedError
 
 
 def test_get_service_raises_not_linked_when_unlinked(client):
@@ -66,12 +66,12 @@ def test_get_service_builds_drive_v3_with_credentials(
     client, cred_storage, monkeypatch
 ):
     monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
-    from cumulus import oauth
+    from bora import oauth
     base = oauth.credentials_from_refresh_token("rt-1")
     oauth.save_credentials(cred_storage, base, account_id="perm-1")
 
     fake_service = mock.Mock(name="drive_v3_service")
-    with mock.patch("cumulus.client.build", return_value=fake_service) as m_build:
+    with mock.patch("bora.client.build", return_value=fake_service) as m_build:
         result = client._get_service()
     assert result is fake_service
     m_build.assert_called_once()
@@ -80,8 +80,8 @@ def test_get_service_builds_drive_v3_with_credentials(
     assert m_build.call_args.kwargs["cache_discovery"] is False
 
 
-from cumulus import oauth as _oauth
-from cumulus.core import FullAccount, PersonalSpaceUsage
+from bora import oauth as _oauth
+from bora.core import FullAccount, PersonalSpaceUsage
 
 
 def _fake_about_response():
@@ -113,7 +113,7 @@ def test_fetch_account_info_for_creds_returns_full_account(
     assert client.linked is True
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
-    with mock.patch("cumulus.client.build", return_value=fake_service):
+    with mock.patch("bora.client.build", return_value=fake_service):
         account = client._fetch_account_info_for_creds(client._credentials)
 
     assert isinstance(account, FullAccount)
@@ -129,7 +129,7 @@ def test_get_account_info_caches(client, cred_storage, monkeypatch):
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
 
-    with mock.patch("cumulus.client.build", return_value=fake_service):
+    with mock.patch("bora.client.build", return_value=fake_service):
         a1 = client.get_account_info()
         a2 = client.get_account_info()
 
@@ -142,7 +142,7 @@ def test_get_space_usage(client, cred_storage, monkeypatch):
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
 
-    with mock.patch("cumulus.client.build", return_value=fake_service):
+    with mock.patch("bora.client.build", return_value=fake_service):
         usage = client.get_space_usage()
 
     assert isinstance(usage, PersonalSpaceUsage)
@@ -159,7 +159,7 @@ def test_fetch_account_info_persists_state(client, cred_storage, monkeypatch):
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
 
-    with mock.patch("cumulus.client.build", return_value=fake_service):
+    with mock.patch("bora.client.build", return_value=fake_service):
         client.get_account_info()
         client.get_space_usage()
 
@@ -184,7 +184,7 @@ def test_link_with_refresh_token_happy_path(client, cred_storage, monkeypatch):
 
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
-    with mock.patch("cumulus.client.build", return_value=fake_service):
+    with mock.patch("bora.client.build", return_value=fake_service):
         res = client.link(refresh_token="rt-abc")
 
     assert res == 0
@@ -240,7 +240,7 @@ def test_link_with_access_token_happy_path(client, cred_storage, monkeypatch):
     monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
     fake_service = mock.MagicMock()
     fake_service.about().get().execute.return_value = _fake_about_response()
-    with mock.patch("cumulus.client.build", return_value=fake_service):
+    with mock.patch("bora.client.build", return_value=fake_service):
         res = client.link(access_token="at-abc")
 
     assert res == 0
@@ -267,7 +267,7 @@ def test_link_with_bad_code_returns_1_not_traceback(client, monkeypatch):
 def test_get_account_info_unlinked_raises_not_linked(client):
     """No credentials must raise NotLinkedError instead of falling through
     to google.auth.default() / ADC (review F13.3)."""
-    from cumulus.exceptions import NotLinkedError
+    from bora.exceptions import NotLinkedError
 
     client._credentials = None
     client._cached_account_info = None
@@ -300,7 +300,7 @@ def test_link_with_code_uses_pending_flow(client, cred_storage, monkeypatch):
                            return_value=fake_creds):
         fake_service = mock.MagicMock()
         fake_service.about().get().execute.return_value = _fake_about_response()
-        with mock.patch("cumulus.client.build", return_value=fake_service):
+        with mock.patch("bora.client.build", return_value=fake_service):
             res = client.link(code="auth-code-from-redirect")
 
     assert res == 0
@@ -340,7 +340,7 @@ def test_unlink_clears_credentials_and_revokes(client, cred_storage, monkeypatch
     # Force the client to populate _credentials.
     assert client.linked is True
 
-    with mock.patch("cumulus.client.requests.post") as m_post:
+    with mock.patch("bora.client.requests.post") as m_post:
         client.unlink()
 
     assert client._credentials is None
@@ -359,7 +359,7 @@ def test_unlink_tolerates_revoke_failure(client, cred_storage, monkeypatch):
 
     import requests as _req
     with mock.patch(
-        "cumulus.client.requests.post",
+        "bora.client.requests.post",
         side_effect=_req.exceptions.ConnectionError("offline"),
     ):
         # Must not raise.
@@ -370,7 +370,7 @@ def test_unlink_tolerates_revoke_failure(client, cred_storage, monkeypatch):
 
 def test_unlink_when_not_linked_is_a_noop(client):
     assert client.linked is False
-    with mock.patch("cumulus.client.requests.post") as m_post:
+    with mock.patch("bora.client.requests.post") as m_post:
         client.unlink()
     m_post.assert_not_called()
 

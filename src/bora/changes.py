@@ -3,13 +3,13 @@
 Two responsibilities:
 
 * **Projection** — pure helpers that turn a Drive ``files`` resource
-  dict into a :mod:`cumulus.core` dataclass. Shared by ``client.py``'s
+  dict into a :mod:`bora.core` dataclass. Shared by ``client.py``'s
   listing/metadata methods and by the change-feed code below.
 * **Change feed** — :func:`iter_remote_changes` drains Drive's
   ``changes.list`` pages, classifies each entry against the 4-row
   disambiguation table (:func:`classify`), resolves file IDs to paths
   via the path cache, mutates the cache, and yields a single
-  :class:`~cumulus.core.ListFolderResult` per poll cycle.
+  :class:`~bora.core.ListFolderResult` per poll cycle.
 
 The module never imports ``client.py``: it receives the service factory
 and the retry helper as parameters, keeping the dependency one-way
@@ -271,7 +271,7 @@ def iter_remote_changes(
     resolve_deleted_path: "Callable[[str], str | None] | None" = None,
 ) -> "Iterator[ListFolderResult]":
     """Drain Drive's ``changes.list`` pages and yield one
-    :class:`~cumulus.core.ListFolderResult` per poll cycle.
+    :class:`~bora.core.ListFolderResult` per poll cycle.
 
     Each yielded entry has its path resolved via *path_cache*, and the
     cache is mutated as a side effect (``set`` / ``move`` / ``remove``).

@@ -170,7 +170,7 @@ class GoogleDriveClient:
 
     All Google API exceptions, :exc:`OSError` from the local file system, and
     connection errors will be converted to
-    :exc:`cumulus.exceptions.CumulusApiError`.
+    :exc:`bora.exceptions.CumulusApiError`.
 
     :param config_name: Name of the config to use.
     :param cred_storage: Credential storage instance.
@@ -392,7 +392,7 @@ class GoogleDriveClient:
         ``_MAX_RETRY_ATTEMPTS`` it re-raises the last exception unchanged
         so the caller's ``convert_api_errors`` can map it.
 
-        Raises :exc:`~cumulus.exceptions.CancelledError` if the client's
+        Raises :exc:`~bora.exceptions.CancelledError` if the client's
         ``_poll_event`` fires during a backoff sleep (daemon shutdown).
         """
         attempt = 0
@@ -1271,7 +1271,7 @@ class GoogleDriveClient:
     ) -> Iterator[ListFolderResult]:
         """Lists remote changes as a paginated iterator.
 
-        Delegates to :func:`cumulus.changes.iter_remote_changes`, which
+        Delegates to :func:`bora.changes.iter_remote_changes`, which
         classifies each change, resolves paths, mutates the path cache,
         and strips Google-native documents. HTTP errors raised mid-stream
         are converted to Cumulus exceptions.

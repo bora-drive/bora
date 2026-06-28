@@ -24,14 +24,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
-from cumulus.config import remove_configuration
-from cumulus.core import WriteMode
-from cumulus.writes import _SIMPLE_UPLOAD_THRESHOLD
-from cumulus.database.core import Database
-from cumulus.exceptions import CumulusApiError
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
+from bora.config import remove_configuration
+from bora.core import WriteMode
+from bora.writes import _SIMPLE_UPLOAD_THRESHOLD
+from bora.database.core import Database
+from bora.exceptions import CumulusApiError
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 from tests.fake_drive import (
     ROOT_ID,
     FakeDrive,
@@ -145,8 +145,8 @@ def test_resumable_fault_first_chunk_teeth(cof, tmp_path):
     fake.fail_next("files.create", make_conn_reset(), count=_MAX_RETRY_ATTEMPTS)
 
     # After exhausting retries, _retry_transient re-raises the CONNECTION_ERROR;
-    # convert_api_errors then wraps it as cumulus.exceptions.ConnectionError.
-    from cumulus.exceptions import ConnectionError as _CumulusConnError
+    # convert_api_errors then wraps it as bora.exceptions.ConnectionError.
+    from bora.exceptions import ConnectionError as _CumulusConnError
     with pytest.raises(_CumulusConnError):
         client._writes.upload(str(local), "/big2.bin", write_mode=WriteMode.Add)
 

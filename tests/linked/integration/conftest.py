@@ -4,12 +4,12 @@ import time
 
 import pytest
 
-import cumulus.manager
-from cumulus.config import remove_configuration
-from cumulus.exceptions import AuthError, NotFoundError
-from cumulus.main import Maestral
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import delete, generate_cc_name
+import bora.manager
+from bora.config import remove_configuration
+from bora.exceptions import AuthError, NotFoundError
+from bora.main import Maestral
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import delete, generate_cc_name
 
 from tests.linked.conftest import _make_client
 
@@ -161,19 +161,19 @@ def m(pytestconfig, test_lock):
     if pytestconfig.option.OBSERVER == "inotify":
         from watchdog.observers.inotify import InotifyObserver
 
-        cumulus.manager.Observer = InotifyObserver
+        bora.manager.Observer = InotifyObserver
     elif pytestconfig.option.OBSERVER == "fsevents":
         from watchdog.observers.fsevents import FSEventsObserver
 
-        cumulus.manager.Observer = FSEventsObserver
+        bora.manager.Observer = FSEventsObserver
     elif pytestconfig.option.OBSERVER == "kqueue":
         from watchdog.observers.kqueue import KqueueObserver
 
-        cumulus.manager.Observer = KqueueObserver
+        bora.manager.Observer = KqueueObserver
     elif pytestconfig.option.OBSERVER == "polling":
-        from cumulus.fsevents.polling import OrderedPollingObserver
+        from bora.fsevents.polling import OrderedPollingObserver
 
-        cumulus.manager.Observer = OrderedPollingObserver
+        bora.manager.Observer = OrderedPollingObserver
 
     config_name = "cumulus-test-config-integration"
 

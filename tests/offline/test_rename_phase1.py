@@ -9,31 +9,31 @@ import pytest
 
 
 def test_server_error_exists():
-    from cumulus.exceptions import ServerError
+    from bora.exceptions import ServerError
     assert issubclass(ServerError, Exception)
 
 
 def test_connection_error_exists():
-    from cumulus.exceptions import ConnectionError
+    from bora.exceptions import ConnectionError
     assert issubclass(ConnectionError, Exception)
 
 
 def test_auth_error_exists():
-    from cumulus.exceptions import AuthError
+    from bora.exceptions import AuthError
     assert issubclass(AuthError, Exception)
 
 
 def test_no_sync_dir_error_exists():
-    from cumulus.exceptions import NoSyncDirError
+    from bora.exceptions import NoSyncDirError
     assert issubclass(NoSyncDirError, Exception)
 
 
 def test_old_names_still_importable():
     """Backward compat: old names should still be importable as aliases."""
-    from cumulus.exceptions import DropboxServerError, DropboxConnectionError
-    from cumulus.exceptions import DropboxAuthError, NoDropboxDirError
-    from cumulus.exceptions import ServerError, ConnectionError
-    from cumulus.exceptions import AuthError, NoSyncDirError
+    from bora.exceptions import DropboxServerError, DropboxConnectionError
+    from bora.exceptions import DropboxAuthError, NoDropboxDirError
+    from bora.exceptions import ServerError, ConnectionError
+    from bora.exceptions import AuthError, NoSyncDirError
 
     assert DropboxServerError is ServerError
     assert DropboxConnectionError is ConnectionError
@@ -42,14 +42,14 @@ def test_old_names_still_importable():
 
 
 def test_token_errors_inherit_from_auth_error():
-    from cumulus.exceptions import AuthError, TokenExpiredError, TokenRevokedError
+    from bora.exceptions import AuthError, TokenExpiredError, TokenRevokedError
     assert issubclass(TokenExpiredError, AuthError)
     assert issubclass(TokenRevokedError, AuthError)
 
 
 def test_cumulus_api_error_uses_remote_path():
     """CumulusApiError should accept remote_path instead of dbx_path."""
-    from cumulus.exceptions import CumulusApiError
+    from bora.exceptions import CumulusApiError
 
     err = CumulusApiError(
         "title",
@@ -67,7 +67,7 @@ def test_cumulus_api_error_uses_remote_path():
 
 def test_cumulus_api_error_dbx_path_compat():
     """Old dbx_path kwargs should still work as aliases."""
-    from cumulus.exceptions import CumulusApiError
+    from bora.exceptions import CumulusApiError
 
     err = CumulusApiError("title", "msg", dbx_path="/compat", dbx_path_from="/old")
     assert err.remote_path == "/compat"
@@ -79,7 +79,7 @@ def test_cumulus_api_error_dbx_path_compat():
 
 def test_sync_event_has_remote_path_field():
     """SyncEvent should use remote_path instead of dbx_path."""
-    from cumulus.models import SyncEvent
+    from bora.models import SyncEvent
 
     assert hasattr(SyncEvent, 'remote_path')
     assert hasattr(SyncEvent, 'remote_path_lower')
@@ -89,7 +89,7 @@ def test_sync_event_has_remote_path_field():
 
 def test_index_entry_has_remote_path_field():
     """IndexEntry should use remote_path instead of dbx_path."""
-    from cumulus.models import IndexEntry
+    from bora.models import IndexEntry
 
     assert hasattr(IndexEntry, 'remote_path_lower')
     assert hasattr(IndexEntry, 'remote_path_cased')
@@ -98,7 +98,7 @@ def test_index_entry_has_remote_path_field():
 
 def test_sync_error_entry_has_remote_path_field():
     """SyncErrorEntry should use remote_path instead of dbx_path."""
-    from cumulus.models import SyncErrorEntry
+    from bora.models import SyncErrorEntry
 
     assert hasattr(SyncErrorEntry, 'remote_path')
     assert hasattr(SyncErrorEntry, 'remote_path_lower')
@@ -108,7 +108,7 @@ def test_sync_error_entry_has_remote_path_field():
 
 def test_core_metadata_has_remote_fields():
     """Core Metadata dataclasses should not reference 'dbx'."""
-    from cumulus.core import FileMetadata, FolderMetadata, ListFolderResult
+    from bora.core import FileMetadata, FolderMetadata, ListFolderResult
 
     # These are dataclasses with path_lower, path_display etc - no dbx prefix.
     # Just verify they still work.
@@ -175,13 +175,13 @@ def test_pyproject_description_not_dropbox():
 
 def test_constants_no_dropbox_app_key():
     """constants should not have a DROPBOX_APP_KEY."""
-    from cumulus import constants
+    from bora import constants
     assert not hasattr(constants, 'DROPBOX_APP_KEY')
 
 
 def test_exceptions_docstrings_no_dropbox():
     """Exception docstrings should not reference Dropbox."""
-    import cumulus.exceptions as exc
+    import bora.exceptions as exc
     for name in dir(exc):
         obj = getattr(exc, name)
         if isinstance(obj, type) and issubclass(obj, Exception):
@@ -189,14 +189,14 @@ def test_exceptions_docstrings_no_dropbox():
             assert "Dropbox" not in doc, f"{name}.__doc__ still mentions Dropbox"
 
 
-def test_package_importable_as_cumulus():
-    """The package should be importable as 'cumulus'."""
-    import cumulus
-    assert hasattr(cumulus, '__version__')
+def test_package_importable_as_bora():
+    """The package should be importable as 'bora'."""
+    import bora
+    assert hasattr(bora, '__version__')
 
 
-def test_cumulus_cli_entry_point():
-    """The CLI entry point should be 'cumulus'."""
+def test_bora_cli_entry_point():
+    """The CLI entry point should be 'bora'."""
     import tomllib
     from pathlib import Path
 
@@ -205,17 +205,17 @@ def test_cumulus_cli_entry_point():
         data = tomllib.load(f)
 
     scripts = data["project"]["scripts"]
-    assert "cumulus" in scripts
-    assert "cumulus.cli" in scripts["cumulus"]
+    assert "bora" in scripts
+    assert "bora.cli" in scripts["bora"]
 
 
 def test_cumulus_constants():
     """APP_NAME should be Cumulus."""
-    from cumulus.constants import APP_NAME
+    from bora.constants import APP_NAME
     assert APP_NAME == "Cumulus"
 
 
 def test_cumulus_config_dir():
     """Config directory should use 'cumulus' not 'maestral'."""
-    from cumulus.config.main import CONFIG_DIR_NAME
+    from bora.config.main import CONFIG_DIR_NAME
     assert CONFIG_DIR_NAME == "cumulus"

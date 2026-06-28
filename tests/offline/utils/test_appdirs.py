@@ -2,7 +2,7 @@ import platform
 
 import pytest
 
-from cumulus.utils.appdirs import (
+from bora.utils.appdirs import (
     get_autostart_path,
     get_cache_path,
     get_conf_path,

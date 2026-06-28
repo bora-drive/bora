@@ -9,8 +9,8 @@ import pytest
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 
-from cumulus import oauth
-from cumulus.exceptions import AuthError
+from bora import oauth
+from bora.exceptions import AuthError
 
 
 def _write_client_secret(path: Path) -> None:
@@ -62,9 +62,9 @@ def test_load_client_config_missing_bundled_resource_raises_auth_error(monkeypat
     monkeypatch.delenv("CUMULUS_CLIENT_SECRET_PATH", raising=False)
 
     def _raise(*_a, **_kw):
-        raise ModuleNotFoundError("No module named 'cumulus.resources'")
+        raise ModuleNotFoundError("No module named 'bora.resources'")
 
-    monkeypatch.setattr("cumulus.oauth.files", _raise)
+    monkeypatch.setattr("bora.oauth.files", _raise)
     with pytest.raises(AuthError):
         oauth.load_client_config()
 
@@ -80,8 +80,8 @@ def test_credentials_from_refresh_token_uses_bundled_client(monkeypatch):
     assert creds.token is None  # access token absent until first refresh
 
 
-from cumulus.config import remove_configuration
-from cumulus.keyring import CredentialStorage
+from bora.config import remove_configuration
+from bora.keyring import CredentialStorage
 
 
 @pytest.fixture
@@ -197,7 +197,7 @@ def test_run_local_flow_returns_credentials(monkeypatch):
     fake_flow.run_local_server = mock.Mock(return_value=fake_creds)
 
     with mock.patch(
-        "cumulus.oauth.InstalledAppFlow.from_client_config",
+        "bora.oauth.InstalledAppFlow.from_client_config",
         return_value=fake_flow,
     ):
         result = oauth.run_local_flow(port=8080)
@@ -216,7 +216,7 @@ def test_run_local_flow_port_in_use_raises_auth_error(monkeypatch):
     )
 
     with mock.patch(
-        "cumulus.oauth.InstalledAppFlow.from_client_config",
+        "bora.oauth.InstalledAppFlow.from_client_config",
         return_value=fake_flow,
     ):
         with pytest.raises(AuthError) as excinfo:

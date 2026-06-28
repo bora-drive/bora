@@ -5,11 +5,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from cumulus import notify, oauth
-from cumulus.exceptions import CursorResetError, NoSyncDirError
-from cumulus.main import Maestral
-from cumulus.utils.appdirs import get_home_dir
-from cumulus.utils.path import delete
+from bora import notify, oauth
+from bora.exceptions import CursorResetError, NoSyncDirError
+from bora.main import Maestral
+from bora.utils.appdirs import get_home_dir
+from bora.utils.path import delete
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ def test_persistent_cursor_reset_trips_circuit_breaker(m: Maestral, tmp_path) ->
     autostart = manager.autostart
     manager.desktop_notifier = Mock()
 
-    from cumulus.manager import MAX_CURSOR_RESETS
+    from bora.manager import MAX_CURSOR_RESETS
 
     # The first MAX_CURSOR_RESETS resets schedule a restart (autostart set).
     for _ in range(MAX_CURSOR_RESETS):
@@ -153,7 +153,7 @@ def test_cursor_reset_counter_resets_on_healthy_cycle(m: Maestral, tmp_path) -> 
     autostart = manager.autostart
     manager.desktop_notifier = Mock()
 
-    from cumulus.manager import MAX_CURSOR_RESETS
+    from bora.manager import MAX_CURSOR_RESETS
 
     # Exhaust the budget minus one, then a healthy cycle clears it.
     for _ in range(MAX_CURSOR_RESETS):

@@ -26,12 +26,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from cumulus.client import GoogleDriveClient, _DOWNLOAD_CHUNK_SIZE
-from cumulus.config import remove_configuration
-from cumulus.database.core import Database
-from cumulus.exceptions import DataCorruptionError
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient, _DOWNLOAD_CHUNK_SIZE
+from bora.config import remove_configuration
+from bora.database.core import Database
+from bora.exceptions import DataCorruptionError
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 from tests.fake_drive import ROOT_ID, FakeDrive, make_timeout
 
 # ---------------------------------------------------------------------------
@@ -240,8 +240,8 @@ def test_mid_chunk_timeout_teeth(cof, tmp_path):
     client must raise (wrapped as a Cumulus connection error), and no file is
     committed.
     """
-    from cumulus.client import _MAX_RETRY_ATTEMPTS
-    from cumulus.exceptions import ConnectionError as _CumulusConnError
+    from bora.client import _MAX_RETRY_ATTEMPTS
+    from bora.exceptions import ConnectionError as _CumulusConnError
 
     client, fake = cof
 

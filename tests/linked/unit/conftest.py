@@ -4,12 +4,12 @@ import sqlite3
 
 import pytest
 
-from cumulus.client import GoogleDriveClient
-from cumulus.config import remove_configuration
-from cumulus.database.core import Database
-from cumulus.exceptions import AuthError, NotFoundError
-from cumulus.keyring import CredentialStorage
-from cumulus.path_cache import PathIDCache
+from bora.client import GoogleDriveClient
+from bora.config import remove_configuration
+from bora.database.core import Database
+from bora.exceptions import AuthError, NotFoundError
+from bora.keyring import CredentialStorage
+from bora.path_cache import PathIDCache
 
 from tests.linked.conftest import TEST_CONFIG, _make_client
 

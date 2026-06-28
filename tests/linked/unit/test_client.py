@@ -38,13 +38,13 @@ import os
 
 import pytest
 
-from cumulus.client import GoogleDriveClient
-from cumulus.core import FileMetadata, FolderMetadata, WriteMode
-from cumulus.exceptions import (
+from bora.client import GoogleDriveClient
+from bora.core import FileMetadata, FolderMetadata, WriteMode
+from bora.exceptions import (
     DataCorruptionError,
     NotFoundError,
 )
-from cumulus.utils.path import normalize
+from bora.utils.path import normalize
 
 from tests.linked.conftest import requires_account, wait_until
 
@@ -104,7 +104,7 @@ def test_upload_hash_mismatch(
     md5Checksum. Monkeypatching _md5_file to return a wrong hash causes every
     upload to fail the comparison.
     """
-    import cumulus.writes as _writes
+    import bora.writes as _writes
 
     file = resources + "/file.txt"
 
@@ -142,11 +142,11 @@ def test_download_hash_mismatch(
 ) -> None:
     """DataCorruptionError raised when the downloaded file has the wrong MD5.
 
-    client.py's download() method verifies the file via cumulus.client.hashlib.md5
+    client.py's download() method verifies the file via bora.client.hashlib.md5
     after the download completes. Monkeypatching that reference to return a
     wrong hexdigest causes the comparison to fail.
     """
-    import cumulus.client as _client_mod
+    import bora.client as _client_mod
 
     file = resources + "/file.txt"
     client.upload(file, "/file.txt")

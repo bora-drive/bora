@@ -7,17 +7,17 @@ import httplib2
 import pytest
 from googleapiclient.errors import HttpError
 
-from cumulus.client import GoogleDriveClient
-from cumulus.config import list_configs, remove_configuration
-from cumulus.core import AccountType, FullAccount
-from cumulus.database.core import Database
-from cumulus.path_cache import PathIDCache
-from cumulus.daemon import Stop, stop_cumulus_daemon_process
-from cumulus.fsevents import Observer
-from cumulus.keyring import CredentialStorage
-from cumulus.main import Maestral
-from cumulus.sync import SyncEngine
-from cumulus.utils.path import delete
+from bora.client import GoogleDriveClient
+from bora.config import list_configs, remove_configuration
+from bora.core import AccountType, FullAccount
+from bora.database.core import Database
+from bora.path_cache import PathIDCache
+from bora.daemon import Stop, stop_cumulus_daemon_process
+from bora.fsevents import Observer
+from bora.keyring import CredentialStorage
+from bora.main import Maestral
+from bora.sync import SyncEngine
+from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive
 
 

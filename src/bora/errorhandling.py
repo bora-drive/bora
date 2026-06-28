@@ -1,6 +1,6 @@
 """This module contains methods to convert OSErrors, Google auth-library
 exceptions, and HTTP errors to instances of
-:exc:`cumulus.exceptions.CumulusApiError`.
+:exc:`bora.exceptions.CumulusApiError`.
 """
 
 from __future__ import annotations
@@ -207,7 +207,7 @@ def convert_api_errors(
     remote_path: str | None = None, local_path: str | None = None
 ) -> Iterator[None]:
     """A context manager that catches and re-raises instances of :exc:`OSError` and
-    Google API exceptions as :exc:`cumulus.exceptions.CumulusApiError` or
+    Google API exceptions as :exc:`bora.exceptions.CumulusApiError` or
     :exc:`ConnectionError`.
 
     :param remote_path: Remote path associated with the error.
@@ -250,7 +250,7 @@ def convert_api_errors(
 def os_to_cumulus_error(
     exc: OSError, remote_path: str | None = None, local_path: str | None = None
 ) -> LocalError:
-    """Converts a :exc:`OSError` to a :exc:`cumulus.exceptions.CumulusApiError` and
+    """Converts a :exc:`OSError` to a :exc:`bora.exceptions.CumulusApiError` and
     tries to add a reasonably informative error title and message.
 
     :param exc: Original OSError.
@@ -335,7 +335,7 @@ def google_api_to_cumulus_error(
     remote_path: str | None = None,
     local_path: str | None = None,
 ) -> CumulusApiError:
-    """Converts a Google API exception to a :exc:`cumulus.exceptions.CumulusApiError`.
+    """Converts a Google API exception to a :exc:`bora.exceptions.CumulusApiError`.
 
     .. note:: Not yet implemented. Will be completed in Phase 6.
 

@@ -1,6 +1,6 @@
 import pytest
 
-from cumulus.utils import get_newer_version
+from bora.utils import get_newer_version
 
 releases = (
     "0.6.1",
