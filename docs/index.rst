@@ -12,6 +12,8 @@ refer to `bora.tools <https://bora.tools>`_.
    :caption: Background
    :maxdepth: 2
 
+   setup
+   differences
    background/sync_logic
    background/logging
    background/config_files
