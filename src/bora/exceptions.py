@@ -39,35 +39,14 @@ class BoraApiError(Exception):
         remote_path_from: str | None = None,
         local_path: str | None = None,
         local_path_from: str | None = None,
-        # Backward compat aliases:
-        dbx_path: str | None = None,
-        dbx_path_from: str | None = None,
     ) -> None:
         super().__init__(f"{title}. {message}")
         self.title = title
         self.message = message
-        self.remote_path = remote_path or dbx_path
-        self.remote_path_from = remote_path_from or dbx_path_from
+        self.remote_path = remote_path
+        self.remote_path_from = remote_path_from
         self.local_path = local_path
         self.local_path_from = local_path_from
-
-    @property
-    def dbx_path(self) -> str | None:
-        """Backward compat alias for remote_path."""
-        return self.remote_path
-
-    @dbx_path.setter
-    def dbx_path(self, value: str | None) -> None:
-        self.remote_path = value
-
-    @property
-    def dbx_path_from(self) -> str | None:
-        """Backward compat alias for remote_path_from."""
-        return self.remote_path_from
-
-    @dbx_path_from.setter
-    def dbx_path_from(self, value: str | None) -> None:
-        self.remote_path_from = value
 
     def __str__(self) -> str:
         return f"{self.title}. {self.message}"
@@ -130,9 +109,6 @@ class ServerError(SyncError):
     """Raised in case of internal server errors."""
 
 
-DropboxServerError = ServerError  # backward compat
-
-
 class RestrictedContentError(SyncError):
     """Raised when trying to sync restricted content, for instance when adding a file
     with a DMCA takedown notice to a public folder."""
@@ -164,9 +140,6 @@ class ConnectionError(BoraApiError):
     """Raised when the connection to the remote server fails."""
 
 
-DropboxConnectionError = ConnectionError  # backward compat
-
-
 class CancelledError(BoraApiError):
     """Raised when syncing is cancelled by the user."""
 
@@ -187,9 +160,6 @@ class NoSyncDirError(BoraApiError):
     """Raised when the local sync folder cannot be found."""
 
 
-NoDropboxDirError = NoSyncDirError  # backward compat
-
-
 class CacheDirError(BoraApiError):
     """Raised when creating the cache directory fails."""
 
@@ -208,9 +178,6 @@ class DatabaseError(BoraApiError):
 
 class AuthError(BoraApiError):
     """Raised when authentication fails."""
-
-
-DropboxAuthError = AuthError  # backward compat
 
 
 class TokenExpiredError(AuthError):

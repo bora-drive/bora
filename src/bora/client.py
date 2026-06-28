@@ -1312,8 +1312,3 @@ class GoogleDriveClient:
             has_more=False,
             cursor=results[-1].cursor,
         )
-
-
-# Backward-compat alias: sync.py and main.py still reference this name.
-# TODO: Update all call-sites to use GoogleDriveClient, then remove this alias.
-DropboxClient = GoogleDriveClient
