@@ -77,7 +77,7 @@ This cache should be stored in SQLite alongside the existing sync database.
 The cursor-based change feed maps directly. The long-poll mechanism does not.
 
 **Solution for `wait_for_remote_changes`:** Replace the long-poll with **periodic polling**
-of `changes.list` (e.g., every 30s). This is simpler than setting up webhooks and is
+of `changes.list` (e.g., every 180s). This is simpler than setting up webhooks and is
 sufficient for a desktop client. Webhooks can be added later as an optimization.
 
 ### 3.3 File Revisions
@@ -286,7 +286,7 @@ Before any code runs, a Google Cloud project is required:
 | Google Drive rate limits (more aggressive than Dropbox — 12k queries/day default per-user) | **Medium** | Batch API calls; exponential backoff; request quota increase |
 | Duplicate filenames in same folder | **Medium** | Detect and refuse to sync, or auto-rename with suffix |
 | Files with multiple parents | **Low** | Pick first parent as canonical; log warning |
-| No long-poll equivalent | **Medium** | Polling every 30s is fine for desktop; webhooks later |
+| No long-poll equivalent | **Medium** | Polling every 180s is fine for desktop; webhooks later |
 | OAuth verification for public distribution | **Medium** | Apply early; use restricted scopes where possible |
 | Google Docs/Sheets/Slides (not real files) | **Medium** | Skip or export as PDF/OOXML; they have no content hash or downloadable bytes |
 | Symlinks (no Google Drive equivalent) | **Low** | Skip symlinks during upload; log warning. `symlink_target` field kept in schema but always `None`. |
