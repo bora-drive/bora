@@ -55,15 +55,10 @@ from .core import (
     FileMetadata,
     FolderMetadata,
     FullAccount,
-    LinkAccessLevel,
-    LinkAudience,
-    LinkPermissions,
     ListFolderResult,
-    ListSharedLinkResult,
     Metadata,
     PersonalSpaceUsage,
     RootInfo,
-    SharedLinkMetadata,
     SpaceUsage,
     Team,
     TeamRootInfo,
@@ -1295,48 +1290,6 @@ class GoogleDriveClient:
                 last_cursor,
                 resolve_deleted_path=resolve_deleted_path,
             )
-
-    # ---- Sharing ---------------------------------------------------------------------
-
-    def create_shared_link(
-        self,
-        remote_path: str,
-        visibility: LinkAudience = LinkAudience.Public,
-        access_level: LinkAccessLevel = LinkAccessLevel.Viewer,
-        allow_download: bool | None = None,
-        password: str | None = None,
-        expires: datetime | None = None,
-    ) -> SharedLinkMetadata:
-        """Creates a shared link for the given path.
-
-        :param remote_path: Path to file or folder to share.
-        :param visibility: Visibility of the shared link.
-        :param access_level: Access level granted with the link.
-        :param allow_download: Whether to allow downloads.
-        :param password: Optional password protection.
-        :param expires: Optional expiry time.
-        :returns: Metadata for shared link.
-        """
-        _not_implemented()
-        return SharedLinkMetadata("", "", "", None, None)  # type: ignore[call-arg]  # unreachable
-
-    def revoke_shared_link(self, url: str) -> None:
-        """Revokes a shared link.
-
-        :param url: URL to revoke.
-        """
-        _not_implemented()
-
-    def list_shared_links(
-        self, remote_path: str | None = None
-    ) -> list[SharedLinkMetadata]:
-        """Lists all shared links for a given path.
-
-        :param remote_path: Path to file or folder.
-        :returns: Shared links for the path.
-        """
-        _not_implemented()
-        return []  # unreachable
 
     # ---- Utilities -------------------------------------------------------------------
 

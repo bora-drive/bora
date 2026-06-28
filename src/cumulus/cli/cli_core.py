@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import sys
 import threading
-from datetime import datetime
 from os import path as osp
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 import click
-from rich.console import Console, ConsoleRenderable
 
 from .. import oauth
-from ..core import FolderMetadata, SharedLinkMetadata
+from ..core import FolderMetadata
 from ..utils.path import delete
 from .common import (
     check_for_fatal_errors,
@@ -20,9 +18,9 @@ from .common import (
     existing_config_option,
     inject_proxy,
 )
-from .core import CliException, RemotePath
+from .core import CliException
 from .dialogs import confirm, prompt, select, select_multiple, select_path
-from .output import RichDateField, echo, info, ok, rich_table, warn
+from .output import echo, info, ok, warn
 
 if TYPE_CHECKING:
     from ..daemon import MaestralProxy
@@ -467,94 +465,3 @@ def auth_status(config_name: str) -> None:
     echo(f"Account type:  {account_type}")
     echo(f"Remote ID:    {dbid}")
     echo("")
-
-
-@click.group(help="Create and manage shared links.")
-def sharelink() -> None:
-    pass
-
-
-@sharelink.command(
-    name="create", help="Create a shared link for a file or folder. Return the URL."
-)
-@click.argument("sync_path", type=RemotePath())
-@click.option(
-    "-p",
-    "--password",
-    help="Optional password for the link.",
-)
-@click.option(
-    "-e",
-    "--expiry",
-    metavar="DATE",
-    type=click.DateTime(formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"]),
-    help="Expiry time for the link (e.g. '2025-07-24 20:50').",
-)
-@inject_proxy(fallback=True, existing_config=True)
-@convert_api_errors
-def sharelink_create(
-    m: Maestral,
-    sync_path: str,
-    password: str,
-    expiry: datetime | None,
-) -> None:
-    link_info = m.create_shared_link(sync_path, password=password, expires=expiry)
-    echo(link_info.url)
-
-
-@sharelink.command(name="revoke", help="Revoke a shared link.")
-@click.argument("url", nargs=-1, required=True)
-@inject_proxy(fallback=True, existing_config=True)
-@convert_api_errors
-def sharelink_revoke(m: Maestral, url: list[str]) -> None:
-    for u in url:
-        m.revoke_shared_link(u)
-        ok(f"Revoked shared link {u}")
-
-
-@sharelink.command(
-    name="list", help="List shared links for given paths or all shared links."
-)
-@click.argument("sync_path", nargs=-1, type=RemotePath())
-@click.option(
-    "-l",
-    "--long",
-    is_flag=True,
-    default=False,
-    help="Show output in long format with metadata.",
-)
-@inject_proxy(fallback=True, existing_config=True)
-@convert_api_errors
-def sharelink_list(m: Maestral, sync_path: list[str], long: bool) -> None:
-    links: list[SharedLinkMetadata]
-
-    if len(sync_path) > 0:
-        links = []
-        for remote_path in sync_path:
-            links.extend(m.list_shared_links(remote_path))
-    else:
-        links = m.list_shared_links()
-
-    if long:
-        link_table = rich_table("URL", "Item", "Access", "Expires")
-
-        for link in links:
-            dt_field: ConsoleRenderable | str
-
-            if link.expires:
-                dt_field = RichDateField(link.expires)
-            else:
-                dt_field = "-"
-
-            if link.link_permissions.require_password:
-                access = "password"
-            else:
-                access = link.link_permissions.effective_audience.value
-
-            link_table.add_row(link.url, link.name, access, dt_field)
-
-        console = Console()
-        console.print(link_table)
-
-    else:
-        echo("\n".join(link.url for link in links))
