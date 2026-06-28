@@ -26,9 +26,6 @@ Ported:
   - test_restore
   - test_make_dir
   - test_batch_methods (make_dir_batch + remove_batch)
-
-Added:
-  - test_sharing_stubs_raise (confirms sharing methods raise NotImplementedError)
 """
 
 from __future__ import annotations

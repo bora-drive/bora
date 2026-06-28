@@ -1,8 +1,8 @@
 """Tests for Phase 1 renaming: exception classes should have backend-agnostic names.
 
 These tests verify that the old Dropbox-prefixed names are replaced with
-new generic names, and that the old names still work as aliases for
-backward compatibility.
+new generic names. The transitional backward-compat aliases (DropboxClient,
+Dropbox*Error, dbx_path) were removed in Stage 8.
 """
 
 def test_server_error_exists():

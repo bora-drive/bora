@@ -9,7 +9,7 @@ DEFAULTS_CONFIG = {
         "keyring": "automatic",
     },
     "sync": {
-        "path": "/Users/Leslie/Dropbox (Bora)",
+        "path": "/Users/Leslie/Google Drive (Bora)",
         "excluded_items": ["/Photos"],
         "upload": True,
         "download": True,
