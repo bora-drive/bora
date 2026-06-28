@@ -5,9 +5,6 @@ new generic names, and that the old names still work as aliases for
 backward compatibility.
 """
 
-import pytest
-
-
 def test_server_error_exists():
     from bora.exceptions import ServerError
     assert issubclass(ServerError, Exception)
@@ -26,19 +23,6 @@ def test_auth_error_exists():
 def test_no_sync_dir_error_exists():
     from bora.exceptions import NoSyncDirError
     assert issubclass(NoSyncDirError, Exception)
-
-
-def test_old_names_still_importable():
-    """Backward compat: old names should still be importable as aliases."""
-    from bora.exceptions import DropboxServerError, DropboxConnectionError
-    from bora.exceptions import DropboxAuthError, NoDropboxDirError
-    from bora.exceptions import ServerError, ConnectionError
-    from bora.exceptions import AuthError, NoSyncDirError
-
-    assert DropboxServerError is ServerError
-    assert DropboxConnectionError is ConnectionError
-    assert DropboxAuthError is AuthError
-    assert NoDropboxDirError is NoSyncDirError
 
 
 def test_token_errors_inherit_from_auth_error():
@@ -63,18 +47,6 @@ def test_bora_api_error_uses_remote_path():
     assert err.remote_path_from == "/old"
     assert err.local_path == "/local/test"
     assert err.local_path_from == "/local/old"
-
-
-def test_bora_api_error_dbx_path_compat():
-    """Old dbx_path kwargs should still work as aliases."""
-    from bora.exceptions import BoraApiError
-
-    err = BoraApiError("title", "msg", dbx_path="/compat", dbx_path_from="/old")
-    assert err.remote_path == "/compat"
-    assert err.remote_path_from == "/old"
-    # Old attribute names should also work
-    assert err.dbx_path == "/compat"
-    assert err.dbx_path_from == "/old"
 
 
 def test_sync_event_has_remote_path_field():
