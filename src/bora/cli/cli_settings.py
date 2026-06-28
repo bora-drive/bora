@@ -9,7 +9,7 @@ from .core import CliException, RemotePath
 from .output import echo, ok
 
 if TYPE_CHECKING:
-    from ..main import Maestral
+    from ..main import Bora
 
 
 @click.command(
@@ -56,7 +56,7 @@ def excluded() -> None:
 
 @excluded.command(name="list", help="List all excluded files and folders.")
 @inject_proxy(fallback=True, existing_config=True)
-def excluded_list(m: Maestral) -> None:
+def excluded_list(m: Bora) -> None:
     excluded_items = m.excluded_items
 
     if len(excluded_items) == 0:
@@ -73,7 +73,7 @@ def excluded_list(m: Maestral) -> None:
 @click.argument("sync_paths", type=RemotePath(), nargs=-1)
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def excluded_add(m: Maestral, sync_paths: list[str]) -> None:
+def excluded_add(m: Bora, sync_paths: list[str]) -> None:
     if any(p == "/" for p in sync_paths):
         raise CliException("Cannot exclude the root directory.")
 
@@ -95,7 +95,7 @@ folder will be included as well (but no other items inside it).
 @click.argument("sync_paths", type=RemotePath(), nargs=-1)
 @inject_proxy(fallback=False, existing_config=True)
 @convert_api_errors
-def excluded_remove(m: Maestral, sync_paths: str) -> None:
+def excluded_remove(m: Bora, sync_paths: str) -> None:
     if any(p == "/" for p in sync_paths):
         return echo("The root directory is always included")
 
@@ -120,7 +120,7 @@ def notify() -> None:
     type=click.Choice(["ERROR", "SYNCISSUE", "FILECHANGE"], case_sensitive=False),
 )
 @inject_proxy(fallback=True, existing_config=True)
-def notify_level(m: Maestral, level_name: str) -> None:
+def notify_level(m: Bora, level_name: str) -> None:
     from .. import notify as _notify
 
     if level_name:
@@ -137,7 +137,7 @@ def notify_level(m: Maestral, level_name: str) -> None:
 )
 @click.argument("minutes", type=click.IntRange(min=0))
 @inject_proxy(fallback=True, existing_config=True)
-def notify_snooze(m: Maestral, minutes: int) -> None:
+def notify_snooze(m: Bora, minutes: int) -> None:
     m.notification_snooze = minutes
 
     if minutes > 0:
@@ -160,7 +160,7 @@ def bandwidth_limit() -> None:
     type=click.FLOAT,
 )
 @inject_proxy(fallback=True, existing_config=True)
-def bandwidth_limit_up(m: Maestral, mb_per_second: float | None) -> None:
+def bandwidth_limit_up(m: Bora, mb_per_second: float | None) -> None:
     if mb_per_second is not None:
         m.bandwidth_limit_up = mb_per_second * 10**6
         speed_str = f"{mb_per_second} MB/sec" if mb_per_second > 0 else "unlimited"
@@ -180,7 +180,7 @@ def bandwidth_limit_up(m: Maestral, mb_per_second: float | None) -> None:
     type=click.FLOAT,
 )
 @inject_proxy(fallback=True, existing_config=True)
-def bandwidth_limit_down(m: Maestral, mb_per_second: float | None) -> None:
+def bandwidth_limit_down(m: Bora, mb_per_second: float | None) -> None:
     if mb_per_second is not None:
         m.bandwidth_limit_down = mb_per_second * 10**6
         speed_fmt = f"{mb_per_second} MB/sec" if mb_per_second > 0 else "unlimited"

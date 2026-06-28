@@ -62,7 +62,7 @@ from bora.exceptions import (
     SymlinkError,
     SyncError,
 )
-from bora.main import Maestral
+from bora.main import Bora
 from bora.models import SyncDirection, SyncEvent
 from bora.utils.appdirs import get_home_dir
 from bora.utils.path import (
@@ -90,8 +90,8 @@ HOME = get_home_dir()
 LOCK_PATH = "/" + LOCK_NAME
 
 
-def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
-    """Blocks until Maestral instance is idle for at least ``cycles`` sync cycles."""
+def wait_for_idle(m: Bora, cycles: int = 6) -> None:
+    """Blocks until Bora instance is idle for at least ``cycles`` sync cycles."""
 
     count = 0
 
@@ -106,7 +106,7 @@ def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
             count += 1
 
 
-def remove_remote(m: Maestral, path: str) -> None:
+def remove_remote(m: Bora, path: str) -> None:
     """Trash a remote item through the independent mutator client so the
     deletion reaches the engine via its change feed with the engine's own
     path cache left intact (see ``RemoteMutator`` in conftest). ``m.client``
@@ -120,7 +120,7 @@ def remove_remote(m: Maestral, path: str) -> None:
 
 
 @requires_account
-def test_setup(m: Maestral) -> None:
+def test_setup(m: Bora) -> None:
     assert_synced(m)
     assert_no_errors(m)
 
@@ -144,7 +144,7 @@ def test_setup(m: Maestral) -> None:
         ),
     ],
 )
-def test_file_lifecycle(m: Maestral, name: str) -> None:
+def test_file_lifecycle(m: Bora, name: str) -> None:
     """Tests creating, modifying and deleting a file."""
 
     # Test local file creation.
@@ -184,7 +184,7 @@ def test_file_lifecycle(m: Maestral, name: str) -> None:
 
 
 @requires_account
-def test_folder_tree_local(m: Maestral) -> None:
+def test_folder_tree_local(m: Bora) -> None:
     """Tests the upload sync of a nested local folder structure."""
 
     # Test local tree creation.
@@ -217,7 +217,7 @@ def test_folder_tree_local(m: Maestral) -> None:
 
 
 @requires_account
-def test_folder_tree_remote(m: Maestral) -> None:
+def test_folder_tree_remote(m: Bora) -> None:
     """Tests the download sync of a nested remote folder structure."""
 
     # Test remote tree creation.
@@ -250,7 +250,7 @@ def test_folder_tree_remote(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_indexing(m: Maestral) -> None:
+def test_local_indexing(m: Bora) -> None:
     """Tests the upload sync of a nested local folder structure during startup sync."""
 
     m.stop_sync()
@@ -301,7 +301,7 @@ def test_local_indexing(m: Maestral) -> None:
 
 
 @requires_account
-def test_case_change_local(m: Maestral) -> None:
+def test_case_change_local(m: Bora) -> None:
     """
     Tests the upload sync of local rename which only changes the casing of the name.
     """
@@ -336,7 +336,7 @@ def test_case_change_local(m: Maestral) -> None:
 
 
 @requires_account
-def test_case_change_local_while_stopped(m: Maestral) -> None:
+def test_case_change_local_while_stopped(m: Bora) -> None:
     """
     Tests the upload sync of local rename which only changes the casing of the name.
     """
@@ -372,7 +372,7 @@ def test_case_change_local_while_stopped(m: Maestral) -> None:
 
 
 @requires_account
-def test_case_change_remote(m: Maestral) -> None:
+def test_case_change_remote(m: Bora) -> None:
     """
     Tests the download sync of a remote rename which only changes the casing of the file
     name.
@@ -404,7 +404,7 @@ def test_case_change_remote(m: Maestral) -> None:
 
 
 @requires_account
-def test_mignore(m: Maestral) -> None:
+def test_mignore(m: Bora) -> None:
     """Tests the exclusion of local items by a mignore file."""
 
     # 1) Test that changes have no effect when the sync is running.
@@ -459,7 +459,7 @@ def test_mignore(m: Maestral) -> None:
 
 
 @requires_account
-def test_move_to_existing_file(m: Maestral) -> None:
+def test_move_to_existing_file(m: Bora) -> None:
     """Tests moving a local file onto another and replacing it."""
 
     # Create two local files.
@@ -484,7 +484,7 @@ def test_move_to_existing_file(m: Maestral) -> None:
 
 
 @requires_account
-def test_excluded_folder_cleared_on_deletion(m: Maestral) -> None:
+def test_excluded_folder_cleared_on_deletion(m: Bora) -> None:
     """
     Tests that an entry in our selective sync excluded list gets removed when the
     corresponding item is deleted.
@@ -518,7 +518,7 @@ def test_excluded_folder_cleared_on_deletion(m: Maestral) -> None:
 
 
 @requires_account
-def test_unix_permissions(m: Maestral) -> None:
+def test_unix_permissions(m: Bora) -> None:
     """
     Tests that a newly downloaded file is created with default permissions for our
     process and that any locally set permissions are preserved on remote file
@@ -562,7 +562,7 @@ def test_unix_permissions(m: Maestral) -> None:
 
 
 @requires_account
-def test_file_conflict_modified(m: Maestral) -> None:
+def test_file_conflict_modified(m: Bora) -> None:
     """Tests conflicting local vs remote file changes."""
 
     # Create a test file and stop syncing.
@@ -595,7 +595,7 @@ def test_file_conflict_modified(m: Maestral) -> None:
 
 
 @requires_account
-def test_file_conflict_created(m: Maestral) -> None:
+def test_file_conflict_created(m: Bora) -> None:
     """Tests conflicting local vs remote file creations."""
 
     m.stop_sync()
@@ -620,7 +620,7 @@ def test_file_conflict_created(m: Maestral) -> None:
 
 
 @requires_account
-def test_remote_file_replaced_by_folder(m: Maestral) -> None:
+def test_remote_file_replaced_by_folder(m: Bora) -> None:
     """Tests the download sync when a file is replaced by a folder."""
 
     # Create a test file.
@@ -641,7 +641,7 @@ def test_remote_file_replaced_by_folder(m: Maestral) -> None:
 
 @requires_account
 @pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, 0/6 attempts): the conflict signal is never raised. Drive's change feed lags the remote replacement, so the engine first uploads the locally-modified file via files.update against the old (now trashed) file id — trashing does not change the rev, so the rev guard passes, no DataChangedError is raised, no upload error is recorded, and the change is marked synced. When the DeletedMetadata + FolderMetadata for /file.txt then arrive, _check_download_conflict finds no unsynced local changes ('remote item is newer') and _on_remote_deleted deletes the locally-modified file, so no conflicted copy is created; the modified content survives only inside the trashed remote file. Log: /tmp/cluster-a-task5-remote_file_replaced_by_folder-run{1,2}.log", strict=False)
-def test_remote_file_replaced_by_folder_and_unsynced_local_changes(m: Maestral) -> None:
+def test_remote_file_replaced_by_folder_and_unsynced_local_changes(m: Bora) -> None:
     """
     Tests the download sync when a file is replaced by a folder and the local file has
     unsynced changes.
@@ -677,7 +677,7 @@ def test_remote_file_replaced_by_folder_and_unsynced_local_changes(m: Maestral) 
 
 
 @requires_account
-def test_remote_folder_replaced_by_file(m: Maestral) -> None:
+def test_remote_folder_replaced_by_file(m: Bora) -> None:
     """Tests the download sync when a folder is replaced by a file."""
 
     # Note: we use a folder tree here to test recursive ctime checks.
@@ -708,7 +708,7 @@ def test_remote_folder_replaced_by_file(m: Maestral) -> None:
 
 @requires_account
 @pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, 0/6 attempts): same family as the file case — before the change feed reports the remote replacement, the engine uploads the unsynced local child (/folder/subfolder) under the old folder id; Drive allows creating children under a trashed parent, so the upload succeeds (no DataChangedError, no upload error recorded) and the child is marked synced but is orphaned in the trash. The subsequent DeletedMetadata for /folder then passes _check_download_conflict with 'no unsynced changes' and _on_remote_deleted recursively deletes the local folder, so no conflicted copy is created. Log: /tmp/cluster-a-task5-remote_folder_replaced_by_file-run{1,2}.log", strict=False)
-def test_remote_folder_replaced_by_file_and_unsynced_local_changes(m: Maestral) -> None:
+def test_remote_folder_replaced_by_file_and_unsynced_local_changes(m: Bora) -> None:
     """
     Tests the download sync when a folder is replaced by a file and the local folder has
     unsynced changes.
@@ -744,7 +744,7 @@ def test_remote_folder_replaced_by_file_and_unsynced_local_changes(m: Maestral) 
 
 
 @requires_account
-def test_local_folder_replaced_by_file(m: Maestral) -> None:
+def test_local_folder_replaced_by_file(m: Bora) -> None:
     """Tests the upload sync when a local folder is replaced by a file."""
 
     os.mkdir(m.sync_path + "/folder")
@@ -762,7 +762,7 @@ def test_local_folder_replaced_by_file(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_folder_file_deleted_event(m: Maestral) -> None:
+def test_local_folder_file_deleted_event(m: Bora) -> None:
     """Tests the upload sync when a local folder is deleted but a FileDeletedEvent
     is emitted instead. The deletion should fail."""
 
@@ -784,7 +784,7 @@ def test_local_folder_file_deleted_event(m: Maestral) -> None:
 
 @requires_account
 @pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, flaky: 3/4 invocations green, 1 failed all reruns, 1 passed only on rerun): _on_local_deleted intentionally replaces the remote folder without checking it for unsynced remote children (upstream Dropbox behavior the test relies on). The flaky failure is a Drive duplicate-name race: the test mutator's refresh listing lags Drive's eventual consistency, so make_dir creates a second folder also named 'folder' (Drive permits same-name siblings) and uploads file.txt into it; the engine's id-based deletion removes only the indexed folder, leaving the server with both a folder and a file at /folder, and sync settles diverged (remote folder vs local file: 'different content for /folder'). Log: /tmp/cluster-a-task5-local_folder_replaced_by_file-run2.log", strict=False)
-def test_local_folder_replaced_by_file_and_unsynced_remote_changes(m: Maestral) -> None:
+def test_local_folder_replaced_by_file_and_unsynced_remote_changes(m: Bora) -> None:
     """
     Tests the upload sync when a local folder is replaced by a file and the remote
     folder has unsynced changes.
@@ -810,7 +810,7 @@ def test_local_folder_replaced_by_file_and_unsynced_remote_changes(m: Maestral) 
 
 
 @requires_account
-def test_local_file_replaced_by_folder(m: Maestral) -> None:
+def test_local_file_replaced_by_folder(m: Bora) -> None:
     """Tests the upload sync when a local file is replaced by a folder."""
 
     create_local_tree(m.sync_path, {"file.txt": "content"})
@@ -828,7 +828,7 @@ def test_local_file_replaced_by_folder(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_file_folder_deleted_event(m: Maestral) -> None:
+def test_local_file_folder_deleted_event(m: Bora) -> None:
     """Tests the upload sync when a local file is deleted but a folder deleted event is
     emitted instead. The deletion should succeed."""
 
@@ -850,7 +850,7 @@ def test_local_file_folder_deleted_event(m: Maestral) -> None:
 
 @requires_account
 @pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, flaky: 3/4 invocations green, 1 failed all reruns, 1 passed only on rerun): the Cluster-A rev-guard fix works here — _on_local_deleted raises DataChangedError (remote file was modified) and records an Up sync error, though the replacement folder is still uploaded as a duplicate-named remote sibling. Recovery depends on the remote file's modification arriving via the change feed (the download-conflict path then materializes it locally — the passing case). In failing runs, the changes.list fetch right after the failed deletion advanced the cursor past the not-yet-materialized file-modification entry, the change was not delivered within the test window, so the modified remote file is never downloaded and the recorded upload error persists. Log: /tmp/cluster-a-task5-local_file_replaced_by_folder-run1.log", strict=False)
-def test_local_file_replaced_by_folder_and_unsynced_remote_changes(m: Maestral) -> None:
+def test_local_file_replaced_by_folder_and_unsynced_remote_changes(m: Bora) -> None:
     """
     Tests the upload sync when a local file is replaced by a folder and the remote
     file has unsynced changes.
@@ -883,7 +883,7 @@ def test_local_file_replaced_by_folder_and_unsynced_remote_changes(m: Maestral) 
 
 
 @requires_account
-def test_selective_sync_conflict(m: Maestral) -> None:
+def test_selective_sync_conflict(m: Bora) -> None:
     """
     Tests the creation of a selective sync conflict when a local item is created with a
     path that is excluded by selective sync.
@@ -917,7 +917,7 @@ def test_selective_sync_conflict(m: Maestral) -> None:
 @pytest.mark.skipif(
     not is_fs_case_sensitive(HOME), reason="file system is not case sensitive"
 )
-def test_case_conflict(m: Maestral) -> None:
+def test_case_conflict(m: Bora) -> None:
     """
     Tests the creation of a case conflict when a local item is created with a path that
     only differs in casing from an existing path.
@@ -939,7 +939,7 @@ def test_case_conflict(m: Maestral) -> None:
 
 
 @requires_account
-def test_unicode_decomposed(m: Maestral) -> None:
+def test_unicode_decomposed(m: Bora) -> None:
     """A file with decomposed (NFD) unicode characters round-trips as NFD.
 
     Google Drive does not normalize unicode file names (unlike Dropbox, which
@@ -987,7 +987,7 @@ def test_unicode_decomposed(m: Maestral) -> None:
 
 
 @requires_account
-def test_unicode_conflict(m: Maestral) -> None:
+def test_unicode_conflict(m: Bora) -> None:
     """
     Tests the creation of a unicode conflict when a local item is created with a path
     that only differs in utf-8 form from an existing path.
@@ -1019,7 +1019,7 @@ def test_unicode_conflict(m: Maestral) -> None:
 
 
 @requires_account
-def test_parallel_deletion_when_paused(m: Maestral) -> None:
+def test_parallel_deletion_when_paused(m: Bora) -> None:
     """Tests parallel remote and local deletions of an item."""
 
     # create a local file
@@ -1045,7 +1045,7 @@ def test_parallel_deletion_when_paused(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_and_remote_creation_with_equal_content(m: Maestral) -> None:
+def test_local_and_remote_creation_with_equal_content(m: Bora) -> None:
     """Tests parallel and equal remote and local changes of an item."""
 
     m.stop_sync()
@@ -1064,7 +1064,7 @@ def test_local_and_remote_creation_with_equal_content(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_and_remote_creation_with_different_content(m: Maestral) -> None:
+def test_local_and_remote_creation_with_different_content(m: Bora) -> None:
     """Tests parallel and different remote and local changes of an item."""
 
     m.stop_sync()
@@ -1090,7 +1090,7 @@ def test_local_and_remote_creation_with_different_content(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_deletion_during_upload(m: Maestral) -> None:
+def test_local_deletion_during_upload(m: Bora) -> None:
     """Tests the case where a local item is deleted during the upload."""
 
     # We mimic a deletion during upload by queueing a fake FileCreatedEvent.
@@ -1104,7 +1104,7 @@ def test_local_deletion_during_upload(m: Maestral) -> None:
 
 
 @requires_account
-def test_rapid_local_changes(m: Maestral) -> None:
+def test_rapid_local_changes(m: Bora) -> None:
     """Tests local changes to the content of a file with varying intervals."""
 
     for t in (0.1, 0.1, 0.5, 0.5, 1.0, 1.0, 2.0, 2.0):
@@ -1119,7 +1119,7 @@ def test_rapid_local_changes(m: Maestral) -> None:
 
 
 @requires_account
-def test_rapid_remote_changes(m: Maestral) -> None:
+def test_rapid_remote_changes(m: Bora) -> None:
     """Tests remote changes to the content of a file with varying intervals.
 
     NOTE [E2]: Under Drive there is no optimistic concurrency rev check on upload;
@@ -1149,7 +1149,7 @@ def test_rapid_remote_changes(m: Maestral) -> None:
     "Drive-equivalent invalid-path case — bytes outside the file system "
     "encoding — is covered by test_unknown_path_encoding."
 )
-def test_local_path_error(m: Maestral) -> None:
+def test_local_path_error(m: Bora) -> None:
     """Tests error handling for forbidden file names."""
 
     # paths with backslash are not allowed on Drive
@@ -1173,7 +1173,7 @@ def test_local_path_error(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_indexing_error(m: Maestral) -> None:
+def test_local_indexing_error(m: Bora) -> None:
     """Tests handling of PermissionError during local indexing."""
 
     remote_path = "/folder/file.txt"
@@ -1197,7 +1197,7 @@ def test_local_indexing_error(m: Maestral) -> None:
 
 
 @requires_account
-def test_local_permission_error(m: Maestral) -> None:
+def test_local_permission_error(m: Bora) -> None:
     """Tests error handling on local PermissionError."""
 
     m.stop_sync()
@@ -1230,7 +1230,7 @@ def test_local_permission_error(m: Maestral) -> None:
 
 
 @requires_account
-def test_long_path_error(m: Maestral) -> None:
+def test_long_path_error(m: Bora) -> None:
     """A remote item whose path exceeds the LOCAL filesystem limit surfaces a
     PathError on download.
 
@@ -1265,7 +1265,7 @@ def test_long_path_error(m: Maestral) -> None:
 @pytest.mark.skipif(
     sys.platform != "linux", reason="macOS enforces utf-8 path encoding"
 )
-def test_unknown_path_encoding(m: Maestral, capsys) -> None:
+def test_unknown_path_encoding(m: Bora, capsys) -> None:
     """
     Tests the handling of a local path with bytes that cannot be decoded with the
     file system encoding reported by the platform.
@@ -1305,7 +1305,7 @@ def test_unknown_path_encoding(m: Maestral, capsys) -> None:
 
 
 @requires_account
-def test_symlink_error(m: Maestral) -> None:
+def test_symlink_error(m: Bora) -> None:
     local_path = m.sync_path + "/link"
 
     os.symlink("to_nowhere", local_path)
@@ -1315,7 +1315,7 @@ def test_symlink_error(m: Maestral) -> None:
 
 
 @requires_account
-def test_symlink_indexing_error(m: Maestral) -> None:
+def test_symlink_indexing_error(m: Bora) -> None:
     m.stop_sync()
 
     local_path = m.sync_path + "/link"
@@ -1329,7 +1329,7 @@ def test_symlink_indexing_error(m: Maestral) -> None:
 
 
 @requires_account
-def test_sync_dir_delete_during_sync(m: Maestral) -> None:
+def test_sync_dir_delete_during_sync(m: Bora) -> None:
     delete(m.sync_path)
 
     wait_for_idle(m)
@@ -1340,7 +1340,7 @@ def test_sync_dir_delete_during_sync(m: Maestral) -> None:
 
 @requires_account
 @pytest.mark.skipif(is_fs_case_sensitive(HOME), reason="file system is case sensitive")
-def test_sync_dir_rename_during_sync(m: Maestral) -> None:
+def test_sync_dir_rename_during_sync(m: Bora) -> None:
     dirname, basename = osp.split(m.sync_path)
 
     # Move the directory to a new location with a different casing.
@@ -1353,7 +1353,7 @@ def test_sync_dir_rename_during_sync(m: Maestral) -> None:
 
 
 @requires_account
-def test_sync_dir_delete_during_pause(m: Maestral) -> None:
+def test_sync_dir_delete_during_pause(m: Bora) -> None:
     m.stop_sync()
 
     delete(m.sync_path)
@@ -1370,7 +1370,7 @@ def test_sync_dir_delete_during_pause(m: Maestral) -> None:
 
 
 @requires_account
-def test_sync_event_conversion_performance(m: Maestral) -> None:
+def test_sync_event_conversion_performance(m: Bora) -> None:
     """Tests the performance of converting remote file changes to SyncEvents.
 
     NOTE [E2]: performance thresholds are environment-specific and may need
@@ -1416,7 +1416,7 @@ def test_sync_event_conversion_performance(m: Maestral) -> None:
 
 
 @requires_account
-def test_invalid_pending_download(m: Maestral) -> None:
+def test_invalid_pending_download(m: Bora) -> None:
     """
     Tests error handling when an invalid path is saved in the pending downloads list.
     """
@@ -1436,7 +1436,7 @@ def test_invalid_pending_download(m: Maestral) -> None:
 
 
 @requires_account
-def test_out_of_order_indexing(m: Maestral) -> None:
+def test_out_of_order_indexing(m: Bora) -> None:
     """Tests applying remote events when children are synced before their parents.
 
     NOTE [E2]: relies on list_remote_changes_iterator internal iteration order.
@@ -1486,13 +1486,13 @@ def test_out_of_order_indexing(m: Maestral) -> None:
 # ==== assert helpers ==================================================================
 
 
-def assert_no_errors(m: Maestral) -> None:
+def assert_no_errors(m: Bora) -> None:
     assert len(m.fatal_errors) == 0, m.fatal_errors
     assert len(m.sync_errors) == 0, m.sync_errors
 
 
 def assert_sync_error(
-    m: Maestral,
+    m: Bora,
     err_class: type[SyncError],
     local_path: str | None = None,
     remote_path: str | None = None,
@@ -1515,7 +1515,7 @@ def assert_sync_error(
 
 
 def assert_synced(
-    m: Maestral, tree: DirTreeType | None = None, timeout: int = 90, interval: int = 3
+    m: Bora, tree: DirTreeType | None = None, timeout: int = 90, interval: int = 3
 ) -> None:
     """Condition-based wrapper around :func:`_assert_synced_once`.
 
@@ -1541,7 +1541,7 @@ def assert_synced(
             deadline -= interval
 
 
-def _assert_synced_once(m: Maestral, tree: DirTreeType | None = None) -> None:
+def _assert_synced_once(m: Bora, tree: DirTreeType | None = None) -> None:
     """
     Asserts that the local and remote folders are synced:
 
@@ -1619,7 +1619,7 @@ def _assert_synced_once(m: Maestral, tree: DirTreeType | None = None) -> None:
         assert_local_tree(m, tree)
 
 
-def assert_local_tree(m: Maestral, tree: DirTreeType) -> None:
+def assert_local_tree(m: Bora, tree: DirTreeType) -> None:
     actual_tree = {}  # type: ignore
 
     local_lockpath = m.to_local_path(LOCK_PATH)
@@ -1673,7 +1673,7 @@ def create_local_tree(prefix: str, tree: DirTreeType) -> None:
             create_local_tree(local_path, content)
 
 
-def create_remote_tree(m: Maestral, tree: DirTreeType, prefix: str = "/") -> None:
+def create_remote_tree(m: Bora, tree: DirTreeType, prefix: str = "/") -> None:
     """Recursively create files and folders on the remote via the independent
     mutator client (see ``RemoteMutator``), so the engine observes them only
     through its change feed and its shared path cache is never pre-populated.

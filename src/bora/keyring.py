@@ -119,7 +119,7 @@ class CredentialStorage:
             # Bomb out with an exception.
 
             title = f"Cannot load keyring {keyring_class}"
-            message = "Please relink Maestral to get a new access token."
+            message = "Please relink Bora to get a new access token."
             new_exc = KeyringAccessError(title, message).with_traceback(
                 exc.__traceback__
             )

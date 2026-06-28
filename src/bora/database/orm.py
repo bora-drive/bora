@@ -2,7 +2,7 @@
 A basic object relational mapper for SQLite.
 
 This is a very simple ORM implementation which contains only functionality needed by
-Maestral. Many operations will still require explicit SQL statements. This module is no
+Bora. Many operations will still require explicit SQL statements. This module is no
 alternative to fully featured ORMs such as sqlalchemy but may be useful when system
 memory is constrained.
 """

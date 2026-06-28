@@ -41,7 +41,7 @@ is deleted, so are its children. And before a child is created, its parent direc
 must exist.
 
 MovedEvents which are not unique (their paths appear in other events) will be split
-into Deleted and Created events by Maestral.
+into Deleted and Created events by Bora.
 """
 
 # Copyright 2011 Yesudeep Mangalapilly <yesudeep@gmail.com>

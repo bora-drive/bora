@@ -7,13 +7,13 @@ import bora.main
 from bora.constants import GITHUB_RELEASES_API
 from bora.core import FolderMetadata, ListFolderResult
 from bora.exceptions import NotLinkedError
-from bora.main import Maestral
+from bora.main import Bora
 from bora.models import IndexEntry, ItemType
 from bora.path_cache import PathIDCache
 from bora.path_codec import encode_path, fold_path
 
 
-def test_check_for_updates(m: Maestral) -> None:
+def test_check_for_updates(m: Bora) -> None:
     # get current releases from GitHub
 
     resp = requests.get(GITHUB_RELEASES_API)
@@ -50,17 +50,17 @@ def test_check_for_updates(m: Maestral) -> None:
     assert update_res.release_notes != ""
 
 
-def test_not_linked_error(m: Maestral) -> None:
+def test_not_linked_error(m: Bora) -> None:
     with pytest.raises(NotLinkedError):
         m.get_metadata("/test")
 
 
-def test_maestral_wires_path_cache_into_client(m: Maestral) -> None:
-    """Stage 3: the client must receive a PathIDCache from Maestral."""
+def test_bora_wires_path_cache_into_client(m: Bora) -> None:
+    """Stage 3: the client must receive a PathIDCache from Bora."""
     assert isinstance(m.client._path_cache, PathIDCache)
 
 
-def test_shutdown_daemon_calls_client_close(m: Maestral) -> None:
+def test_shutdown_daemon_calls_client_close(m: Bora) -> None:
     """Stage 5: shutdown_daemon must call client.close() before stop_sync()
     so that any in-flight change-feed poll is aborted before workers are joined."""
     call_order: list[str] = []
@@ -91,12 +91,12 @@ def _bypass_link_checks():
     """exclude/include_items guard on a linked account and a sync dir; neither
     exists in the offline harness, and neither is needed by the code under test."""
     return (
-        patch.object(Maestral, "_check_linked"),
-        patch.object(Maestral, "_check_sync_dir"),
+        patch.object(Bora, "_check_linked"),
+        patch.object(Bora, "_check_sync_dir"),
     )
 
 
-def test_include_items_casefold_divergent_name(m: Maestral) -> None:
+def test_include_items_casefold_divergent_name(m: Bora) -> None:
     """exclude → include round-trip for a casefold-divergent name.
 
     'Straße' is stored as '/strasse' (fold_human: casefold maps ß → ss), but
@@ -112,7 +112,7 @@ def test_include_items_casefold_divergent_name(m: Maestral) -> None:
     assert m.sync.excluded_items == set()
 
 
-def test_include_items_literal_percent_name(m: Maestral) -> None:
+def test_include_items_literal_percent_name(m: Bora) -> None:
     """A name containing a literal percent-escape ('a%20b') must survive the
     round-trip: it is stored verbatim in fold_human form and must not be
     unquoted by any comparison along the way."""
@@ -126,7 +126,7 @@ def test_include_items_literal_percent_name(m: Maestral) -> None:
     assert m.sync.excluded_items == set()
 
 
-def test_exclude_items_removes_index_entries_by_fold_path_key(m: Maestral) -> None:
+def test_exclude_items_removes_index_entries_by_fold_path_key(m: Bora) -> None:
     """_remove_after_excluded must key index housekeeping by the fold_path
     (encoded) form — the index's remote_path_lower — not the fold_human form."""
     encoded = encode_path("/Ördner/datei.txt")
@@ -154,7 +154,7 @@ def test_exclude_items_removes_index_entries_by_fold_path_key(m: Maestral) -> No
     )
 
 
-def test_include_items_readds_children_in_fold_human_form(m: Maestral) -> None:
+def test_include_items_readds_children_in_fold_human_form(m: Bora) -> None:
     """Including a child of an excluded folder re-adds its siblings to
     excluded_items. The metadata's path_lower is in fold_path (encoded) form
     and must be decoded before insertion, and the client must be queried with

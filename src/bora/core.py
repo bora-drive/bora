@@ -39,7 +39,7 @@ class RootInfo:
     home_namespace_id: str
     """Unique ID of the user's personal namespace
 
-    This will be different from :attr:`root_namespace_id` when Maestral is set up to
+    This will be different from :attr:`root_namespace_id` when Bora is set up to
     sync the shared folder of a team.
     """
 
@@ -254,7 +254,7 @@ class UpdateCheckResult:
     """Information on update availability"""
 
     update_available: bool
-    """Whether an update to Maestral is available"""
+    """Whether an update to Bora is available"""
     latest_release: str
     """The latest release that can be updated to"""
     release_notes: str

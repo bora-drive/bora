@@ -21,13 +21,13 @@ from .core import RemotePath
 from .output import RichDateField, echo, rich_table
 
 if TYPE_CHECKING:
-    from ..main import Maestral
+    from ..main import Bora
 
 
 @click.command(help="Show the status of the daemon.")
 @inject_proxy(fallback=False, existing_config=True)
 @convert_api_errors
-def status(m: Maestral) -> None:
+def status(m: Bora) -> None:
     email = m.get_state("account", "email")
     account_type = m.get_state("account", "type").capitalize()
     usage = m.get_state("account", "usage")
@@ -79,7 +79,7 @@ a file-manager.
 @click.argument("local_path", type=click.Path(exists=True, resolve_path=True))
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def filestatus(m: Maestral, local_path: str) -> None:
+def filestatus(m: Bora, local_path: str) -> None:
     stat = m.get_file_status(local_path)
     echo(stat)
 
@@ -87,7 +87,7 @@ def filestatus(m: Maestral, local_path: str) -> None:
 @click.command(help="Live view of all items being synced.")
 @inject_proxy(fallback=False, existing_config=True)
 @convert_api_errors
-def activity(m: Maestral) -> None:
+def activity(m: Bora) -> None:
     if check_for_fatal_errors(m):
         return
 
@@ -152,14 +152,14 @@ def activity(m: Maestral) -> None:
                     time.sleep(0.2)
                     progress.refresh()
     except ConnectionClosedError:
-        return echo("Maestral daemon is not running.")
+        return echo("Bora daemon is not running.")
 
 
 @click.command(help="Show sync history.")
 @click.argument("sync_path", type=RemotePath(), default="/")
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def history(m: Maestral, sync_path: str) -> None:
+def history(m: Bora, sync_path: str) -> None:
     remote_path = None if sync_path == "/" else sync_path
     events = m.get_history(remote_path)
     table = rich_table("Path", "Change", "Location", "Time")
@@ -196,7 +196,7 @@ def history(m: Maestral, sync_path: str) -> None:
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def ls(m: Maestral, long: bool, sync_path: str, include_deleted: bool) -> None:
+def ls(m: Bora, long: bool, sync_path: str, include_deleted: bool) -> None:
     echo("Loading...\r", nl=False)
 
     entries_iter = m.list_folder_iterator(
@@ -295,9 +295,9 @@ def config_files(clean: bool) -> None:
         # Clean up stale config files.
         for name in list_configs():
             conf = BoraConfig(name)
-            dbid = conf.get("auth", "account_id")
+            remote_id = conf.get("auth", "account_id")
 
-            if dbid == "" and not is_running(name):
+            if remote_id == "" and not is_running(name):
                 remove_configuration(name)
                 echo(f"Removed: {conf.config_path}")
 

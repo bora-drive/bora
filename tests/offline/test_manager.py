@@ -7,7 +7,7 @@ import pytest
 
 from bora import notify, oauth
 from bora.exceptions import CursorResetError, NoSyncDirError
-from bora.main import Maestral
+from bora.main import Bora
 from bora.utils.appdirs import get_home_dir
 from bora.utils.path import delete
 
@@ -16,7 +16,7 @@ from bora.utils.path import delete
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _fake_linked(m: Maestral) -> None:
+def _fake_linked(m: Bora) -> None:
     """Store a valid (offline) refresh-token blob so that m.client.linked is
     True without hitting a real OAuth server."""
     creds = oauth.credentials_from_refresh_token("rt-offline-test")
@@ -28,8 +28,8 @@ def _fake_linked(m: Maestral) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_pending_flags_on_fresh_instance(m: Maestral) -> None:
-    """A freshly constructed Maestral instance has no linked account and no
+def test_pending_flags_on_fresh_instance(m: Bora) -> None:
+    """A freshly constructed Bora instance has no linked account and no
     sync folder configured, so both pending_link and pending_sync_folder
     must be True."""
     assert m.pending_link is True
@@ -37,7 +37,7 @@ def test_pending_flags_on_fresh_instance(m: Maestral) -> None:
 
 
 def test_create_sync_directory_creates_dir_and_clears_pending_flag(
-    m: Maestral, tmp_path
+    m: Bora, tmp_path
 ) -> None:
     """create_sync_directory should create the local directory on disk and
     update sync_path so that pending_sync_folder becomes False."""
@@ -53,7 +53,7 @@ def test_create_sync_directory_creates_dir_and_clears_pending_flag(
 
 
 def test_ensure_sync_folder_present_raises_when_dir_missing(
-    m: Maestral,
+    m: Bora,
 ) -> None:
     """ensure_sync_folder_present must raise NoSyncDirError when the
     configured sync directory does not exist on disk."""
@@ -65,7 +65,7 @@ def test_ensure_sync_folder_present_raises_when_dir_missing(
 
 
 def test_ensure_sync_folder_present_passes_when_dir_exists(
-    m: Maestral, tmp_path
+    m: Bora, tmp_path
 ) -> None:
     """ensure_sync_folder_present must not raise when the sync folder is
     present on disk."""
@@ -77,7 +77,7 @@ def test_ensure_sync_folder_present_passes_when_dir_exists(
     m.sync.ensure_sync_folder_present()
 
 
-def test_cursor_reset_triggers_reindex_and_autostart(m: Maestral, tmp_path) -> None:
+def test_cursor_reset_triggers_reindex_and_autostart(m: Bora, tmp_path) -> None:
     """CursorResetError from the download worker must reset sync state and
     schedule a restart, not stop permanently (review F5)."""
     local_dir = str(tmp_path / "SyncRoot")
@@ -104,7 +104,7 @@ def test_cursor_reset_triggers_reindex_and_autostart(m: Maestral, tmp_path) -> N
     assert manager.desktop_notifier.notify.call_args.kwargs["level"] == notify.INFO
 
 
-def test_persistent_cursor_reset_trips_circuit_breaker(m: Maestral, tmp_path) -> None:
+def test_persistent_cursor_reset_trips_circuit_breaker(m: Bora, tmp_path) -> None:
     """7c-3: repeated CursorResetError must NOT loop forever. After
     MAX_CURSOR_RESETS consecutive resets the manager gives up: it stops without
     re-arming autostart and raises a visible (ERROR-level) notification."""
@@ -141,7 +141,7 @@ def test_persistent_cursor_reset_trips_circuit_breaker(m: Maestral, tmp_path) ->
     assert error_calls, "breaker must surface a visible ERROR notification"
 
 
-def test_cursor_reset_counter_resets_on_healthy_cycle(m: Maestral, tmp_path) -> None:
+def test_cursor_reset_counter_resets_on_healthy_cycle(m: Bora, tmp_path) -> None:
     """7c-3: a healthy (exception-free) pass through the error handler clears
     the reset counter, so transient resets never accumulate to a trip."""
     local_dir = str(tmp_path / "SyncRoot2")

@@ -112,7 +112,7 @@ def _sql_drop_table(db: Database, table: str) -> None:
 # ======================================================================================
 
 
-class Maestral:
+class Bora:
     """The public API
 
     All methods and properties return objects or raise exceptions which can safely be
@@ -130,8 +130,8 @@ class Maestral:
         existing remote account and set up the local sync folder. If successful,
         invoke :meth:`start_sync` to start syncing.
 
-        >>> from bora.main import Maestral
-        >>> m = Maestral(config_name='private')
+        >>> from bora.main import Bora
+        >>> m = Bora(config_name='private')
         >>> url = m.get_auth_url()  # get token from authorization website
         >>> print(f'Please go to {url} to retrieve a authorization token.')
         >>> token = input('Enter auth token: ')
@@ -142,7 +142,7 @@ class Maestral:
 
     :param config_name: Name of bora configuration to run. Must not contain any
         whitespace. If the given config file does exist, it will be created.
-    :param log_to_stderr: If ``True``, Maestral will print log messages to stderr.
+    :param log_to_stderr: If ``True``, Bora will print log messages to stderr.
         When started as a systemd services, this can result in duplicate log messages
         in the systemd journal. Defaults to ``False``.
     :param event_loop: Event loop to use for any features that require an asyncio event
@@ -258,13 +258,13 @@ class Maestral:
 
     @property
     def version(self) -> str:
-        """Returns the current Maestral version."""
+        """Returns the current Bora version."""
         return __version__
 
     def get_auth_url(self) -> str:
         """
         Returns a URL to authorize access to a remote account. To link a remote
-        account, retrieve an authorization code from the URL and link Maestral by
+        account, retrieve an authorization code from the URL and link Bora by
         calling :meth:`link` with the provided code.
 
         :returns: URL to retrieve an authorization code.
@@ -278,7 +278,7 @@ class Maestral:
         access_token: str | None = None,
     ) -> int:
         """
-        Links Maestral with a remote account using the given authorization code. The
+        Links Bora with a remote account using the given authorization code. The
         code will be exchanged for an access token and a refresh token with the remote
         servers. The refresh token will be stored for future usage as documented in the
         :mod:`oauth` module. Supported keyring backends are, in order of preference:
@@ -290,7 +290,7 @@ class Maestral:
             * Plain text storage
 
         For testing, it is also possible to directly provide a long-lived refresh token
-        or a short-lived access token. Note that the tokens must be issued for Maestral,
+        or a short-lived access token. Note that the tokens must be issued for Bora,
         with the required scopes, and will be validated with remote servers as part of
         this call.
 
@@ -553,7 +553,7 @@ class Maestral:
 
     @property
     def pending_link(self) -> bool:
-        """Whether Maestral is linked to a remote account (read only). This will block
+        """Whether Bora is linked to a remote account (read only). This will block
         until the user's keyring is unlocked to load the saved auth token."""
         return not self.client.linked
 
@@ -619,7 +619,7 @@ class Maestral:
         Returns a list of fatal errors as dicts (read only). This does not include lost
         internet connections or file sync errors which only emit warnings and are
         tracked and cleared separately. Errors listed here must be acted upon for
-        Maestral to continue syncing.
+        Bora to continue syncing.
 
         The following keys will always be present but may contain empty values: "type",
         "inherits", "title", "traceback", "title", and "message".s
@@ -778,7 +778,7 @@ class Maestral:
     def get_profile_pic(self) -> str | None:
         """
         Attempts to download the user's profile picture from the remote. The picture is
-        saved in Maestral's cache directory for retrieval when there is no internet
+        saved in Bora's cache directory for retrieval when there is no internet
         connection. Check :attr:`account_profile_pic_path` for cached profile pics.
 
         :returns: Path to saved profile picture or ``None`` if no profile picture was
@@ -1110,7 +1110,7 @@ class Maestral:
         """
         Resets the sync index and state. Only call this to clean up leftover state
         information if the remote was improperly unlinked (e.g., auth token has been
-        manually deleted). Otherwise, leave state management to Maestral.
+        manually deleted). Otherwise, leave state management to Bora.
 
         :raises NotLinkedError: if no remote account is linked.
         """

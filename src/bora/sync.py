@@ -276,8 +276,8 @@ class FSEventHandler(FileSystemEventHandler):
             Prevent triggereing a sync event when creating a local file:
 
             >>> from watchdog.events import FileCreatedEvent
-            >>> from bora.main import Maestral
-            >>> m = Maestral()
+            >>> from bora.main import Bora
+            >>> m = Bora()
             >>> with m.sync.fs_events.ignore(FileCreatedEvent('path')):
             ...     open('path').close()
 
@@ -314,7 +314,7 @@ class FSEventHandler(FileSystemEventHandler):
     def _is_ignored(self, event: FileSystemEvent) -> bool:
         """
         Checks if a file system event should be explicitly ignored because it was
-        triggered by Maestral itself.
+        triggered by Bora itself.
 
         :param event: Local file system event.
         :returns: Whether the event should be ignored.
@@ -1241,7 +1241,7 @@ class SyncEngine:
         exception = NoSyncDirError(
             "sync folder missing",
             "Please move the sync folder back to its original location "
-            "or restart Maestral to set up a new folder.",
+            "or restart Bora to set up a new folder.",
         )
 
         if not isdir(self.sync_path):
@@ -1260,7 +1260,7 @@ class SyncEngine:
                 title = "sync folder renamed"
                 msg = (
                     "Please move the sync folder back to its original location "
-                    "or restart Maestral to set up a new folder."
+                    "or restart Bora to set up a new folder."
                 )
                 raise NoSyncDirError(title, msg)
 
@@ -1503,7 +1503,7 @@ class SyncEngine:
         
 
         This includes file system files such as 'desktop.ini' and '.DS_Store' and some
-        temporary files as well as caches used by Maestral. `is_excluded`
+        temporary files as well as caches used by Bora. `is_excluded`
         accepts both local and remote paths.
 
         :param path: Can be an absolute path, a path relative to the sync folder or
@@ -1720,17 +1720,17 @@ class SyncEngine:
             msg = (
                 f'The index file at "{self._db_path}" cannot be read. '
                 "Please check that you have sufficient permissions and "
-                "restart Maestral to continue syncing."
+                "restart Bora to continue syncing."
             )
             new_exc = DatabaseError(title, msg).with_traceback(exc.__traceback__)
         except sqlite3.IntegrityError as exc:
             title = "Database integrity error"
-            msg = "Please restart Maestral to continue syncing."
+            msg = "Please restart Bora to continue syncing."
             new_exc = DatabaseError(title, msg).with_traceback(exc.__traceback__)
         except sqlite3.DatabaseError as exc:
             title = "Database transaction error"
             msg = (
-                "Please restart Maestral to continue syncing. "
+                "Please restart Bora to continue syncing. "
                 "Rebuild the index if this issue persists."
             )
             new_exc = DatabaseError(title, msg).with_traceback(exc.__traceback__)

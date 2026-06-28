@@ -1,5 +1,5 @@
 """
-This module contains the command line interface of Maestral. Keep all heavy imports
+This module contains the command line interface of Bora. Keep all heavy imports
 local to the command or method that requires them to ensure a responsive CLI.
 """
 

@@ -3,8 +3,8 @@ This module handles starting the bora daemon on user login and supports multiple
 platform specific backends such as launchd or systemd.
 
 Note that launchd agents will not show as "login items" in macOS system preferences. As
-a result, the user does not have a convenient UI to remove Maestral autostart entries
-manually outside Maestral itself. Login items however only support app bundles and
+a result, the user does not have a convenient UI to remove Bora autostart entries
+manually outside Bora itself. Login items however only support app bundles and
 provide no option to pass command line arguments to the app. They would therefore
 neither support pip installed packages nor multiple configurations.
 """
@@ -289,13 +289,13 @@ def get_command_path(dist: str, command: str) -> str:
 
 
 class AutoStart:
-    """Starts Maestral on user log-in
+    """Starts Bora on user log-in
 
     Creates auto-start files in the appropriate system location to automatically start
-    Maestral when the user logs in. Different backends are used depending on the
+    Bora when the user logs in. Different backends are used depending on the
     platform.
 
-    :param config_name: Name of Maestral config.
+    :param config_name: Name of Bora config.
     """
 
     _impl: AutoStartBase
@@ -339,14 +339,14 @@ class AutoStart:
         elif self.implementation == SupportedImplementations.systemd:
             notify_failure = (
                 "if [ ${SERVICE_RESULT} != success ]; "
-                "then notify-send Maestral 'Daemon failed: ${SERVICE_RESULT}'; "
+                "then notify-send Bora 'Daemon failed: ${SERVICE_RESULT}'; "
                 "fi"
             )
 
             self._impl = AutoStartSystemd(
                 service_name="bora-daemon@bora.service",
                 start_cmd=" ".join(start_cmd),
-                unit_dict={"Description": "Maestral daemon for the config %i"},
+                unit_dict={"Description": "Bora daemon for the config %i"},
                 service_dict={
                     "Type": "notify",
                     "WatchdogSec": "30",

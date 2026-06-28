@@ -114,7 +114,7 @@ class AwaitableHandler(logging.Handler):
 class CachedHandler(logging.Handler):
     """Handler which stores past records
 
-    This is used to populate Maestral's status and error interfaces. The method
+    This is used to populate Bora's status and error interfaces. The method
     :meth:`wait_for_emit` can be used from another thread to block until a new record is
     emitted, for instance to react to state changes.
 

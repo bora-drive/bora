@@ -21,13 +21,13 @@ from .output import RichDateField, echo, echo_via_pager, ok, rich_table, warn
 from .utils import get_term_size
 
 if TYPE_CHECKING:
-    from ..main import Maestral
+    from ..main import Bora
 
 
 @click.command(help="Move the local sync folder.")
 @click.argument("new_path", required=False, type=click.Path(writable=True))
 @inject_proxy(fallback=True, existing_config=True)
-def move_dir(m: Maestral, new_path: str) -> None:
+def move_dir(m: Bora, new_path: str) -> None:
     new_path = new_path or select_remote_path_dialog(m.config_name)
     new_path = osp.realpath(osp.expanduser(new_path))
 
@@ -48,7 +48,7 @@ Rebuilding may take several minutes, depending on the size of your sync folder.
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def rebuild_index(m: Maestral, yes: bool) -> None:
+def rebuild_index(m: Bora, yes: bool) -> None:
     size = get_term_size()
 
     msg = textwrap.fill(
@@ -83,7 +83,7 @@ def rebuild_index(m: Maestral, yes: bool) -> None:
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def revs(m: Maestral, sync_path: str, limit: int) -> None:
+def revs(m: Bora, sync_path: str, limit: int) -> None:
     table = rich_table("Revision", "Modified Time")
 
     for entry in m.list_revisions(sync_path, limit=limit):
@@ -127,7 +127,7 @@ and memory.
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
 def diff(
-    m: Maestral,
+    m: Bora,
     sync_path: str,
     rev: list[str],
     no_color: bool,
@@ -244,7 +244,7 @@ If no revision number is given, old revisions will be listed.
 )
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def restore(m: Maestral, sync_path: str, rev: str, limit: int) -> None:
+def restore(m: Bora, sync_path: str, rev: str, limit: int) -> None:
     if not rev:
         echo("Loading...\r", nl=False)
         entries = m.list_revisions(sync_path, limit=limit)
@@ -330,7 +330,7 @@ def log_clear(config_name: str) -> None:
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
 )
 @inject_proxy(fallback=True, existing_config=True)
-def log_level(m: Maestral, level_name: str) -> None:
+def log_level(m: Bora, level_name: str) -> None:
     if level_name:
         m.log_level = cast(int, getattr(logging, level_name))
         ok(f"Log level set to {level_name}.")
@@ -376,7 +376,7 @@ def config() -> None:
 @config.command(name="get", help="Print the value of a given configuration key.")
 @click.argument("key", type=ConfigKey())
 @inject_proxy(fallback=True, existing_config=True)
-def config_get(m: Maestral, key: str) -> None:
+def config_get(m: Bora, key: str) -> None:
     from ..config.main import KEY_SECTION_MAP
 
     # Check if the config key exists in any section.
@@ -403,7 +403,7 @@ instance, setting a boolean config value to 1 will actually set it to True.
 @click.argument("value")
 @inject_proxy(fallback=True, existing_config=True)
 @convert_api_errors
-def config_set(m: Maestral, key: str, value: str) -> None:
+def config_set(m: Bora, key: str, value: str) -> None:
     from ..config.main import DEFAULTS_CONFIG, KEY_SECTION_MAP
 
     section = KEY_SECTION_MAP.get(key, "")

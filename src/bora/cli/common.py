@@ -13,8 +13,8 @@ from .output import warn
 from .utils import get_term_size
 
 if TYPE_CHECKING:
-    from ..daemon import MaestralProxy
-    from ..main import Maestral
+    from ..daemon import BoraProxy
+    from ..main import Bora
 
 
 P = ParamSpec("P")
@@ -40,12 +40,12 @@ def convert_api_errors(func: Callable[P, T]) -> Callable[P, T]:
     return wrapper
 
 
-def check_for_fatal_errors(m: MaestralProxy | Maestral) -> bool:
+def check_for_fatal_errors(m: BoraProxy | Bora) -> bool:
     """
-    Checks the given Maestral instance for fatal errors such as revoked access,
+    Checks the given Bora instance for fatal errors such as revoked access,
     deleted sync folder etc. Prints a nice representation to the command line.
 
-    :param m: Proxy to Maestral daemon or Maestral instance.
+    :param m: Proxy to Bora daemon or Bora instance.
     :returns: True in case of fatal errors, False otherwise.
     """
 
@@ -94,7 +94,7 @@ def inject_proxy(
 ) -> Callable[[Callable[P, T]], Callable[P, Any]]:
     def decorator(f: Callable[P, T]) -> Callable[P, Any]:
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
-            from ..daemon import CommunicationError, MaestralProxy
+            from ..daemon import CommunicationError, BoraProxy
 
             ctx = click.get_current_context()
 
@@ -102,9 +102,9 @@ def inject_proxy(
             kwargs.pop("config_name", None)
 
             try:
-                proxy = ctx.with_resource(MaestralProxy(config_name, fallback=fallback))
+                proxy = ctx.with_resource(BoraProxy(config_name, fallback=fallback))
             except CommunicationError:
-                click.echo("Maestral daemon is not running.")
+                click.echo("Bora daemon is not running.")
                 ctx.exit(1)
             else:
                 return ctx.invoke(f, proxy, *args, **kwargs)

@@ -1,4 +1,4 @@
-"""Linked integration tests for the Maestral main API — ported to Google Drive (Stage 7a, D6).
+"""Linked integration tests for the Bora main API — ported to Google Drive (Stage 7a, D6).
 
 Tests run against a real Google account when BORA_TEST_REFRESH_TOKEN is set;
 they skip cleanly when the variable is absent.
@@ -41,7 +41,7 @@ from bora.exceptions import (
     SyncError,
     UnsupportedFileTypeForDiff,
 )
-from bora.main import Maestral
+from bora.main import Bora
 from bora.utils.integration import get_inotify_limits
 
 from tests.linked.conftest import requires_account, wait_until
@@ -53,7 +53,7 @@ from tests.linked.conftest import requires_account, wait_until
 
 
 def _create_file_with_content(
-    m: Maestral, remote_path: str, content: str | bytes
+    m: Bora, remote_path: str, content: str | bytes
 ) -> FileMetadata:
     """Upload content to remote_path via the Drive client; return FileMetadata."""
     if isinstance(content, bytes):
@@ -80,8 +80,8 @@ def _create_file_with_content(
     return md
 
 
-def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
-    """Blocks until Maestral instance is idle for at least ``cycles`` sync cycles."""
+def wait_for_idle(m: Bora, cycles: int = 6) -> None:
+    """Blocks until Bora instance is idle for at least ``cycles`` sync cycles."""
 
     count = 0
 
@@ -102,7 +102,7 @@ def wait_for_idle(m: Maestral, cycles: int = 6) -> None:
 
 
 @requires_account
-def test_status_properties(m: Maestral) -> None:
+def test_status_properties(m: Bora) -> None:
     assert not m.pending_link
     assert not m.pending_sync_folder
 
@@ -118,7 +118,7 @@ def test_status_properties(m: Maestral) -> None:
 
 
 @requires_account
-def test_file_status(m: Maestral) -> None:
+def test_file_status(m: Bora) -> None:
     # test synced Drive folder
     file_status = m.get_file_status(m.sync_path)
     assert file_status == FileStatus.Synced.value
@@ -170,7 +170,7 @@ def test_file_status(m: Maestral) -> None:
 
 
 @requires_account
-def test_move_dropbox_folder(m: Maestral) -> None:
+def test_move_dropbox_folder(m: Bora) -> None:
     new_dir_short = "~/New GoogleDrive"
     new_dir = osp.realpath(osp.expanduser(new_dir_short))
 
@@ -185,7 +185,7 @@ def test_move_dropbox_folder(m: Maestral) -> None:
 
 
 @requires_account
-def test_move_dropbox_folder_to_itself(m: Maestral) -> None:
+def test_move_dropbox_folder_to_itself(m: Bora) -> None:
     m.move_sync_directory(m.sync_path)
 
     # assert that sync is still running
@@ -193,7 +193,7 @@ def test_move_dropbox_folder_to_itself(m: Maestral) -> None:
 
 
 @requires_account
-def test_move_dropbox_folder_to_existing(m: Maestral, tmp_path) -> None:
+def test_move_dropbox_folder_to_existing(m: Bora, tmp_path) -> None:
     new_dir = tmp_path / "new_dbx_dir"
     new_dir.mkdir()
 
@@ -210,10 +210,10 @@ def test_move_dropbox_folder_to_existing(m: Maestral, tmp_path) -> None:
 
 
 @requires_account
-def test_exclude_items(m: Maestral) -> None:
+def test_exclude_items(m: Bora) -> None:
     """
-    Tests :meth:`Maestral.exclude_item`, :meth:`Maestral.include_item`,
-    :meth:`Maestral.excluded_status` and :meth:`Maestral.excluded_items`.
+    Tests :meth:`Bora.exclude_item`, :meth:`Bora.include_item`,
+    :meth:`Bora.excluded_status` and :meth:`Bora.excluded_items`.
     """
     dbx_dirs = [
         "/selective_sync_test_folder",
@@ -240,10 +240,10 @@ def test_exclude_items(m: Maestral) -> None:
     # check that local items have been deleted
     assert not osp.exists(m.to_local_path("/selective_sync_test_folder"))
 
-    # check that `Maestral.excluded_items` only contains top-level folder
+    # check that `Bora.excluded_items` only contains top-level folder
     assert m.excluded_items == {"/selective_sync_test_folder"}
 
-    # check that `Maestral.excluded_status` returns the correct values
+    # check that `Bora.excluded_status` returns the correct values
     assert m.excluded_status("") == "partially excluded"
     assert m.excluded_status("/independent_folder") == "included"
 
@@ -253,7 +253,7 @@ def test_exclude_items(m: Maestral) -> None:
 
 
 @requires_account
-def test_include_items(m: Maestral) -> None:
+def test_include_items(m: Bora) -> None:
     # create remote folder structure and exclude from sync
     m.exclude_items("/selective_sync_test_folder")
     dbx_dirs = [
@@ -283,7 +283,7 @@ def test_include_items(m: Maestral) -> None:
 
 
 @requires_account
-def test_include_items_nested(m: Maestral) -> None:
+def test_include_items_nested(m: Bora) -> None:
     """Tests special cases of nested selected sync changes."""
     # create remote folder structure and exclude from sync
     m.exclude_items("/selective_sync_test_folder")
@@ -315,8 +315,8 @@ def test_include_items_nested(m: Maestral) -> None:
 
 
 @requires_account
-def test_selective_sync_global(m: Maestral) -> None:
-    """Test :meth:`Maestral.exclude_items` to change all items at once."""
+def test_selective_sync_global(m: Bora) -> None:
+    """Test :meth:`Bora.exclude_items` to change all items at once."""
     dbx_dirs = [
         "/selective_sync_test_folder",
         "/independent_folder",
@@ -342,7 +342,7 @@ def test_selective_sync_global(m: Maestral) -> None:
     # check that local items have been deleted
     assert not osp.exists(m.to_local_path("/selective_sync_test_folder"))
 
-    # check that `Maestral.excluded_items` has been updated correctly
+    # check that `Bora.excluded_items` has been updated correctly
     assert m.excluded_items == {"/selective_sync_test_folder"}
 
     # exclude only child folder from sync, check that it worked
@@ -366,7 +366,7 @@ def test_selective_sync_global(m: Maestral) -> None:
 
 
 @requires_account
-def test_get_file_diff(m: Maestral) -> None:
+def test_get_file_diff(m: Bora) -> None:
     """Tests diffing two remote revisions of a file."""
     remote_path = "/test.txt"
 
@@ -390,7 +390,7 @@ def test_get_file_diff(m: Maestral) -> None:
 
 
 @requires_account
-def test_get_file_diff_local(m: Maestral) -> None:
+def test_get_file_diff_local(m: Bora) -> None:
     """Tests diffing a remote revision against the local file."""
     remote_path = "/test.txt"
     local_path = m.to_local_path(remote_path)
@@ -414,7 +414,7 @@ def test_get_file_diff_local(m: Maestral) -> None:
 
 
 @requires_account
-def test_get_file_diff_not_found(m: Maestral) -> None:
+def test_get_file_diff_not_found(m: Bora) -> None:
     """Tests that get_file_diff raises NotFoundError for a non-existent rev."""
     remote_path = "/test.txt"
 
@@ -427,7 +427,7 @@ def test_get_file_diff_not_found(m: Maestral) -> None:
 
 
 @requires_account
-def test_get_file_diff_unsupported_ext(m: Maestral) -> None:
+def test_get_file_diff_unsupported_ext(m: Bora) -> None:
     """Tests file diffs for unsupported file types."""
 
     remote_path = "/test.pdf"
@@ -445,7 +445,7 @@ def test_get_file_diff_unsupported_ext(m: Maestral) -> None:
 
 
 @requires_account
-def test_get_file_diff_unsupported_content(m: Maestral) -> None:
+def test_get_file_diff_unsupported_content(m: Bora) -> None:
     """Tests file diffs for binary content with .txt extension."""
 
     remote_path = "/test.txt"
@@ -464,7 +464,7 @@ def test_get_file_diff_unsupported_content(m: Maestral) -> None:
 
 
 @requires_account
-def test_get_file_diff_unsupported_content_local(m: Maestral) -> None:
+def test_get_file_diff_unsupported_content_local(m: Bora) -> None:
     """Tests file diff for binary local file content."""
     remote_path = "/test.txt"
     local_path = m.to_local_path(remote_path)
@@ -490,7 +490,7 @@ def test_get_file_diff_unsupported_content_local(m: Maestral) -> None:
 
 
 @requires_account
-def test_restore(m: Maestral) -> None:
+def test_restore(m: Bora) -> None:
     """Tests restoring an old revision."""
 
     remote_path = "/file.txt"
@@ -539,7 +539,7 @@ def test_restore(m: Maestral) -> None:
 
 
 @requires_account
-def test_restore_failed(m: Maestral) -> None:
+def test_restore_failed(m: Bora) -> None:
     """Tests restoring a non-existing revision."""
 
     with pytest.raises(NotFoundError):
@@ -554,7 +554,7 @@ def test_restore_failed(m: Maestral) -> None:
 @requires_account
 @pytest.mark.skipif(sys.platform != "linux", reason="inotify specific test")
 @pytest.mark.skipif(os.getenv("CI", False) is False, reason="Only running on CI")
-def test_inotify_error(m: Maestral) -> None:
+def test_inotify_error(m: Bora) -> None:
     max_user_watches, max_user_instances, _ = get_inotify_limits()
 
     try:
