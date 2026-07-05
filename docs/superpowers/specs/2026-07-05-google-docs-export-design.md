@@ -95,11 +95,18 @@ distinction switch to `is_exportable` / `is_unsupported_native`.
 
 ### 3.4 `sync.py` / `models.py` — the flag & wiring
 
-- **`models.py`:** add `download_only` (bool, default `False`) to `IndexEntry`
-  (`src/bora/models.py:473`). This is a schema change to Bora's custom ORM —
-  the plan must include a DB migration path. (Per config header notes, an
-  *additive* config key needs no `CONF_VERSION` bump; the **DB** index schema is
-  separate and does need a migration step.)
+- **`models.py`:** add `download_only` (nullable bool `Column`, treated as
+  `False` when absent) to `IndexEntry` (`src/bora/models.py:473`). The custom ORM
+  only does `CREATE TABLE IF NOT EXISTS` — it will **not** add a column to an
+  existing `.db`, and the per-version `_update_from_pre_v*` hooks are dead code
+  (no dispatcher) on this unreleased `0.1.0` fork. The correct, version-
+  independent mechanism is a **schema-drift guard** at DB-manager init: compare
+  `PRAGMA table_info` against `model.__columns__` for the derived-cache tables
+  (`index`, `history`, `hash_cache`); on any mismatch, **drop** them so
+  `CREATE TABLE` recreates them and the existing empty-index bootstrap re-derives
+  them from Drive. This honors the documented "derived cache → drop-and-reindex
+  on schema change" policy (`main.py:1538` comment) without a migration
+  framework, and covers fresh installs, existing dev DBs, and the test account.
 - **Download path** (`_on_remote_file`, `src/bora/sync.py:3695`): for exportables,
   resolve the export target, download via the export branch, set `download_only=
   True` on the index entry, and apply read-only perms (§5).
@@ -111,14 +118,19 @@ distinction switch to `is_exportable` / `is_unsupported_native`.
 
 ## 4. Data flow & change detection
 
-Native docs have **no `md5Checksum` and no `size`**, but **do** have
-`headRevisionId` (already in `FILE_FIELDS`, `changes.py:54`, stored as `rev`) and
-`modifiedTime`.
+Native docs have **no `md5Checksum`, no `size`, and no `headRevisionId`**
+(that field is documented as binary-content-only). They **do** have the Drive
+`version` field (a monotonically-increasing integer that changes on every
+server-side edit) and `modifiedTime`.
 
-- **Change signal = `headRevisionId`.** On each remote change `rev` differs →
-  re-export. This already drives `_check_download_conflict`
+- **Change signal = the Drive `version` field.** Add `version` to `FILE_FIELDS`
+  (`changes.py:54`). For exportables, project `rev = str(version)`; binary files
+  keep `rev = headRevisionId` (unchanged). On each remote change `rev` differs →
+  re-export. This drives `_check_download_conflict` unchanged
   (`src/bora/sync.py:3368`: `if event.rev == local_rev → identical`), so
-  exportables ride the existing path with `rev` as the identity key.
+  exportables ride the existing path with `rev` as the identity key. Using
+  `version` also satisfies the "Rev required to update index" guard
+  (`sync.py:1029`), which an empty `headRevisionId` would violate.
 - **`content_hash` = md5 of the exported bytes, computed locally** after export.
   It is *not* a server hash (there is none). Its only job is to let the
   local-scan machinery detect user tampering: an edited local file → md5 ≠
@@ -211,17 +223,13 @@ actually on disk — tamper detection compares the *current* disk file against t
 
 ## 9. Phasing
 
-1. **Phase 1 — Core export (Office formats).** `native_docs` classifier,
-   `client` export branch, `download_only` flag + migration, upload suppression,
-   read-only perms, conflict-copy on edit, change detection via `rev`, config +
-   CLI, tests, live spot-check. The `export_google_docs_markdown` key exists and
-   defaults `True`, but until Phase 2 lands the code path is a no-op: **Docs
-   export as `.docx` in Phase 1 regardless of the toggle.**
-2. **Phase 2 — Markdown for Docs.** Activate the `text/markdown` export target
-   so the (already-on) markdown default takes effect — Docs export as `.md`.
-   Toggle-flip transition (replace the mirror, rename by `remote_id`), tests,
-   live spot-check.
-
-(Phase boundary is a plan-level decision; both phases are in this spec because
-they share the same seam and flag. The markdown default is `True` from Phase 1
-so no config change is needed when Phase 2 lands — behavior changes on upgrade.)
+**Single phase.** Markdown export for Docs uses the *identical* `export_media`
+seam as the Office formats — only the `mimeType` (`text/markdown`) and extension
+(`.md`) differ. Deferring it would ship a no-op default (Docs would export as
+`.docx` while the markdown default is `True`). It is therefore implemented
+inline: the naming helper and export branch handle the markdown target from the
+start, and the `export_google_docs_markdown` toggle is live on first release.
+The toggle-flip transition (an existing `.docx` mirror whose toggle flips to
+markdown is replaced by `.md`, treated as a rename of the download-only mirror
+keyed by `remote_id`) is covered by the change-detection path, since flipping
+the toggle changes the projected `remote_path` for the Doc.
