@@ -51,9 +51,11 @@ from watchdog.events import (
     FileDeletedEvent,
 )
 
+from bora.config import remove_configuration
 from bora.core import FileMetadata, FolderMetadata, WriteMode
 from bora.errorhandling import convert_api_errors
 from bora.exceptions import (
+    AuthError,
     FolderConflictError,
     InsufficientPermissionsError,
     NoSyncDirError,
@@ -68,6 +70,7 @@ from bora.utils.appdirs import get_home_dir
 from bora.utils.path import (
     delete,
     fs_max_lengths_for_path,
+    generate_cc_name,
     get_symlink_target,
     is_fs_case_sensitive,
     move,
@@ -77,7 +80,7 @@ from bora.utils.path import (
     walk,
 )
 
-from tests.linked.conftest import LOCK_NAME, requires_account, wait_until
+from tests.linked.conftest import LOCK_NAME, _make_client, requires_account, wait_until
 
 # mypy cannot yet check recursive type definitions...
 DirTreeType = Mapping[str, Union[str, Mapping[str, Union[str, Mapping[str, str]]]]]
@@ -556,6 +559,103 @@ def test_unix_permissions(m: Bora) -> None:
 
     assert_synced(m)
     assert_no_errors(m)
+
+
+@requires_account
+def test_view_only_shared_file_downloads_read_only(m: Bora) -> None:
+    """
+    A file shared view-only (Drive ``canEdit == false``) from a second
+    account must be downloaded locally with its write bits cleared (Task 8).
+
+    This is a genuine cross-account round trip: it needs a second, distinct
+    Google account to act as the recipient, which is not wired up anywhere
+    else in this suite (the existing ``RemoteMutator`` reuses the *same*
+    account under a second client/cache, purely to avoid corrupting the
+    engine's own path cache -- see ``tests/linked/integration/conftest.py``).
+    Skips cleanly unless ``BORA_TEST_REFRESH_TOKEN_2`` (the recipient's
+    refresh token, optionally paired with ``BORA_TEST_ACCESS_TOKEN_2``) is
+    set, so it never blocks M1. See
+    ``docs/superpowers/plans/2026-07-05-shared-with-me.md`` step 5.
+
+    The primary `m` fixture account (``BORA_TEST_REFRESH_TOKEN``) plays the
+    sharer: it uploads a file and grants the second account "reader" (i.e.
+    view-only) access directly via the raw Drive permissions API, since
+    ``client.share_dir`` is an unimplemented Dropbox-era MVP stub.
+    """
+    second_refresh_token = os.environ.get("BORA_TEST_REFRESH_TOKEN_2")
+    if not second_refresh_token:
+        pytest.skip(
+            "set BORA_TEST_REFRESH_TOKEN_2 to a second account's refresh "
+            "token to run the real cross-account view-only download test"
+        )
+    second_access_token = os.environ.get("BORA_TEST_ACCESS_TOKEN_2")
+
+    second_config = "bora-test-config-second"
+    second_client, second_cred = _make_client(second_config)
+    try:
+        res = second_client.link(
+            refresh_token=second_refresh_token, access_token=second_access_token
+        )
+        if res > 0:
+            raise AuthError(f"linking second test account failed (code {res})")
+        second_email = second_client.get_account_info().email
+
+        # Owner (the `m` fixture account) creates a file and shares it
+        # view-only with the second account.
+        create_remote_tree(m, {"view-only.txt": "shared content"})
+        wait_for_idle(m)
+
+        listing = m.client.list_folder("/", recursive=False)
+        remote_file = next(
+            e for e in listing.entries if getattr(e, "name", None) == "view-only.txt"
+        )
+        m.client._get_service().permissions().create(
+            fileId=remote_file.id,
+            body={"type": "user", "role": "reader", "emailAddress": second_email},
+            sendNotificationEmail=False,
+        ).execute()
+
+        # Second account: its own Bora instance syncs the "Shared with me"
+        # item down and must land it read-only on disk.
+        second_sync_config = second_config + "-sync"
+        m2 = Bora(second_sync_config)
+        try:
+            res2 = m2.link(
+                refresh_token=second_refresh_token, access_token=second_access_token
+            )
+            if res2 > 0:
+                raise AuthError(f"linking second sync instance failed (code {res2})")
+
+            local_drive_dir = generate_cc_name(
+                get_home_dir() + "/GoogleDriveSecond", suffix="test runner"
+            )
+            m2.create_sync_directory(local_drive_dir)
+            try:
+                m2.start_sync()
+                wait_for_idle(m2)
+
+                local = osp.join(m2.sync_path, "Shared with me", "view-only.txt")
+                wait_until(lambda: osp.isfile(local))
+
+                assert not (os.stat(local).st_mode & 0o222)
+            finally:
+                m2.stop_sync()
+                # The permission tests chmod files to remove write bits; restore
+                # them across the tree before deleting, mirroring
+                # conftest._force_delete_tree.
+                for root, dirs, files in os.walk(local_drive_dir, topdown=True):
+                    for name in dirs + files:
+                        try:
+                            os.chmod(osp.join(root, name), 0o700)
+                        except OSError:
+                            pass
+                delete(local_drive_dir)
+        finally:
+            remove_configuration(second_sync_config)
+            m2.cred_storage.delete_creds()
+    finally:
+        remove_configuration(second_config)
+        second_cred.delete_creds()
 
 
 # ==== test conflict resolution ========================================================
