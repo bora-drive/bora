@@ -247,6 +247,7 @@ def test_nested_events(sync: SyncEngine) -> None:
     assert cleaned_events == res
 
 
+@pytest.mark.slow
 @pytest.mark.benchmark(
     group="local-event-processing",
     min_time=0.1,

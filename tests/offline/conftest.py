@@ -21,37 +21,6 @@ from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive
 
 
-def pytest_addoption(parser):
-    """Add the ``--run-load`` opt-in flag for the slow load tests."""
-    parser.addoption(
-        "--run-load",
-        action="store_true",
-        default=False,
-        help=(
-            "Run the slow @pytest.mark.load tests (10k-file storm / "
-            "crash-resume). Skipped by default; each takes many minutes."
-        ),
-    )
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip @pytest.mark.load tests unless ``--run-load`` is passed.
-
-    Load tests take 10+ minutes each, so a plain ``pytest`` run must never
-    include them. They run only when explicitly opted in on the command line
-    with ``--run-load``. This keeps the default gate fast without every caller
-    having to remember ``-m 'not load'``.
-    """
-    if config.getoption("--run-load"):
-        return
-    skip_load = pytest.mark.skip(
-        reason="slow load test; pass --run-load to include it"
-    )
-    for item in items:
-        if "load" in item.keywords:
-            item.add_marker(skip_load)
-
-
 def _make_path_cache() -> PathIDCache:
     cache = PathIDCache(Database(sqlite3.connect(":memory:")))
     cache.root_id = "ROOT"
