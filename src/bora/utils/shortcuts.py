@@ -19,15 +19,22 @@ _LINK_FLAGS = 0x00000088
 _FILE_ATTR_NORMAL = 0x00000080
 
 
-def write_platform_symlink(target: str, link_path: str) -> None:
+def write_platform_symlink(target: str, link_path: str) -> str:
     """Create a symlink at *link_path* pointing to *target*.
 
     Falls back to a ``<link_path>.lnk`` shortcut file when the OS refuses
-    a real symlink (typically Windows without privilege)."""
+    a real symlink (typically Windows without privilege).
+
+    :returns: The path actually written to: *link_path* on the real-symlink
+        path, or ``<link_path>.lnk`` on the Windows fallback. Callers must
+        stat/inspect the returned path, not *link_path* unconditionally."""
     try:
         os.symlink(target, link_path)
+        return link_path
     except OSError:
-        write_lnk(target, link_path + ".lnk")
+        lnk_path = link_path + ".lnk"
+        write_lnk(target, lnk_path)
+        return lnk_path
 
 
 def _unicode_str(value: str) -> bytes:

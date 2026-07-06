@@ -2450,14 +2450,15 @@ def test_symlink_download_uses_platform_writer(
     calls: list[tuple[str, str]] = []
     import bora.sync as sync_mod
 
-    def fake_write_platform_symlink(target: str, link_path: str) -> None:
+    def fake_write_platform_symlink(target: str, link_path: str) -> str:
         calls.append((target, link_path))
-        # _on_remote_file unconditionally os.lstat()s event.local_path right
-        # after this call (to feed _save_local_hash's inode/mtime), so the
-        # fake still has to leave something on disk at link_path -- this
-        # verifies write_platform_symlink was called with the right args
-        # without depending on its real (unpatched) POSIX-symlink behavior.
+        # _on_remote_file os.lstat()s the path this function returns (to
+        # feed _save_local_hash's inode/mtime), so the fake still has to
+        # leave something on disk and return its path -- this verifies
+        # write_platform_symlink was called with the right args without
+        # depending on its real (unpatched) POSIX-symlink behavior.
         os.symlink(target, link_path)
+        return link_path
 
     monkeypatch.setattr(
         sync_mod, "write_platform_symlink", fake_write_platform_symlink
