@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from bora.database.core import Database
-from bora.path_cache import PathIDCache
+from bora.path_cache import SHARED_WITH_ME_ID, SHARED_WITH_ME_PATH, PathIDCache
 
 
 def make_cache(root_id: str = "ROOT") -> PathIDCache:
@@ -696,3 +696,25 @@ class TestInvariantsAfterMutations:
         ]
         cache.populate_from_listing(items2)
         _assert_invariants(cache)
+
+
+class TestSharedWithMeVirtualRoot:
+    def test_id_to_path_maps_sentinel(self) -> None:
+        cache = make_cache()
+        assert cache.id_to_path(SHARED_WITH_ME_ID) == SHARED_WITH_ME_PATH
+
+    def test_path_to_id_maps_reserved_path(self) -> None:
+        cache = make_cache()
+        assert cache.path_to_id(SHARED_WITH_ME_PATH) == SHARED_WITH_ME_ID
+
+    def test_child_of_sentinel_resolves(self) -> None:
+        cache = make_cache()
+        cache.set(
+            remote_path="/Shared with me/Report.pdf",
+            file_id="S1",
+            parent_id=SHARED_WITH_ME_ID,
+            name="Report.pdf",
+            is_folder=False,
+        )
+        assert cache.resolve_path("S1") == "/Shared with me/Report.pdf"
+        assert cache.id_to_path("S1") == "/Shared with me/Report.pdf"
