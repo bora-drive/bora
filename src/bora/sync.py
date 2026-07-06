@@ -1067,12 +1067,22 @@ class SyncEngine:
                                 stale.remote_path_lower
                             )
 
-                # SyncEvent carries no can_edit flag; preserve whatever
-                # read_only value the existing row already has (0 if there
-                # is no prior row). The metadata-based writer below is the
-                # authoritative source for this flag.
-                existing = self._index_table.get(remote_path_lower)
-                read_only = existing.read_only if existing is not None else 0
+                # SyncEvent.read_only is populated from the remote metadata's
+                # can_edit flag by from_metadata (download events). Use it
+                # directly so a view-only shared item is marked read-only as
+                # soon as it is first indexed on download -- this is the ONLY
+                # writer on the download apply path (_on_remote_file /
+                # _on_remote_folder), so without this the item would land
+                # writable and never get gated by _is_read_only_event /
+                # _create_remote_entry. Fall back to the existing row's value
+                # only when the event genuinely doesn't carry the flag (e.g.
+                # a non-metadata-derived event), and to 0 (editable) if there
+                # is no prior row either.
+                if event.read_only is not None:
+                    read_only = event.read_only
+                else:
+                    existing = self._index_table.get(remote_path_lower)
+                    read_only = existing.read_only if existing is not None else 0
 
                 # Create or update entry.
                 entry = IndexEntry(
@@ -2650,9 +2660,7 @@ class SyncEngine:
             # in _is_read_only_event/_create_remote_entry, which cannot catch
             # this case because a brand-new symlink has no index row of its
             # own yet to carry a read_only flag.
-            parent_lower = fold_path(posixpath.dirname(event.remote_path_lower))
-            parent_entry = self._index_table.get(parent_lower)
-            if parent_entry is not None and parent_entry.is_read_only:
+            if self._parent_is_read_only(event):
                 return SyncStatus.Skipped  # cannot write into a view-only folder
 
             entry = self._index_table.get(event.remote_path_lower)
@@ -2913,9 +2921,7 @@ class SyncEngine:
         # _is_read_only_event in _create_remote_entry.
         deleted_entry = self._index_table.get(event.remote_path_lower)
         if deleted_entry is not None and deleted_entry.is_symlink:
-            parent_lower = fold_path(posixpath.dirname(event.remote_path_lower))
-            parent_entry = self._index_table.get(parent_lower)
-            if parent_entry is not None and parent_entry.is_read_only:
+            if self._parent_is_read_only(event):
                 self._logger.debug(
                     'Not deleting "%s": containing folder is read-only',
                     event.remote_path,
@@ -3927,6 +3933,17 @@ class SyncEngine:
         read-only (i.e. a view-only shared item, Drive canEdit == false)."""
         entry = self._index_table.get(event.remote_path_lower)
         return entry is not None and entry.is_read_only
+
+    def _parent_is_read_only(self, event: SyncEvent) -> bool:
+        """Returns whether the index entry for ``event``'s containing folder
+        is marked read-only (i.e. a view-only shared folder). Used to gate
+        mutations -- such as creating/retargeting/removing a shortcut -- that
+        change the containing folder's listing rather than the item itself,
+        so they cannot rely on the item's own (possibly nonexistent)
+        read_only flag the way :meth:`_is_read_only_event` does."""
+        parent_lower = fold_path(posixpath.dirname(event.remote_path_lower))
+        parent_entry = self._index_table.get(parent_lower)
+        return parent_entry is not None and parent_entry.is_read_only
 
     def _on_remote_file(self, event: SyncEvent) -> SyncStatus:
         """

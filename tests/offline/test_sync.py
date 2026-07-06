@@ -2440,6 +2440,160 @@ def test_read_only_gate_discards_activity_and_clears_sync_errors(
     assert sync_engine.has_sync_errors() is False
 
 
+# ==== I1 fix: read_only must actually reach the index on the download path ==
+#
+# Blocker from the whole-branch review: update_index_from_sync_event (the
+# ONLY writer on the download apply path -- _on_remote_file/_on_remote_folder)
+# could not derive read_only from can_edit because SyncEvent carried no such
+# field, so it always wrote read_only=0 (or preserved a prior row). Only
+# update_index_from_remote_metadata (called from upload/move handlers, never
+# from download) derived it correctly. Net effect: a view-only shared item
+# downloaded via the real sync path landed WRITABLE and its upload gate never
+# armed. These tests drive the REAL download path end-to-end (FakeDrive ->
+# client.get_metadata/download -> SyncEvent.from_metadata ->
+# _create_local_entry/_on_remote_file -> update_index_from_sync_event) rather
+# than seeding read_only by hand, so they actually exercise the seam that was
+# broken.
+
+
+def test_view_only_shared_file_download_sets_read_only_and_gates_upload(
+    sync_engine: SyncEngine,
+) -> None:
+    """End-to-end regression for the I1 blocker (file variant).
+
+    Before the fix: SyncEvent had no can_edit/read_only field, so
+    update_index_from_sync_event always wrote read_only=0 for a freshly
+    downloaded item, _is_read_only_event returned False, _apply_read_only
+    never ran (file stayed writable), and a subsequent local edit was NOT
+    gated by _create_remote_entry -- it fell through to
+    _on_local_file_modified, i.e. would have been uploaded and hit a Drive
+    403 (the retry-storm scenario spec Sec5 exists to prevent).
+    """
+    import stat as _stat
+
+    shared_dir = os.path.join(sync_engine.sync_path, "Shared with me")
+    if os.path.exists(shared_dir):
+        delete(shared_dir)
+
+    fake = FakeDrive()
+    content = b"view only content"
+    file_id = fake._insert("viewonly.txt", "OTHER_ROOT", "text/plain", content)
+    fake.files[file_id]["sharedWithMe"] = True
+    fake.files[file_id]["ownedByMe"] = False
+    fake.files[file_id]["capabilities"] = {"canEdit": False}
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+    remote_path = "/Shared with me/viewonly.txt"
+    sync_engine.client._path_cache.set(
+        remote_path,
+        file_id,
+        parent_id=SHARED_WITH_ME_ID,
+        name="viewonly.txt",
+        is_folder=False,
+    )
+
+    # Real download path: get_metadata -> SyncEvent.from_metadata ->
+    # _create_local_entry -> _on_remote_file -> update_index_from_sync_event.
+    success = sync_engine.get_remote_item(remote_path)
+    assert success, "download of view-only shared file must succeed"
+
+    local_file = os.path.join(shared_dir, "viewonly.txt")
+    assert os.path.isfile(local_file)
+    with open(local_file, "rb") as f:
+        assert f.read() == content
+
+    # (1) The downloaded local file must have its write bits cleared.
+    mode = _stat.S_IMODE(os.lstat(local_file).st_mode)
+    assert not (mode & 0o222), "view-only download must be written read-only"
+
+    # Index row backing the gate must also be read-only (belt and braces --
+    # this is what _is_read_only_event actually consults).
+    entry = sync_engine.get_index_entry(remote_path.lower())
+    assert entry is not None
+    assert entry.is_read_only is True
+
+    # (2) A subsequent local-modified event for this path must be gated:
+    # _create_remote_entry must skip it without ever invoking the upload
+    # handler. Restore the write bit first to simulate an edit actually
+    # landing on disk (e.g. a race, or a filesystem that ignores the chmod).
+    os.chmod(local_file, 0o644)
+    with open(local_file, "wb") as f:
+        f.write(b"local edit attempt")
+
+    event = _local_modified_event(
+        sync_engine, remote_path, _md5(b"local edit attempt")
+    )
+
+    called = []
+    sync_engine._on_local_file_modified = lambda e: called.append(e)  # type: ignore[method-assign]
+
+    result = sync_engine._create_remote_entry(event)
+
+    assert result.status == SyncStatus.Skipped
+    assert called == []
+
+
+def test_view_only_shared_folder_download_sets_read_only_dir(
+    sync_engine: SyncEngine,
+) -> None:
+    """Folder variant of the above: _on_remote_folder must also derive
+    read_only from can_edit via the real from_metadata ->
+    update_index_from_sync_event seam, chmod'ing the directory 0o555.
+
+    A full end-to-end drive through get_remote_item/_get_remote_folder would
+    fan out through a thread pool (do_parallel), and this fixture's
+    in-memory sqlite connection isn't safe to touch from worker threads --
+    the same pre-existing fixture limitation noted in
+    test_get_remote_item_creates_shared_with_me_mount. This instead builds
+    the event via the real SyncEvent.from_metadata(md, sync_engine) (the same
+    call get_remote_item/_get_remote_folder make) and drives it straight into
+    the real _on_remote_folder, which is the actual code path under test for
+    the read_only seam.
+    """
+    import stat as _stat
+
+    os.makedirs(
+        os.path.join(sync_engine.sync_path, "Shared with me"), exist_ok=True
+    )
+
+    remote_path = "/Shared with me/ViewOnlyFolder"
+    # Seed the parent's casing/index row so _ensure_parent and correct_case()
+    # resolve "/Shared with me" locally instead of requiring a linked client.
+    _seed_index_entry(
+        sync_engine, "/Shared with me", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR",
+    )
+
+    md = FolderMetadata(
+        name="ViewOnlyFolder",
+        path_lower=remote_path.lower(),
+        path_display=remote_path,
+        id="FOLDER-VIEWONLY",
+        shared=True,
+        can_edit=False,
+    )
+
+    event = SyncEvent.from_metadata(md, sync_engine)
+    status = sync_engine._on_remote_folder(event)
+
+    assert status == SyncStatus.Done
+    assert os.path.isdir(event.local_path)
+
+    mode = _stat.S_IMODE(os.lstat(event.local_path).st_mode)
+    assert not (mode & 0o222), "view-only shared folder must be written read-only"
+    assert mode & 0o111, "folder must remain traversable/listable"
+
+    entry = sync_engine.get_index_entry(remote_path.lower())
+    assert entry is not None
+    assert entry.is_read_only is True
+
+
 # ==== Task 14: download path materializes shortcuts via the platform writer ==
 
 
