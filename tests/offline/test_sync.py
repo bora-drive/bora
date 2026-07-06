@@ -2526,6 +2526,146 @@ def test_unknown_local_symlink_still_errors(sync_engine: SyncEngine) -> None:
         sync_engine._on_local_file_modified(event)
 
 
+# ==== Task 17: create/retarget Drive shortcuts from local symlinks (M3) =====
+#
+# Extends the Task 15 symlink branch: a brand-new local symlink (no index
+# row) whose target maps to a known Drive item now creates a shortcut instead
+# of raising SymlinkError; a known shortcut whose target TEXT changed is
+# retargeted in place; a known shortcut whose text is unchanged remains the
+# Task 15 no-op (see test_local_symlink_matching_known_shortcut_is_skipped
+# above), and a known shortcut whose new target does not map to a synced item
+# is left untouched (Skipped) rather than erred, mirroring _target_remote_path
+# returning None for the brand-new case.
+
+
+def _make_shortcut_metadata(remote_path: str, file_id: str, target_rel: str) -> FileMetadata:
+    return FileMetadata(
+        name=osp.basename(remote_path),
+        path_lower=remote_path.lower(),
+        path_display=remote_path,
+        id=file_id,
+        modified=datetime.today(),
+        rev="",
+        size=0,
+        symlink_target=target_rel,
+        shared=False,
+        modified_by=None,
+        is_downloadable=False,
+        content_hash="",
+    )
+
+
+def test_local_symlink_new_target_creates_shortcut(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """A brand-new local symlink (no index row) whose target resolves to a
+    known Drive item calls client.create_shortcut and indexes the result --
+    replacing the old blanket SymlinkError for this mappable case."""
+    remote_path = "/Shared with me/link"
+    target_remote = "/Docs/report.pdf"
+    sync_engine.client._path_cache.set(
+        target_remote, "F-target", parent_id="F-docs", name="report.pdf",
+        is_folder=False,
+    )
+    # Seed the parent's casing in the index so update_index_from_remote_metadata's
+    # correct_case() resolves "/Shared with me" locally instead of hitting the
+    # (unlinked, in this test) network client.
+    _seed_index_entry(
+        sync_engine, "/Shared with me", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR",
+    )
+
+    event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
+    event.symlink_target = "../Docs/report.pdf"
+
+    md_new = _make_shortcut_metadata(remote_path, "F-shortcut", "../Docs/report.pdf")
+    calls = []
+    monkeypatch.setattr(
+        sync_engine.client, "create_shortcut",
+        lambda rp, trp, **kw: calls.append((rp, trp)) or md_new,
+    )
+
+    status = sync_engine._on_local_file_modified(event)
+
+    assert status == SyncStatus.Done
+    assert calls == [(remote_path, target_remote)]
+    entry = sync_engine._index_table.get(remote_path.lower())
+    assert entry is not None
+    assert entry.is_symlink
+    assert entry.remote_id == "F-shortcut"
+
+
+def test_local_symlink_known_shortcut_retargets_on_target_change(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """A KNOWN shortcut (index row with is_symlink + remote_id) whose local
+    symlink text changed calls client.retarget_shortcut with the new target,
+    not create_shortcut."""
+    remote_path = "/Shared with me/link"
+    new_target_remote = "/Docs/other.pdf"
+    _seed_index_entry(
+        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
+        remote_id="SL", symlink_target="../Docs/report.pdf",
+    )
+    _seed_index_entry(
+        sync_engine, "/Shared with me", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR",
+    )
+    sync_engine.client._path_cache.set(
+        new_target_remote, "F-other", parent_id="F-docs", name="other.pdf",
+        is_folder=False,
+    )
+
+    event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
+    event.symlink_target = "../Docs/other.pdf"
+
+    md_new = _make_shortcut_metadata(remote_path, "SL", "../Docs/other.pdf")
+    calls = []
+    monkeypatch.setattr(
+        sync_engine.client, "retarget_shortcut",
+        lambda rp, trp: calls.append((rp, trp)) or md_new,
+    )
+    monkeypatch.setattr(
+        sync_engine.client, "create_shortcut",
+        lambda *a, **kw: pytest.fail("create_shortcut must not be called for a known shortcut"),
+    )
+
+    status = sync_engine._on_local_file_modified(event)
+
+    assert status == SyncStatus.Done
+    assert calls == [(remote_path, new_target_remote)]
+    entry = sync_engine._index_table.get(remote_path.lower())
+    assert entry is not None
+    assert entry.symlink_target == "../Docs/other.pdf"
+
+
+def test_local_symlink_known_shortcut_unmappable_new_target_is_left_local(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """A known shortcut whose target text changed to something that does not
+    map to a synced Drive item is left untouched (Skipped, no error) -- the
+    shortcut was working before and Task 18 owns any stronger gate."""
+    remote_path = "/Shared with me/link"
+    _seed_index_entry(
+        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
+        remote_id="SL", symlink_target="../Docs/report.pdf",
+    )
+
+    event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
+    event.symlink_target = "../Docs/nope.pdf"  # never seeded in the path cache
+
+    calls = []
+    monkeypatch.setattr(
+        sync_engine.client, "retarget_shortcut",
+        lambda rp, trp: calls.append((rp, trp)),
+    )
+
+    status = sync_engine._on_local_file_modified(event)
+
+    assert status == SyncStatus.Skipped
+    assert calls == []
+
+
 # ==== Task 16: local symlink deletion propagates to the Drive shortcut (M3) ============
 #
 # A shortcut is an ordinary index row (with a ``symlink_target``) plus a

@@ -879,6 +879,20 @@ class GoogleDriveClient:
         """
         return self._writes.make_dir(remote_path, autorename=autorename)
 
+    def create_shortcut(
+        self, remote_path: str, target_remote_path: str, *, autorename: bool = False
+    ) -> FileMetadata:
+        """Creates a Drive shortcut at *remote_path* -> *target_remote_path*."""
+        return self._writes.create_shortcut(
+            remote_path, target_remote_path, autorename=autorename
+        )
+
+    def retarget_shortcut(
+        self, remote_path: str, target_remote_path: str
+    ) -> FileMetadata:
+        """Points an existing shortcut at a new target."""
+        return self._writes.retarget_shortcut(remote_path, target_remote_path)
+
     def make_dir_batch(
         self, remote_paths: list[str]
     ) -> list[FolderMetadata | BoraApiError]:

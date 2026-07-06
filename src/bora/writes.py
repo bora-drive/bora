@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import posixpath
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Sequence
 
@@ -35,7 +36,7 @@ from .exceptions import (
     NotFoundError,
     UnsupportedFileError,
 )
-from .native_docs import is_google_native
+from .native_docs import GOOGLE_SHORTCUT_MIME_TYPE, is_google_native
 from .path_codec import compose_path, decode_name, encode_name, fold_path
 
 if TYPE_CHECKING:  # avoid runtime cycle
@@ -969,6 +970,89 @@ class _WriteHelper:
             path_display=remote_path,
             id=resp["id"],
             shared=False,
+        )
+
+    def create_shortcut(
+        self,
+        remote_path: str,
+        target_remote_path: str,
+        *,
+        autorename: bool = False,
+    ) -> FileMetadata:
+        """Create a Drive shortcut at *remote_path* pointing at the item
+        currently synced at *target_remote_path*."""
+        client = self._client
+        client._ensure_root_id()
+        parent_path, raw_name = self._split_parent_name(remote_path)
+        if autorename:
+            raw_name = self._autorename_unique(parent_path, raw_name)
+            remote_path = parent_path + "/" + raw_name
+        drive_name = self._decode_segment(raw_name)
+        parent_id = self._resolve_parent_id(parent_path, for_path=remote_path)
+        target_id = self._resolve_file_id(target_remote_path)  # NotFoundError if absent
+
+        new_id = client.reserve_file_id()
+        body = {
+            "id": new_id,
+            "name": drive_name,
+            "mimeType": GOOGLE_SHORTCUT_MIME_TYPE,
+            "parents": [parent_id],
+            "shortcutDetails": {"targetId": target_id},
+        }
+        with convert_api_errors(remote_path=remote_path):
+            resp = client._retry_transient(
+                lambda: client._get_service()
+                .files()
+                .create(body=body, fields="id,name,mimeType,shortcutDetails")
+                .execute()
+            )
+        client._count_request()
+        client._path_cache.set(
+            remote_path, resp["id"], parent_id=parent_id,
+            name=drive_name, is_folder=False,
+        )
+        # Relative-to-own-dir target, matching the download-side convention
+        # (see changes.py:_emit_shortcut).
+        rel_target = posixpath.relpath(
+            target_remote_path, posixpath.dirname(remote_path)
+        )
+        return FileMetadata(
+            name=resp["name"], path_lower=fold_path(remote_path),
+            path_display=remote_path, id=resp["id"],
+            modified=datetime.now(timezone.utc), rev="", size=0,
+            symlink_target=rel_target, shared=False, modified_by=None,
+            is_downloadable=False, content_hash="", can_edit=True,
+        )
+
+    def retarget_shortcut(
+        self, remote_path: str, target_remote_path: str
+    ) -> FileMetadata:
+        """Point an existing Drive shortcut at a new target."""
+        client = self._client
+        client._ensure_root_id()
+        file_id = self._resolve_file_id(remote_path)
+        target_id = self._resolve_file_id(target_remote_path)
+        with convert_api_errors(remote_path=remote_path):
+            resp = client._retry_transient(
+                lambda: client._get_service()
+                .files()
+                .update(
+                    fileId=file_id,
+                    body={"shortcutDetails": {"targetId": target_id}},
+                    fields="id,name,mimeType,shortcutDetails",
+                )
+                .execute()
+            )
+        client._count_request()
+        rel_target = posixpath.relpath(
+            target_remote_path, posixpath.dirname(remote_path)
+        )
+        return FileMetadata(
+            name=resp["name"], path_lower=fold_path(remote_path),
+            path_display=remote_path, id=resp["id"],
+            modified=datetime.now(timezone.utc), rev="", size=0,
+            symlink_target=rel_target, shared=False, modified_by=None,
+            is_downloadable=False, content_hash="", can_edit=True,
         )
 
     def make_dir_batch(
