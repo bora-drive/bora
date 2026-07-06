@@ -1037,6 +1037,34 @@ class GoogleDriveClient:
             if not page_token:
                 break
 
+    def list_shared_roots(self) -> list[dict[str, Any]]:
+        """Return raw Drive ``files`` dicts for every "Shared with me"
+        attach point (``sharedWithMe=true``). These are the tops of shared
+        subtrees; descendants are fetched by the ambient bootstrap listing.
+        """
+        self._ensure_root_id()
+        items: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            with convert_api_errors():
+                resp = self._retry_transient(
+                    lambda pt=page_token: self._get_service()
+                    .files()
+                    .list(
+                        q="sharedWithMe=true and trashed=false",
+                        fields=f"nextPageToken, files({FILE_FIELDS})",
+                        pageSize=_LIST_PAGE_SIZE,
+                        pageToken=pt,
+                    )
+                    .execute()
+                )
+            self._count_request()
+            items.extend(resp.get("files", []))
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        return items
+
     def _bootstrap_recursive(
         self, include_non_downloadable_files: bool = False
     ) -> Iterator[ListFolderResult]:
@@ -1097,6 +1125,19 @@ class GoogleDriveClient:
                 or not is_google_native(it.get("mimeType"))
             )
         ]
+
+        # Verify the ambient trashed=false listing already contains the shared
+        # roots we expect (spec §2). If any shared root is missing from the
+        # flat listing, log it — descendants would otherwise be stranded.
+        shared_root_ids = {r["id"] for r in self.list_shared_roots()}
+        listed_ids = {it["id"] for it in raw_items}
+        missing = shared_root_ids - listed_ids
+        if missing:
+            logger.warning(
+                "Shared roots missing from ambient listing (%d): %s; "
+                "shared content under them may not materialize",
+                len(missing), sorted(missing),
+            )
 
         # Atomic populate. The cache BFS-filters to items reachable from
         # root_id; Computers/Backup, shared-with-me and orphans drop out.

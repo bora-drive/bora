@@ -450,12 +450,20 @@ def test_list_folder_flattens(client, cache):
 
 def _bootstrap_service(files_pages, start_token="TOK1"):
     """Build a fake service for the recursive bootstrap: a
-    changes.getStartPageToken call plus paginated files.list calls."""
+    changes.getStartPageToken call plus paginated files.list calls.
+
+    ``_bootstrap_recursive`` also calls ``list_shared_roots()`` (a second,
+    separate ``files.list`` paging loop) right before it populates the path
+    cache, so one trailing empty page is appended to satisfy that extra
+    ``execute()`` call after the ambient-listing pages are exhausted.
+    """
     service = fake_service()
     service.changes.return_value.getStartPageToken.return_value.execute.return_value = {
         "startPageToken": start_token
     }
-    service.files.return_value.list.return_value.execute.side_effect = files_pages
+    service.files.return_value.list.return_value.execute.side_effect = (
+        list(files_pages) + [{"files": []}]
+    )
     return service
 
 
@@ -1366,3 +1374,13 @@ def test_scoped_recursive_skips_fold_conflicted_entry(client_on_fake, fake_drive
     assert "/sub/report.pdf" not in result_paths
     # The cache must still resolve the folded key to the original id.
     assert cache.path_to_id("/sub/Report.pdf") == orig_id
+
+
+def test_list_shared_roots_returns_shared_items(client_on_fake) -> None:
+    """list_shared_roots() queries sharedWithMe=true and returns the raw
+    Drive file dicts for shared attach points (spec §2 belt-and-suspenders
+    seed source)."""
+    client, fake = client_on_fake.client, client_on_fake.fake
+    fake.add_shared_root("Team Docs", shared_with_me=True)
+    roots = client.list_shared_roots()
+    assert any(r["name"] == "Team Docs" and r.get("sharedWithMe") for r in roots)

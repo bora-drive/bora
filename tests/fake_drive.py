@@ -241,6 +241,18 @@ class FakeDrive:
         parent_id, name = self._resolve_path_to_parent_and_name(path)
         return self._insert(name, parent_id, FOLDER_MIME, b"")
 
+    def add_shared_root(self, name: str, *, shared_with_me: bool = True) -> str:
+        """Insert a folder owned by another user, parented outside the sync
+        root, and shared with this account (a "Shared with me" attach
+        point). Not reachable via ``_resolve_path_to_parent_and_name`` /
+        the sync root's parent chain — only via ``sharedWithMe=true``
+        queries, mirroring the real Drive semantics."""
+        fid = self._insert(name, "OTHER_ROOT", FOLDER_MIME, b"")
+        self.files[fid]["sharedWithMe"] = shared_with_me
+        self.files[fid]["ownedByMe"] = False
+        self.files[fid]["capabilities"] = {"canEdit": False}
+        return fid
+
     def add_file(
         self, path: str, content: bytes = b"", literal_name: str | None = None
     ) -> str:
@@ -484,6 +496,7 @@ def _match_query(rec: dict, query: str) -> bool:
       "trashed=false"              -> not trashed
       "name = '<value>'"           -> name equality (Drive-escaped)
       "mimeType = '<value>'"       -> mimeType equality
+      "sharedWithMe=true"          -> rec["sharedWithMe"] truthy
     """
     if not query:
         return True
@@ -491,6 +504,9 @@ def _match_query(rec: dict, query: str) -> bool:
         frag = frag.strip()
         if frag in ("trashed=false", "trashed = false"):
             if rec["trashed"]:
+                return False
+        elif frag in ("sharedWithMe=true", "sharedWithMe = true"):
+            if not rec.get("sharedWithMe"):
                 return False
         elif " in parents" in frag:
             pid = frag.split(" in parents")[0].strip().strip("'")
