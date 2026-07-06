@@ -155,6 +155,9 @@ class FileMetadata(Metadata):
     """Whether the file can be downloaded"""
     content_hash: str
     """A content hash of the file"""
+    can_edit: bool = True
+    """Whether the current user may edit this item (Drive capabilities.canEdit).
+    Defaults True for owned My-Drive items; False for view-only shared items."""
 
 
 @dataclass
@@ -165,6 +168,8 @@ class FolderMetadata(Metadata):
     """Unique ID on the server"""
     shared: bool
     """Whether the folder is shared"""
+    can_edit: bool = True
+    """Whether the current user may edit this folder (Drive capabilities.canEdit)."""
 
 
 @dataclass
