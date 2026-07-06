@@ -9,6 +9,7 @@ import errno
 import gc
 import os
 import os.path as osp
+import posixpath
 import random
 import sqlite3
 import stat
@@ -2629,18 +2630,36 @@ class SyncEngine:
         # (M2 behaviour, Task 15) -- most local symlink "modified" events are
         # just an mtime touch, not a retarget. A known shortcut whose target
         # text changed is retargeted in place. A brand-new local symlink (no
-        # index row, or a row that is not itself a symlink) creates a new
-        # shortcut -- unless its target does not map to any Drive item known
-        # to us, which remains genuinely unsupported (SymlinkError, as before
-        # M3): there is nothing we could point a shortcut at.
+        # index row at all) creates a new shortcut -- unless its target does
+        # not map to any Drive item known to us, which remains genuinely
+        # unsupported (SymlinkError, as before M3): there is nothing we could
+        # point a shortcut at. An index row that exists but is NOT itself a
+        # symlink (an existing regular file/folder now replaced locally by a
+        # symlink) must NOT go through create_shortcut -- that would create a
+        # same-name duplicate/orphan item on Drive next to the original: it
+        # falls through to the same SymlinkError as the unmappable case.
         if event.symlink_target is not None:
             entry = self._index_table.get(event.remote_path_lower)
 
             if entry is not None and entry.is_symlink:
-                if event.symlink_target == entry.symlink_target:
+                # event.symlink_target is the raw (decoded) os.readlink() text;
+                # entry.symlink_target was stored as the ENCODED relpath (see
+                # create_shortcut/retarget_shortcut in writes.py). Compare like
+                # for like by recomputing the same encoded relpath from the
+                # freshly-resolved (encoded) target_remote, rather than
+                # comparing the raw text directly -- otherwise a non-ASCII
+                # target name is misclassified as "changed" on every scan.
+                target_remote = self._target_remote_path(event)
+                new_rel = (
+                    posixpath.relpath(
+                        target_remote, posixpath.dirname(event.remote_path)
+                    )
+                    if target_remote is not None
+                    else None
+                )
+                if new_rel is not None and new_rel == entry.symlink_target:
                     return SyncStatus.Skipped
 
-                target_remote = self._target_remote_path(event)
                 if (
                     target_remote is None
                     or self.client._path_cache.path_to_id(target_remote) is None
@@ -2664,21 +2683,33 @@ class SyncEngine:
                 self.update_index_from_remote_metadata(md_new)
                 return SyncStatus.Done
 
-            target_remote = self._target_remote_path(event)
-            if (
-                target_remote is None
-                or self.client._path_cache.path_to_id(target_remote) is None
-            ):
-                error = SymlinkError(
-                    "Could not upload item",
-                    "Syncing symlinks is not supported.",
-                )
-                error.local_path = event.local_path
-                raise error
+            if entry is None:
+                target_remote = self._target_remote_path(event)
+                if (
+                    target_remote is None
+                    or self.client._path_cache.path_to_id(target_remote) is None
+                ):
+                    error = SymlinkError(
+                        "Could not upload item",
+                        "Syncing symlinks is not supported.",
+                    )
+                    error.local_path = event.local_path
+                    raise error
 
-            md_new = self.client.create_shortcut(event.remote_path, target_remote)
-            self.update_index_from_remote_metadata(md_new)
-            return SyncStatus.Done
+                md_new = self.client.create_shortcut(event.remote_path, target_remote)
+                self.update_index_from_remote_metadata(md_new)
+                return SyncStatus.Done
+
+            # entry is not None and not entry.is_symlink: an existing regular
+            # file/folder at this path is being replaced by a local symlink.
+            # Unsupported -- do not create_shortcut, which would leave a
+            # same-name duplicate on Drive alongside the original item.
+            error = SymlinkError(
+                "Could not upload item",
+                "Syncing symlinks is not supported.",
+            )
+            error.local_path = event.local_path
+            raise error
 
         if self._handle_selective_sync_conflict(event):
             return SyncStatus.Conflict
