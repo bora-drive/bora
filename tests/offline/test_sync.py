@@ -2355,3 +2355,57 @@ def test_editable_local_change_is_not_gated(sync_engine: SyncEngine) -> None:
     assert result.status == SyncStatus.Done
     assert called == [event]
 
+
+def test_read_only_gate_discards_activity_and_clears_sync_errors(
+    sync_engine: SyncEngine,
+) -> None:
+    """Review fix: the read-only gate in _create_remote_entry used to `return
+    event` immediately after marking it Skipped, bypassing the cleanup tail
+    that every other exit path reaches (clear_sync_errors_from_event +
+    activity.discard). That leaked a permanent activity-tree entry for every
+    gated event (ActivityTree.add only auto-removes Failed events, never
+    Skipped) and meant a pre-existing sync error for a path that later became
+    read-only could never be cleared, since every future local event to that
+    path just hits the gate again.
+
+    This mirrors the reviewer's repro: the caller (apply_local_changes) adds
+    the event to sync_engine.activity *before* calling _create_remote_entry,
+    and a prior sync error may already be recorded for the path.
+    """
+    remote_path = "/shared with me/stuck.txt"
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=_md5(b"remote content"),
+        last_sync=0.0,
+        read_only=1,
+    )
+
+    # Seed a pre-existing sync error for the path (e.g. left over from before
+    # the item became read-only, or from a prior failed attempt).
+    err = DataChangedError(
+        "Data changed", "stale error", remote_path=remote_path
+    )
+    sync_engine._handle_sync_error(err, direction=SyncDirection.Up)
+    assert sync_engine.has_sync_errors() is True
+
+    event = _local_modified_event(sync_engine, remote_path, _md5(b"local edit"))
+
+    # Mirror apply_local_changes: the caller registers the event in the
+    # activity tree before handing it to _create_remote_entry.
+    sync_engine.activity.add(event)
+    assert event in sync_engine.activity.sync_events
+
+    result = sync_engine._create_remote_entry(event)
+
+    assert result.status == SyncStatus.Skipped
+
+    # The event must be dropped from the in-memory activity tree, not leaked
+    # forever.
+    assert event not in sync_engine.activity.sync_events
+
+    # The stale sync error for this path must be cleared, exactly as it would
+    # be on the normal (non-gated) success path.
+    assert sync_engine.has_sync_errors() is False
+
