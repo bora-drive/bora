@@ -196,6 +196,49 @@ def test_emit_apply_attaches_shared_root_to_sentinel():
     assert cache.id_to_path("SR") == "/Shared with me/Team"
 
 
+def test_shortcut_emits_relative_symlink_metadata():
+    cache = _cache()  # root_id="ROOT"
+    cache.set("/Docs", "D", "ROOT", "Docs", True)
+    cache.set("/Docs/report.pdf", "T", "D", "report.pdf", False)
+    out: list = []
+    change = {"file": {
+        "id": "SL", "name": "link", "parents": ["ROOT"],
+        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
+        "shortcutDetails": {"targetId": "T",
+                            "targetMimeType": "application/pdf"}}}
+    assert _emit_apply(change, cache, out) is True
+    md = out[-1]
+    assert md.symlink_target == "Docs/report.pdf"  # relative to "/" dir
+
+
+def test_shortcut_with_unresolved_target_is_not_emitted():
+    cache = _cache()
+    out: list = []
+    change = {"file": {
+        "id": "SL", "name": "link", "parents": ["ROOT"],
+        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
+        "shortcutDetails": {"targetId": "MISSING"}}}
+    # Returns False -> deferred by the fixpoint; nothing emitted this pass.
+    assert _emit_apply(change, cache, out) is False
+    assert out == []
+
+
+def test_shortcut_to_shortcut_chain_is_refused():
+    cache = _cache()
+    cache.set("/other-link", "OTHER", "ROOT", "other-link", False)
+    out: list = []
+    change = {"file": {
+        "id": "SL", "name": "link", "parents": ["ROOT"],
+        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
+        "shortcutDetails": {
+            "targetId": "OTHER",
+            "targetMimeType": "application/vnd.google-apps.shortcut",
+        }}}
+    # Consumed (not retried) but not emitted, and not cached as a symlink.
+    assert _emit_apply(change, cache, out) is True
+    assert out == []
+
+
 def test_unshare_removed_true_deletes_from_cache():
     cache = _cache()
     cache.set("/Shared with me/Team", "SR", SHARED_WITH_ME_ID, "Team", True)
