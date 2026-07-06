@@ -2525,3 +2525,92 @@ def test_unknown_local_symlink_still_errors(sync_engine: SyncEngine) -> None:
     with pytest.raises(SymlinkError):
         sync_engine._on_local_file_modified(event)
 
+
+# ==== Task 16: local symlink deletion propagates to the Drive shortcut (M3) ============
+#
+# A shortcut is an ordinary index row (with a ``symlink_target``) plus a
+# path-cache entry -- there is no separate "shortcut" storage. _on_local_deleted
+# is generic: it resolves the remote item by path via ``client.get_metadata``
+# and, absent a mismatch, deletes it via the path-based ``client.remove``. It
+# carries no symlink-specific guard, so deleting the local symlink should
+# already propagate to a remote shortcut delete with no production change.
+
+
+def _local_deleted_event(
+    sync: SyncEngine, remote_path: str, remote_id: str = "SL"
+) -> SyncEvent:
+    """Build a local-deleted upload SyncEvent for a (now-vanished) symlink."""
+    return SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=remote_id,
+        local_path=sync.to_local_path_from_cased(remote_path),
+        rev=None,
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Removed,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+
+def test_delete_local_symlink_deletes_remote_shortcut(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """Deleting a local shortcut symlink must delete the corresponding Drive
+    shortcut via the path-based ``client.remove`` (Task 16 / M3)."""
+    remote_path = "/Shared with me/link"
+
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SL",
+        symlink_target="../Docs/report.pdf",
+    )
+
+    # Seed the path cache so a path-based resolution (e.g. inside client.remove
+    # in production) would succeed, mirroring the suite's other deletion tests.
+    sync_engine.client._path_cache.set(
+        remote_path, "SL", parent_id="SR", name="link", is_folder=False
+    )
+
+    md_remote = FileMetadata(
+        name="link",
+        path_lower=remote_path.lower(),
+        path_display=remote_path,
+        id="SL",
+        modified=datetime.today(),
+        rev="r1",
+        size=0,
+        symlink_target="../Docs/report.pdf",
+        shared=True,
+        modified_by=None,
+        is_downloadable=False,
+        content_hash="",
+    )
+    monkeypatch.setattr(
+        sync_engine.client, "get_metadata", lambda path, **kwargs: md_remote
+    )
+
+    calls = []
+    # remove() is path-based: (remote_path, parent_rev=None).
+    monkeypatch.setattr(
+        sync_engine.client,
+        "remove",
+        lambda p, parent_rev=None: calls.append(p),
+    )
+
+    event = _local_deleted_event(sync_engine, remote_path, remote_id="SL")
+
+    status = sync_engine._on_local_deleted(event)
+
+    assert status == SyncStatus.Done
+    assert calls == [remote_path]
+
