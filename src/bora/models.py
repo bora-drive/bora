@@ -513,6 +513,11 @@ class IndexEntry(Model):
     If the file is a symlink, its target path. This should only be set for files.
     """
 
+    read_only = NonNullColumn(SqlInt(), default=0)
+    """1 if the current user may not edit this item (Drive canEdit == false).
+    Consulted as the upload gate so no remote fetch is needed at local-change
+    time. Defaults 0 (editable)."""
+
     @property
     def is_file(self) -> bool:
         """Returns True for files"""
@@ -527,6 +532,11 @@ class IndexEntry(Model):
     def is_symlink(self) -> bool:
         """Returns True for symlinks"""
         return self.symlink_target is not None
+
+    @property
+    def is_read_only(self) -> bool:
+        """Returns True for view-only shared items."""
+        return bool(self.read_only)
 
     def __repr__(self) -> str:
         return (

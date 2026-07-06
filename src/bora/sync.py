@@ -1064,6 +1064,13 @@ class SyncEngine:
                                 stale.remote_path_lower
                             )
 
+                # SyncEvent carries no can_edit flag; preserve whatever
+                # read_only value the existing row already has (0 if there
+                # is no prior row). The metadata-based writer below is the
+                # authoritative source for this flag.
+                existing = self._index_table.get(remote_path_lower)
+                read_only = existing.read_only if existing is not None else 0
+
                 # Create or update entry.
                 entry = IndexEntry(
                     remote_path_cased=event.remote_path,
@@ -1074,6 +1081,7 @@ class SyncEngine:
                     rev=event.rev,
                     content_hash=event.content_hash,
                     symlink_target=event.symlink_target,
+                    read_only=read_only,
                 )
 
                 self._index_table.update(entry)
@@ -1094,12 +1102,14 @@ class SyncEngine:
                 item_type = ItemType.File
                 symlink_target = md.symlink_target
                 md_id = md.id
+                read_only = int(not md.can_edit)
             elif isinstance(md, FolderMetadata):
                 rev = "folder"
                 hash_str = "folder"
                 item_type = ItemType.Folder
                 symlink_target = None
                 md_id = md.id
+                read_only = int(not md.can_edit)
             else:
                 raise RuntimeError(f"Unknown metadata type: {md}")
 
@@ -1116,6 +1126,7 @@ class SyncEngine:
                 rev=rev,
                 content_hash=hash_str,
                 symlink_target=symlink_target,
+                read_only=read_only,
             )
 
             self._index_table.update(entry)

@@ -2121,3 +2121,38 @@ def test_get_remote_item_creates_shared_with_me_mount(
     with open(local_file, "rb") as f:
         assert f.read() == content
 
+
+# ==== Task 7: read_only index column threaded from can_edit metadata =========
+
+
+def test_index_records_read_only_from_metadata(
+    sync_engine: SyncEngine,
+) -> None:
+    """update_index_from_remote_metadata must derive IndexEntry.read_only
+    from the metadata's can_edit flag, so the upload gate (Task 9) has a
+    local source of truth without a remote fetch."""
+    # Top-level path so correct_case's ancestor lookup hits the "/" base case
+    # instead of requiring a linked client to resolve a parent's casing.
+    remote_path_lower = "/v.pdf"
+    md = FileMetadata(
+        name="v.pdf",
+        path_lower=remote_path_lower,
+        path_display="/v.pdf",
+        id="V1",
+        modified=datetime.today(),
+        rev="r1",
+        size=1,
+        symlink_target=None,
+        shared=True,
+        modified_by=None,
+        is_downloadable=True,
+        content_hash="h",
+        can_edit=False,
+    )
+
+    sync_engine.update_index_from_remote_metadata(md)
+
+    entry = sync_engine.get_index_entry(remote_path_lower)
+    assert entry is not None
+    assert entry.is_read_only is True
+
