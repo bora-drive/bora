@@ -53,7 +53,9 @@ __all__ = [
 # the change-feed field selector below.
 FILE_FIELDS = (
     "id, name, parents, mimeType, modifiedTime, size, md5Checksum, "
-    "shared, headRevisionId, trashed, lastModifyingUser(permissionId)"
+    "shared, headRevisionId, trashed, lastModifyingUser(permissionId), "
+    "sharedWithMe, ownedByMe, capabilities(canEdit), "
+    "shortcutDetails(targetId, targetMimeType)"
 )
 
 # Page size for changes.list. 100 keeps each cache-write batch modest.
@@ -97,6 +99,7 @@ def to_file_metadata(file: dict[str, Any], path_display: str) -> FileMetadata:
         modified_by=last_user.get("permissionId"),
         is_downloadable=True,
         content_hash=file.get("md5Checksum", ""),
+        can_edit=bool(file.get("capabilities", {}).get("canEdit", True)),
     )
 
 
@@ -110,6 +113,7 @@ def to_folder_metadata(
         path_display=path_display,
         id=file["id"],
         shared=bool(file.get("shared", False)),
+        can_edit=bool(file.get("capabilities", {}).get("canEdit", True)),
     )
 
 

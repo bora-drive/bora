@@ -100,6 +100,23 @@ def test_to_folder_metadata_maps_fields():
     assert meta.shared is True
 
 
+def test_to_file_metadata_reads_can_edit_false():
+    file = {**SAMPLE_FILE, "capabilities": {"canEdit": False}}
+    meta = to_file_metadata(file, "/report.pdf")
+    assert meta.can_edit is False
+
+
+def test_to_file_metadata_can_edit_defaults_true_when_absent():
+    meta = to_file_metadata(SAMPLE_FILE, "/report.pdf")
+    assert meta.can_edit is True
+
+
+def test_to_folder_metadata_reads_can_edit():
+    file = {**SAMPLE_FOLDER, "capabilities": {"canEdit": False}}
+    meta = to_folder_metadata(file, "/Docs")
+    assert meta.can_edit is False
+
+
 # ==== classify ============================================================
 
 import sqlite3
