@@ -161,6 +161,7 @@ def _seed_entry(
         rev=rev,
         content_hash=content_hash,
         symlink_target=None,
+        read_only=0,
     )
     with sync._database_access():
         sync._index_table.update(entry)

@@ -245,6 +245,7 @@ def _seed_index_entry(
         rev=rev,
         content_hash=content_hash,
         symlink_target=None,
+        read_only=0,
     )
     with sync._database_access():
         sync._index_table.update(entry)
@@ -740,6 +741,7 @@ def test_local_case_only_folder_rename_does_not_autorename(sync_engine: SyncEngi
         rev="folder",
         content_hash="folder",
         symlink_target=None,
+        read_only=0,
     )
     with sync_engine._database_access():
         sync_engine._index_table.update(entry)
@@ -833,6 +835,7 @@ def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEng
             rev="folder",
             content_hash="folder",
             symlink_target=None,
+            read_only=0,
         )
         with sync_engine._database_access():
             sync_engine._index_table.update(entry)
@@ -990,6 +993,7 @@ def _seed_entry(
         rev=rev,
         content_hash=content_hash,
         symlink_target=None,
+        read_only=0,
     )
     with sync._database_access():
         sync._index_table.update(entry)
