@@ -123,7 +123,7 @@ import sqlite3
 
 from bora.changes import ChangeDecision, _emit_apply, classify
 from bora.database.core import Database
-from bora.path_cache import PathIDCache
+from bora.path_cache import SHARED_WITH_ME_ID, PathIDCache
 
 
 def _cache() -> PathIDCache:
@@ -174,6 +174,37 @@ def test_classify_missing_file_body_is_unknown():
     cache = _cache()
     change = {"removed": False, "fileId": "F1", "file": None}
     assert classify(change, cache) is ChangeDecision.UNKNOWN_FILE
+
+
+def test_classify_shared_with_me_is_apply_without_parent():
+    cache = _cache()  # root_id="ROOT"
+    change = {"removed": False, "fileId": "SR", "file": {
+        "id": "SR", "name": "Team", "parents": ["OTHER"],
+        "mimeType": "application/vnd.google-apps.folder",
+        "trashed": False, "sharedWithMe": True}}
+    assert classify(change, cache) is ChangeDecision.APPLY
+
+
+def test_emit_apply_attaches_shared_root_to_sentinel():
+    cache = _cache()
+    out: list = []
+    change = {"file": {
+        "id": "SR", "name": "Team", "parents": ["OTHER"],
+        "mimeType": "application/vnd.google-apps.folder",
+        "trashed": False, "sharedWithMe": True}}
+    assert _emit_apply(change, cache, out) is True
+    assert cache.id_to_path("SR") == "/Shared with me/Team"
+
+
+def test_unshare_removed_true_deletes_from_cache():
+    cache = _cache()
+    cache.set("/Shared with me/Team", "SR", SHARED_WITH_ME_ID, "Team", True)
+    out: list = []
+    from bora.changes import _emit_delete
+    _emit_delete({"removed": True, "fileId": "SR"}, cache, out, None)
+    assert cache.id_to_path("SR") is None
+    assert any(getattr(e, "path_display", None) == "/Shared with me/Team"
+               for e in out)
 
 
 # ==== iter_remote_changes — FakeDrive-driven tests ========================
