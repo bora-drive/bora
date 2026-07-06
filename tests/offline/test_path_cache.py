@@ -543,6 +543,33 @@ class TestPopulateSharedRoots:
         assert cache.id_to_path("O") is None
 
 
+class TestReservedNameCollision:
+    def test_real_folder_named_shared_with_me_is_renamed(self) -> None:
+        cache = make_cache()  # root_id="ROOT"
+        real = {"id": "RF", "name": "Shared with me",
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": ["ROOT"]}
+        cache.populate_from_listing([real])
+        path = cache.id_to_path("RF")
+        assert path is not None
+        assert path != "/Shared with me"
+        assert path.startswith("/Shared with me")  # suffixed variant
+
+    def test_shared_root_named_shared_with_me_not_renamed(self) -> None:
+        cache = make_cache()
+        # A shared root literally named "Shared with me" is a degenerate
+        # but legal case: it nests one level under the sentinel and must
+        # not be mistaken for the reserved-name collision (it is listed in
+        # shared_root_ids, so the guard must not touch it).
+        shared_root = {
+            "id": "SR", "name": "Shared with me",
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": ["SOMEONE_ELSES_ID"], "sharedWithMe": True,
+        }
+        cache.populate_from_listing([shared_root])
+        assert cache.id_to_path("SR") == "/Shared with me/Shared with me"
+
+
 class TestPopulateAtomicity:
     def test_rollback_on_mid_commit_failure(self) -> None:
         cache = make_cache()
