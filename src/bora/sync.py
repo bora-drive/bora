@@ -2630,15 +2630,31 @@ class SyncEngine:
         # (M2 behaviour, Task 15) -- most local symlink "modified" events are
         # just an mtime touch, not a retarget. A known shortcut whose target
         # text changed is retargeted in place. A brand-new local symlink (no
-        # index row at all) creates a new shortcut -- unless its target does
-        # not map to any Drive item known to us, which remains genuinely
-        # unsupported (SymlinkError, as before M3): there is nothing we could
-        # point a shortcut at. An index row that exists but is NOT itself a
-        # symlink (an existing regular file/folder now replaced locally by a
-        # symlink) must NOT go through create_shortcut -- that would create a
-        # same-name duplicate/orphan item on Drive next to the original: it
-        # falls through to the same SymlinkError as the unmappable case.
+        # index row at all) creates a new shortcut. An index row that exists
+        # but is NOT itself a symlink (an existing regular file/folder now
+        # replaced locally by a symlink) must NOT go through create_shortcut --
+        # that would create a same-name duplicate/orphan item on Drive next to
+        # the original.
+        #
+        # Unmappable target (Finding 2, Task 18): if the symlink's target does
+        # not resolve to a Drive item known to us, there is nothing we could
+        # point a shortcut at (or retarget an existing one to). This is left
+        # local and surfaced as a sync error/notice -- one uniform behaviour
+        # (SymlinkError) for the brand-new, retarget, and non-symlink-row
+        # cases alike, rather than silently skipping only some of them.
         if event.symlink_target is not None:
+            # Write-access gate (Task 18): a shortcut cannot be created,
+            # retargeted, or (see _on_local_deleted) removed inside a folder
+            # we only have view access to. Skip silently -- no persisted sync
+            # error, no retry storm -- mirroring the item-level read-only gate
+            # in _is_read_only_event/_create_remote_entry, which cannot catch
+            # this case because a brand-new symlink has no index row of its
+            # own yet to carry a read_only flag.
+            parent_lower = fold_path(posixpath.dirname(event.remote_path_lower))
+            parent_entry = self._index_table.get(parent_lower)
+            if parent_entry is not None and parent_entry.is_read_only:
+                return SyncStatus.Skipped  # cannot write into a view-only folder
+
             entry = self._index_table.get(event.remote_path_lower)
 
             if entry is not None and entry.is_symlink:
@@ -2664,18 +2680,19 @@ class SyncEngine:
                     target_remote is None
                     or self.client._path_cache.path_to_id(target_remote) is None
                 ):
-                    # The shortcut was previously working; its new target just
-                    # doesn't resolve to a synced item (yet). Leave the local
-                    # symlink and the remote shortcut untouched rather than
-                    # erroring -- a later sync cycle may resolve the target
-                    # once it has synced (Task 18 covers the write-access
-                    # gate; this is not that).
-                    self._logger.warning(
-                        'Symlink target for "%s" is not a synced Drive item; '
-                        "leaving the existing shortcut untouched.",
-                        event.remote_path,
+                    # Finding 2 (Task 18): unify with the brand-new-symlink case
+                    # below -- the new target doesn't resolve to a synced Drive
+                    # item, so there is nothing to retarget the shortcut to.
+                    # Raise the same SymlinkError as the unmappable-create case
+                    # rather than silently skipping: both leave the item local,
+                    # but a genuinely broken target should surface as a sync
+                    # error/notice (spec case (d)), not vanish into a debug log.
+                    error = SymlinkError(
+                        "Could not upload item",
+                        "Syncing symlinks is not supported.",
                     )
-                    return SyncStatus.Skipped
+                    error.local_path = event.local_path
+                    raise error
 
                 md_new = self.client.retarget_shortcut(
                     event.remote_path, target_remote
@@ -2885,6 +2902,25 @@ class SyncEngine:
                 'Not deleting "%s": is excluded by selective sync', event.remote_path
             )
             return SyncStatus.Skipped
+
+        # Write-access gate (Task 18): a shortcut (a symlink's index row) can't
+        # be removed from a folder we only have view access to. This mirrors
+        # the create/retarget gate in _on_local_file_modified -- deleting a
+        # shortcut is a mutation of its containing folder's listing, same as
+        # creating one, so it needs the same parent-level check. Restricted to
+        # symlink rows: a non-symlink item's own read_only flag (populated
+        # from its real Drive metadata) already gates it via
+        # _is_read_only_event in _create_remote_entry.
+        deleted_entry = self._index_table.get(event.remote_path_lower)
+        if deleted_entry is not None and deleted_entry.is_symlink:
+            parent_lower = fold_path(posixpath.dirname(event.remote_path_lower))
+            parent_entry = self._index_table.get(parent_lower)
+            if parent_entry is not None and parent_entry.is_read_only:
+                self._logger.debug(
+                    'Not deleting "%s": containing folder is read-only',
+                    event.remote_path,
+                )
+                return SyncStatus.Skipped  # cannot delete from a view-only folder
 
         local_rev = self.get_local_rev(event.remote_path_lower)
 

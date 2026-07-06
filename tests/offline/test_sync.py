@@ -2533,9 +2533,11 @@ def test_unknown_local_symlink_still_errors(sync_engine: SyncEngine) -> None:
 # of raising SymlinkError; a known shortcut whose target TEXT changed is
 # retargeted in place; a known shortcut whose text is unchanged remains the
 # Task 15 no-op (see test_local_symlink_matching_known_shortcut_is_skipped
-# above), and a known shortcut whose new target does not map to a synced item
-# is left untouched (Skipped) rather than erred, mirroring _target_remote_path
-# returning None for the brand-new case.
+# above). A known shortcut whose new target does not map to a synced item
+# raises SymlinkError, same as the brand-new-unmappable case -- reconciled in
+# Task 18 (Finding 2): both "left local, target unmappable" cases now surface
+# the same sync error/notice instead of one erroring and the other silently
+# skipping with just a debug log.
 
 
 def _make_shortcut_metadata(remote_path: str, file_id: str, target_rel: str) -> FileMetadata:
@@ -2639,12 +2641,16 @@ def test_local_symlink_known_shortcut_retargets_on_target_change(
     assert entry.symlink_target == "../Docs/other.pdf"
 
 
-def test_local_symlink_known_shortcut_unmappable_new_target_is_left_local(
+def test_local_symlink_known_shortcut_unmappable_new_target_errors(
     sync_engine: SyncEngine, monkeypatch
 ) -> None:
     """A known shortcut whose target text changed to something that does not
-    map to a synced Drive item is left untouched (Skipped, no error) -- the
-    shortcut was working before and Task 18 owns any stronger gate."""
+    map to a synced Drive item raises SymlinkError (Task 18, Finding 2): the
+    item is left local and surfaced as a sync error/notice, the same uniform
+    behaviour as a brand-new unmappable symlink
+    (test_unknown_local_symlink_still_errors) -- not a silent Skip."""
+    from bora.exceptions import SymlinkError
+
     remote_path = "/Shared with me/link"
     _seed_index_entry(
         sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
@@ -2660,9 +2666,9 @@ def test_local_symlink_known_shortcut_unmappable_new_target_is_left_local(
         lambda rp, trp: calls.append((rp, trp)),
     )
 
-    status = sync_engine._on_local_file_modified(event)
+    with pytest.raises(SymlinkError):
+        sync_engine._on_local_file_modified(event)
 
-    assert status == SyncStatus.Skipped
     assert calls == []
 
 
@@ -2845,6 +2851,155 @@ def test_delete_local_symlink_deletes_remote_shortcut(
     )
 
     event = _local_deleted_event(sync_engine, remote_path, remote_id="SL")
+
+    status = sync_engine._on_local_deleted(event)
+
+    assert status == SyncStatus.Done
+    assert calls == [remote_path]
+
+
+# ==== Task 18: gate reverse shortcut propagation on write access (M3) =======
+#
+# A view-only shared folder (index row with read_only=1) cannot accept
+# create/retarget/delete of a Drive shortcut inside it, even though the
+# shortcut's OWN index row (if any) may not exist yet or may not itself carry
+# read_only=1. The generic item-level gate in _is_read_only_event only fires
+# for a path that already has an index row; a brand-new local symlink has
+# none, so it needs an explicit check against its PARENT's read-only flag.
+
+
+def _local_symlink_create_event(
+    sync: SyncEngine, remote_path: str, target: str
+) -> SyncEvent:
+    """Build a local upload SyncEvent for a brand-new local symlink."""
+    event = _local_modified_event(sync, remote_path, content_hash="unused")
+    event.symlink_target = target
+    return event
+
+
+def test_shortcut_create_skipped_in_readonly_folder(sync_engine: SyncEngine) -> None:
+    """A brand-new local symlink inside a read-only (view-only) shared folder
+    is skipped silently -- no create_shortcut call, no persisted sync error,
+    no retry storm."""
+    _seed_index_entry(
+        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR", read_only=1,
+    )
+
+    created = []
+    sync_engine.client.create_shortcut = lambda *a, **k: created.append(a)
+
+    event = _local_symlink_create_event(
+        sync_engine, "/Shared with me/Team/link", target="../report.pdf"
+    )
+
+    status = sync_engine._on_local_file_modified(event)
+
+    assert status == SyncStatus.Skipped
+    assert created == []  # no remote create attempted
+
+
+def test_shortcut_retarget_skipped_in_readonly_folder(
+    sync_engine: SyncEngine,
+) -> None:
+    """A KNOWN shortcut's retarget is also gated on the containing folder's
+    write access, not just brand-new creates."""
+    remote_path = "/Shared with me/Team/link"
+    _seed_index_entry(
+        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR", read_only=1,
+    )
+    _seed_index_entry(
+        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
+        remote_id="SL", symlink_target="../report.pdf",
+    )
+
+    retargeted = []
+    sync_engine.client.retarget_shortcut = lambda *a, **k: retargeted.append(a)
+
+    event = _local_symlink_create_event(
+        sync_engine, remote_path, target="../other.pdf"
+    )
+
+    status = sync_engine._on_local_file_modified(event)
+
+    assert status == SyncStatus.Skipped
+    assert retargeted == []
+
+
+def test_shortcut_delete_skipped_in_readonly_folder(sync_engine: SyncEngine) -> None:
+    """Deleting a local shortcut symlink inside a read-only shared folder does
+    not propagate to a remote delete -- the parent gate applies to delete just
+    as it does to create/retarget (Task 16's generic delete path has no
+    symlink-specific guard of its own)."""
+    remote_path = "/Shared with me/Team/link"
+    _seed_index_entry(
+        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR", read_only=1,
+    )
+    _seed_index_entry(
+        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
+        remote_id="SL", symlink_target="../report.pdf",
+    )
+
+    removed = []
+    sync_engine.client.remove = lambda *a, **k: removed.append(a)
+    sync_engine.client.get_metadata = lambda *a, **k: pytest.fail(
+        "get_metadata must not be called; the parent gate should skip before "
+        "any remote call"
+    )
+
+    event = _local_deleted_event(sync_engine, remote_path, remote_id="SL")
+
+    status = sync_engine._on_local_deleted(event)
+
+    assert status == SyncStatus.Skipped
+    assert removed == []
+
+
+def test_non_symlink_delete_in_readonly_folder_not_gated_by_parent_check(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """The parent-read-only gate in _on_local_deleted is scoped to symlink
+    (shortcut) rows -- a regular file's own read_only flag (populated from its
+    real Drive canEdit) is what gates it, via _is_read_only_event upstream in
+    _create_remote_entry, not this parent check. Confirms the new guard does
+    not accidentally block ordinary deletes just because the parent folder
+    happens to be read-only (e.g. a stale/incorrect parent flag)."""
+    remote_path = "/Shared with me/Team/plain.txt"
+    _seed_index_entry(
+        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR", read_only=1,
+    )
+    _seed_index_entry(
+        sync_engine, remote_path, rev="r1", content_hash="deadbeef", last_sync=0.0,
+        remote_id="F1",
+    )
+
+    md_remote = FileMetadata(
+        name="plain.txt",
+        path_lower=remote_path.lower(),
+        path_display=remote_path,
+        id="F1",
+        modified=datetime.today(),
+        rev="r1",
+        size=0,
+        symlink_target=None,
+        shared=True,
+        modified_by=None,
+        is_downloadable=True,
+        content_hash="deadbeef",
+    )
+    monkeypatch.setattr(
+        sync_engine.client, "get_metadata", lambda path, **kwargs: md_remote
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        sync_engine.client, "remove", lambda p, parent_rev=None: calls.append(p)
+    )
+
+    event = _local_deleted_event(sync_engine, remote_path, remote_id="F1")
 
     status = sync_engine._on_local_deleted(event)
 
