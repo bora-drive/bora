@@ -2038,3 +2038,16 @@ def test_clean_remote_changes_path_ends_deleted_keeps_single_delete(
     assert len(cleaned.entries) == 1
     assert isinstance(cleaned.entries[0], DeletedMetadata)
 
+
+def test_ensure_shared_with_me_dir_creates_it(sync_engine: SyncEngine) -> None:
+    shared = os.path.join(sync_engine.sync_path, "Shared with me")
+    assert not os.path.exists(shared)
+    sync_engine.ensure_shared_with_me_dir_present()
+    assert os.path.isdir(shared)
+
+
+def test_ensure_shared_with_me_dir_idempotent(sync_engine: SyncEngine) -> None:
+    sync_engine.ensure_shared_with_me_dir_present()
+    sync_engine.ensure_shared_with_me_dir_present()  # no raise on second call
+    assert os.path.isdir(os.path.join(sync_engine.sync_path, "Shared with me"))
+
