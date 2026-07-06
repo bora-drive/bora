@@ -2430,8 +2430,15 @@ class SyncEngine:
 
         if self._is_read_only_event(event):
             # View-only shared item: never propagate local mutations. Skip
-            # silently — no error, no retry storm (spec §5).
+            # silently — no error, no retry storm (spec §5). Still run the same
+            # cleanup as every other exit path below: clear any stale sync
+            # error for the path (it may have just become read-only) and drop
+            # the event from the in-memory activity tree (added by the caller
+            # in apply_local_changes), so a permanently-gated path doesn't
+            # leak an activity entry or wedge a stuck error badge forever.
             event.status = SyncStatus.Skipped
+            self.clear_sync_errors_from_event(event)
+            self.activity.discard(event)
             return event
 
         try:
