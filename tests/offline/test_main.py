@@ -140,6 +140,7 @@ def test_exclude_items_removes_index_entries_by_fold_path_key(m: Bora) -> None:
         rev="rev-1",
         content_hash=None,
         symlink_target=None,
+        read_only=0,
     )
     with m.sync._database_access():
         m.sync._index_table.update(entry)
