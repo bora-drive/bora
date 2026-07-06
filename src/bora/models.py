@@ -190,6 +190,15 @@ class SyncEvent(Model):
     If the file is a symlink, its target path. This should only be set for files.
     """
 
+    read_only = Column(SqlInt())
+    """
+    1 if the current user may not edit this remote item (Drive
+    ``capabilities.canEdit == false``), 0 if they may. ``None`` when this event
+    was not derived from remote metadata (e.g. local file system events, for
+    which the flag is not meaningful) -- callers that need a definite value
+    should fall back to the existing index row in that case.
+    """
+
     change_type = NonNullColumn(SqlEnum(ChangeType))
     """
     The :class:`ChangeType`. Remote SyncEvents currently do not generate moved events
@@ -306,6 +315,10 @@ class SyncEvent(Model):
             symlink_target = None
             remote_id = None
             change_remote_id = None
+            # The item is gone; there is nothing to gate access to anymore.
+            # Leave read_only unset so update_index_from_sync_event falls
+            # back to removing the row rather than writing a flag for it.
+            read_only = None
 
             entry = sync_engine.get_index_entry(md.path_lower)
             item_type = ItemType.Unknown if entry is None else entry.item_type
@@ -321,6 +334,10 @@ class SyncEvent(Model):
             remote_id = md.id
             change_time = None
             change_remote_id = None
+            # md.can_edit is a plain bool (default True) on both FileMetadata
+            # and FolderMetadata -- no getattr guard needed, same as the
+            # direct access in update_index_from_remote_metadata.
+            read_only = int(not md.can_edit)
 
         elif isinstance(md, FileMetadata):
             item_type = ItemType.File
@@ -330,6 +347,7 @@ class SyncEvent(Model):
             remote_id = md.id
             size = md.size
             change_time = md.modified.timestamp()
+            read_only = int(not md.can_edit)
             if sync_engine.get_local_rev(md.path_lower):
                 change_type = ChangeType.Modified
             else:
@@ -356,6 +374,7 @@ class SyncEvent(Model):
             rev=rev,
             content_hash=hash_str,
             symlink_target=symlink_target,
+            read_only=read_only,
             change_type=change_type,
             change_time=change_time,
             change_remote_id=change_remote_id,
