@@ -113,6 +113,7 @@ from .utils import exc_info_tuple, removeprefix, sanitize_string
 from .utils.appdirs import get_data_path
 from .utils.caches import LRUCache
 from .utils.integration import CPU_CORE_COUNT, cpu_usage_percent
+from .path_cache import SHARED_WITH_ME_PATH
 from .path_codec import decode_path, encode_path, fold_human, fold_path
 from .utils.path import (
     content_hash,
@@ -1263,6 +1264,19 @@ class SyncEngine:
                     "or restart Bora to set up a new folder."
                 )
                 raise NoSyncDirError(title, msg)
+
+    def ensure_shared_with_me_dir_present(self) -> None:
+        """Create the local "Shared with me" mount point if missing.
+
+        Analogous to the sync root: it has no remote_id, is never uploaded,
+        and is created directly rather than via the download path.
+        """
+        # SHARED_WITH_ME_PATH is "/Shared with me"; strip the leading slash.
+        local_path = osp.join(self.sync_path, SHARED_WITH_ME_PATH.lstrip("/"))
+        if osp.isdir(local_path):
+            return
+        with self.fs_events.ignore(DirCreatedEvent(local_path), recursive=False):
+            os.makedirs(local_path, exist_ok=True)
 
     def ensure_cache_dir_present(self) -> None:
         """
@@ -3058,6 +3072,8 @@ class SyncEngine:
         Calling this method will perform a full indexing if this is the first download.
         """
         with self.sync_lock:
+            self.ensure_shared_with_me_dir_present()
+
             if self.remote_cursor == "":
                 self._state.set("sync", "last_reindex", time.time())
                 self._state.set("sync", "did_finish_indexing", False)
