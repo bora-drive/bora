@@ -517,6 +517,32 @@ class TestPopulateFromListing:
         assert cache.path_to_id("/new.pdf") == "F1"
 
 
+class TestPopulateSharedRoots:
+    def test_shared_root_attaches_under_sentinel(self) -> None:
+        cache = make_cache()  # root_id="ROOT"
+        shared_root = {
+            "id": "SR", "name": "TeamFolder",
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": ["SOMEONE_ELSES_ID"], "sharedWithMe": True,
+        }
+        child = {
+            "id": "SC", "name": "notes.txt", "mimeType": "text/plain",
+            "parents": ["SR"],
+        }
+        cache.populate_from_listing([shared_root, child])
+        assert cache.id_to_path("SR") == "/Shared with me/TeamFolder"
+        assert cache.id_to_path("SC") == "/Shared with me/TeamFolder/notes.txt"
+
+    def test_non_shared_orphan_still_dropped(self) -> None:
+        cache = make_cache()
+        orphan = {
+            "id": "O", "name": "x.txt", "mimeType": "text/plain",
+            "parents": ["UNREACHABLE"],  # no sharedWithMe flag
+        }
+        cache.populate_from_listing([orphan])
+        assert cache.id_to_path("O") is None
+
+
 class TestPopulateAtomicity:
     def test_rollback_on_mid_commit_failure(self) -> None:
         cache = make_cache()
