@@ -2160,3 +2160,95 @@ def test_index_records_read_only_from_metadata(
     assert entry is not None
     assert entry.is_read_only is True
 
+
+def test_readonly_file_download_clears_write_bits(
+    sync_engine: SyncEngine,
+) -> None:
+    """_apply_read_only must clear write bits on a downloaded view-only
+    shared file, wrapped in fs_events.ignore so the chmod isn't echoed back
+    as a local change (Task 8)."""
+    import stat as _stat
+
+    local = osp.join(sync_engine.sync_path, "Shared with me", "v.txt")
+    os.makedirs(osp.dirname(local), exist_ok=True)
+    with open(local, "w") as f:
+        f.write("x")
+
+    sync_engine._apply_read_only(local, is_dir=False)
+
+    mode = _stat.S_IMODE(os.lstat(local).st_mode)
+    assert not (mode & 0o222)  # no write bits
+
+
+def test_apply_read_only_dir_clears_write_bits(sync_engine: SyncEngine) -> None:
+    """_apply_read_only(is_dir=True) uses 0o555 so the directory stays
+    traversable/listable but not writable."""
+    import stat as _stat
+
+    local = osp.join(sync_engine.sync_path, "Shared with me", "d")
+    os.makedirs(local, exist_ok=True)
+
+    sync_engine._apply_read_only(local, is_dir=True)
+
+    mode = _stat.S_IMODE(os.lstat(local).st_mode)
+    assert not (mode & 0o222)
+    assert mode & 0o111  # still traversable
+
+
+def test_restore_writable_reinstates_write_bit(sync_engine: SyncEngine) -> None:
+    """_restore_writable must OR in the owner write bit before the engine
+    overwrites/deletes a read-only local file."""
+    import stat as _stat
+
+    local = osp.join(sync_engine.sync_path, "Shared with me", "v.txt")
+    os.makedirs(osp.dirname(local), exist_ok=True)
+    with open(local, "w") as f:
+        f.write("x")
+    os.chmod(local, 0o444)
+
+    sync_engine._restore_writable(local)
+
+    mode = _stat.S_IMODE(os.lstat(local).st_mode)
+    assert mode & 0o200
+
+
+def test_restore_writable_missing_file_is_noop(sync_engine: SyncEngine) -> None:
+    """_restore_writable must not raise if the local target no longer
+    exists (e.g. already removed by a prior remote-delete replay)."""
+    local = osp.join(sync_engine.sync_path, "Shared with me", "missing.txt")
+
+    sync_engine._restore_writable(local)  # should not raise
+
+
+def test_is_read_only_event_reads_index_entry(sync_engine: SyncEngine) -> None:
+    """_is_read_only_event must consult the index entry at
+    event.remote_path_lower rather than any flag on the SyncEvent itself."""
+    remote_path = "/v.pdf"
+    entry = IndexEntry(
+        remote_path_cased=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id="id:ro",
+        item_type=ItemType.File,
+        last_sync=0.0,
+        rev="r1",
+        content_hash="h",
+        symlink_target=None,
+        read_only=1,
+    )
+    with sync_engine._database_access():
+        sync_engine._index_table.update(entry)
+
+    event = _download_event(sync_engine, remote_path, "r1", "h")
+
+    assert sync_engine._is_read_only_event(event) is True
+
+
+def test_is_read_only_event_false_when_no_index_entry(
+    sync_engine: SyncEngine,
+) -> None:
+    """_is_read_only_event must return False (not raise) when there is no
+    index entry yet for the event's path."""
+    event = _download_event(sync_engine, "/nope.pdf", "r1", "h")
+
+    assert sync_engine._is_read_only_event(event) is False
+

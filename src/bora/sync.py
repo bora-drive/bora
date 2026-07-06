@@ -11,6 +11,7 @@ import os
 import os.path as osp
 import random
 import sqlite3
+import stat
 import sys
 import threading
 import time
@@ -1857,8 +1858,8 @@ class SyncEngine:
         snapshot_time = time.time()
 
         # Get modified or added items.
-        for local_path, stat in walk(self.sync_path, self._scandir_with_ignore):
-            is_dir = S_ISDIR(stat.st_mode)
+        for local_path, st in walk(self.sync_path, self._scandir_with_ignore):
+            is_dir = S_ISDIR(st.st_mode)
             index_entry = self.get_index_entry_for_local_path(local_path)
 
             if index_entry:
@@ -1872,7 +1873,7 @@ class SyncEngine:
 
             # Check if item was created or modified since the last sync,
             # but before we started the FileEventHandler (~snapshot_time).
-            mtime_check = snapshot_time > stat.st_mtime > last_sync
+            mtime_check = snapshot_time > st.st_mtime > last_sync
 
             # Always upload untracked items, check mtime of tracked items.
             is_modified = mtime_check and not is_new
@@ -3721,6 +3722,33 @@ class SyncEngine:
             suffix = f"conflicted copy {date}"
         return generate_cc_name(local_path, suffix)
 
+    def _apply_read_only(self, local_path: str, *, is_dir: bool) -> None:
+        """Clear write bits on a view-only shared item, ignoring the
+        resulting chmod so it is not echoed back as a local change."""
+        mode = 0o555 if is_dir else 0o444
+        with self.fs_events.ignore(
+            FileModifiedEvent(local_path), recursive=False
+        ):
+            os.chmod(local_path, mode)
+
+    def _restore_writable(self, local_path: str) -> None:
+        """Restore write permission before overwriting/deleting a read-only
+        local file for an incoming remote change."""
+        try:
+            cur = stat.S_IMODE(os.lstat(local_path).st_mode)
+        except FileNotFoundError:
+            return
+        with self.fs_events.ignore(
+            FileModifiedEvent(local_path), recursive=False
+        ):
+            os.chmod(local_path, cur | 0o200)
+
+    def _is_read_only_event(self, event: SyncEvent) -> bool:
+        """Returns whether the index entry for ``event`` is marked
+        read-only (i.e. a view-only shared item, Drive canEdit == false)."""
+        entry = self._index_table.get(event.remote_path_lower)
+        return entry is not None and entry.is_read_only
+
     def _on_remote_file(self, event: SyncEvent) -> SyncStatus:
         """
         Applies a remote file change or creation locally.
@@ -3813,6 +3841,12 @@ class SyncEngine:
                 # Ignore FileDeletedEvent when replacing old file.
                 ignore_events.append(FileDeletedEvent(event.local_path))
 
+            # A previous download may have left this file read-only (view-only
+            # shared item). Restore write permission before the move below, or
+            # the move -- an overwrite-in-place on some platforms -- would fail
+            # with EACCES.
+            self._restore_writable(event.local_path)
+
             # Move the downloaded file to its destination.
             with self.fs_events.ignore(*ignore_events, recursive=False):
                 with convert_api_errors(
@@ -3828,6 +3862,10 @@ class SyncEngine:
                     )
 
         self.update_index_from_sync_event(event)
+
+        if self._is_read_only_event(event):
+            self._apply_read_only(event.local_path, is_dir=False)
+
         self._save_local_hash(
             stat.st_ino, event.local_path, event.content_hash, stat.st_mtime
         )
@@ -3904,6 +3942,9 @@ class SyncEngine:
 
         self.update_index_from_sync_event(event)
 
+        if self._is_read_only_event(event):
+            self._apply_read_only(event.local_path, is_dir=True)
+
         self._logger.debug('Created local folder "%s"', event.remote_path)
 
         return status
@@ -3928,6 +3969,11 @@ class SyncEngine:
             return SyncStatus.Skipped
         elif conflict_check is Conflict.LocalNewerOrIdentical:
             return SyncStatus.Skipped
+
+        # A view-only shared item may have been left read-only on disk by a
+        # previous download; restore write permission before removing it, or
+        # the delete below would fail with EACCES.
+        self._restore_writable(event.local_path)
 
         event_cls = DirDeletedEvent if isdir(event.local_path) else FileDeletedEvent
         with self.fs_events.ignore(event_cls(event.local_path)):
@@ -4184,8 +4230,8 @@ class SyncEngine:
 
             # Add created and modified events for children as appropriate.
 
-            for path, stat in walk(local_path, self._scandir_with_ignore):
-                if S_ISDIR(stat.st_mode):
+            for path, st in walk(local_path, self._scandir_with_ignore):
+                if S_ISDIR(st.st_mode):
                     self.fs_events.queue_event(DirCreatedEvent(path))
                 else:
                     self.fs_events.queue_event(FileModifiedEvent(path))
