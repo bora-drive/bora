@@ -2666,6 +2666,103 @@ def test_local_symlink_known_shortcut_unmappable_new_target_is_left_local(
     assert calls == []
 
 
+def test_local_symlink_known_shortcut_non_ascii_target_unchanged_is_skipped(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """Regression: entry.symlink_target is the ENCODED relpath (as stored by
+    create_shortcut/retarget_shortcut in writes.py), while event.symlink_target
+    is the raw (decoded) os.readlink() text. For a non-ASCII target name these
+    differ textually even when nothing changed -- comparing them directly
+    misclassifies an unchanged shortcut as "changed" and retargets it (and
+    burns a quota-consuming files.update call) on every scan cycle. The
+    no-op check must compare like-for-like (both encoded)."""
+    remote_path = "/Shared with me/link"
+    target_remote = "/Docs/café.pdf"  # café.pdf
+    encoded_target_remote = encode_path(target_remote)
+    assert encoded_target_remote == "/Docs/caf%C3%A9.pdf"
+
+    # entry.symlink_target as actually stored by create_shortcut/retarget_shortcut:
+    # posixpath.relpath(ENCODED target, ENCODED own dirname).
+    _seed_index_entry(
+        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
+        remote_id="SL", symlink_target="../Docs/caf%C3%A9.pdf",
+    )
+    _seed_index_entry(
+        sync_engine, "/Shared with me", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR",
+    )
+    sync_engine.client._path_cache.set(
+        encoded_target_remote, "F-target", parent_id="F-docs", name="caf%C3%A9.pdf",
+        is_folder=False,
+    )
+
+    event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
+    # Raw readlink() text is human/decoded and UNCHANGED from what produced
+    # the stored shortcut above -- this must be a no-op.
+    event.symlink_target = "../Docs/café.pdf"
+
+    calls = []
+    monkeypatch.setattr(
+        sync_engine.client, "retarget_shortcut",
+        lambda rp, trp: calls.append((rp, trp)),
+    )
+    monkeypatch.setattr(
+        sync_engine.client, "create_shortcut",
+        lambda *a, **kw: pytest.fail("create_shortcut must not be called for a known shortcut"),
+    )
+
+    status = sync_engine._on_local_file_modified(event)
+
+    assert status == SyncStatus.Skipped
+    assert calls == []
+
+
+def test_local_symlink_replacing_existing_non_symlink_row_errors_not_duplicate(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """Regression: if a NON-symlink index row (a previously-synced regular
+    file/folder) already exists at this path, a local symlink now appearing
+    there must NOT call create_shortcut -- that would create a same-name
+    duplicate/orphan item on Drive next to the original. It must fall through
+    to the existing (pre-Task-17) SymlinkError, even when the symlink's target
+    does map to a known Drive item."""
+    from bora.exceptions import SymlinkError
+
+    remote_path = "/Shared with me/link"
+    target_remote = "/Docs/report.pdf"
+
+    # Existing REGULAR (non-symlink) index row at this path.
+    _seed_index_entry(
+        sync_engine, remote_path, rev="r1", content_hash="deadbeef", last_sync=0.0,
+        remote_id="F-old",
+    )
+    _seed_index_entry(
+        sync_engine, "/Shared with me", rev="folder", content_hash=None,
+        last_sync=0.0, remote_id="SR",
+    )
+    sync_engine.client._path_cache.set(
+        target_remote, "F-target", parent_id="F-docs", name="report.pdf",
+        is_folder=False,
+    )
+
+    event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
+    event.symlink_target = "../Docs/report.pdf"
+
+    calls = []
+    monkeypatch.setattr(
+        sync_engine.client, "create_shortcut",
+        lambda *a, **kw: calls.append(a) or pytest.fail(
+            "create_shortcut must not be called; it would duplicate the "
+            "existing non-symlink item on Drive"
+        ),
+    )
+
+    with pytest.raises(SymlinkError):
+        sync_engine._on_local_file_modified(event)
+
+    assert calls == []
+
+
 # ==== Task 16: local symlink deletion propagates to the Drive shortcut (M3) ============
 #
 # A shortcut is an ordinary index row (with a ``symlink_target``) plus a
