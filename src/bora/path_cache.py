@@ -48,9 +48,20 @@ from .path_codec import compose_path, decode_name, encode_name, fold_key, fold_p
 if TYPE_CHECKING:
     from .database.core import Database
 
-__all__ = ["PathCacheEntry", "PathIDCache"]
+__all__ = [
+    "PathCacheEntry",
+    "PathIDCache",
+    "SHARED_WITH_ME_ID",
+    "SHARED_WITH_ME_PATH",
+]
 
 logger = logging.getLogger(__name__)
+
+# Virtual root for "Shared with me" content. Like ``root_id``/"/", this
+# id↔path mapping is code-only (no PathCacheEntry row). The id is a
+# synthetic sentinel that cannot collide with a real Drive file id.
+SHARED_WITH_ME_ID = "__bora_shared_with_me__"
+SHARED_WITH_ME_PATH = "/Shared with me"
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +147,8 @@ class PathIDCache:
         with self._lock:
             if remote_path == self.ROOT_PATH:
                 return self._root_id
+            if remote_path == SHARED_WITH_ME_PATH:
+                return SHARED_WITH_ME_ID
 
             fold = fold_path(remote_path)
             rows = self._table.select_sql(
@@ -153,6 +166,8 @@ class PathIDCache:
                 return entry.remote_path
             if file_id == self._root_id:
                 return self.ROOT_PATH
+            if file_id == SHARED_WITH_ME_ID:
+                return SHARED_WITH_ME_PATH
             return None
 
     def get_entry(self, file_id: str) -> PathCacheEntry | None:
@@ -308,7 +323,10 @@ class PathIDCache:
             parts: list[str] = []
             current_id: str | None = file_id
 
-            while current_id and current_id != self._root_id:
+            while current_id and current_id not in (
+                self._root_id,
+                SHARED_WITH_ME_ID,
+            ):
                 entry = self._table.get(current_id)
                 if entry is None:
                     logger.warning(
@@ -322,12 +340,14 @@ class PathIDCache:
                 current_id = entry.parent_id
 
             if current_id is None:
-                # Walked off the tree without reaching root — orphan.
+                # Walked off the tree without reaching a known root — orphan.
                 logger.warning(
                     "Orphaned file: parent chain for %s does not reach root", file_id
                 )
                 return None
 
+            if current_id == SHARED_WITH_ME_ID:
+                parts.append(SHARED_WITH_ME_PATH.lstrip("/"))
             parts.reverse()
             return "/" + "/".join(parts)
 
