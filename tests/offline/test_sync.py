@@ -234,18 +234,20 @@ def _seed_index_entry(
     content_hash: str | None,
     last_sync: float,
     read_only: int = 0,
+    remote_id: str = "id:seed",
+    symlink_target: str | None = None,
 ) -> None:
     """Insert an IndexEntry for ``remote_path`` directly via the engine's index API."""
     remote_path_lower = remote_path.lower()
     entry = IndexEntry(
         remote_path_cased=remote_path,
         remote_path_lower=remote_path_lower,
-        remote_id="id:seed",
+        remote_id=remote_id,
         item_type=ItemType.File,
         last_sync=last_sync,
         rev=rev,
         content_hash=content_hash,
-        symlink_target=None,
+        symlink_target=symlink_target,
         read_only=read_only,
     )
     with sync._database_access():
@@ -2481,4 +2483,45 @@ def test_symlink_download_uses_platform_writer(
     assert calls == [("../Docs/report.pdf", local_path)]
     assert os.path.islink(local_path)
     assert os.readlink(local_path) == "../Docs/report.pdf"
+
+
+# ==== Task 15: upload guard relaxed for known shortcut symlinks (M2) ========
+
+
+def test_local_symlink_matching_known_shortcut_is_skipped(
+    sync_engine: SyncEngine,
+) -> None:
+    """A local symlink whose path matches a KNOWN shortcut (an index row with
+    a symlink_target) is silently ignored on upload -- M2 is download-only for
+    shortcuts; local edits/deletes are not propagated until M3."""
+    remote_path = "/Shared with me/link"
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SL",
+        symlink_target="../Docs/report.pdf",
+    )
+
+    event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
+    event.symlink_target = "../Docs/report.pdf"
+
+    status = sync_engine._on_local_file_modified(event)
+
+    assert status == SyncStatus.Skipped
+
+
+def test_unknown_local_symlink_still_errors(sync_engine: SyncEngine) -> None:
+    """A local symlink with no matching index row (or one that is not itself
+    a symlink) is still unsupported and must raise SymlinkError, as before."""
+    from bora.exceptions import SymlinkError
+
+    remote_path = "/nope/link"
+    event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
+    event.symlink_target = "to_nowhere"
+
+    with pytest.raises(SymlinkError):
+        sync_engine._on_local_file_modified(event)
 

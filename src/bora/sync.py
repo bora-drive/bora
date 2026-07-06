@@ -2600,8 +2600,14 @@ class SyncEngine:
         # Google Drive has no native symlink representation and the write client
         # does not store a symlink target, so a local symlink cannot be synced.
         # Surface it as a SymlinkError rather than silently skipping (a broken
-        # symlink would otherwise just fail to read and be ignored).
+        # symlink would otherwise just fail to read and be ignored) -- unless
+        # it matches a KNOWN shortcut (an index row with a symlink_target),
+        # in which case M2 is download-only: ignore the local mutation
+        # silently (M3 will propagate it).
         if event.symlink_target is not None:
+            entry = self._index_table.get(event.remote_path_lower)
+            if entry is not None and entry.is_symlink:
+                return SyncStatus.Skipped
             error = SymlinkError(
                 "Could not upload item",
                 "Syncing symlinks is not supported.",
