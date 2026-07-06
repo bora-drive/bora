@@ -154,7 +154,7 @@ def classify(
     in_scope = any(path_cache.id_to_path(p) is not None for p in parents)
     if not in_scope:
         if file.get("sharedWithMe"):
-            # A new shared-with-me attach point: in scope under the virtual root.
+            # New shared-with-me attach point: in scope under the virtual root.
             return ChangeDecision.APPLY
         if path_cache.id_to_path(file["id"]) is not None:
             return ChangeDecision.DELETE
