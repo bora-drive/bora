@@ -3733,15 +3733,42 @@ class SyncEngine:
 
     def _restore_writable(self, local_path: str) -> None:
         """Restore write permission before overwriting/deleting a read-only
-        local file for an incoming remote change."""
+        local file or directory for an incoming remote change.
+
+        A shared folder has *every* nested directory independently marked
+        read-only (mode 0o555, see :meth:`_apply_read_only`), so restoring
+        only the top-level path is not enough to delete the subtree --
+        ``shutil.rmtree`` (used by :func:`bora.utils.path.delete`) would
+        raise ``PermissionError`` on the first nested read-only directory.
+        For directories we therefore walk the whole tree and restore write
+        (and execute) permission on every nested directory as well.
+        """
         try:
-            cur = stat.S_IMODE(os.lstat(local_path).st_mode)
+            top_mode = stat.S_IMODE(os.lstat(local_path).st_mode)
         except FileNotFoundError:
             return
-        with self.fs_events.ignore(
-            FileModifiedEvent(local_path), recursive=False
-        ):
-            os.chmod(local_path, cur | 0o200)
+
+        if os.path.isdir(local_path) and not os.path.islink(local_path):
+            dir_paths = [local_path]
+            for dirpath, dirnames, _filenames in os.walk(local_path):
+                dir_paths.extend(
+                    os.path.join(dirpath, name) for name in dirnames
+                )
+
+            for dir_path in dir_paths:
+                try:
+                    cur = stat.S_IMODE(os.lstat(dir_path).st_mode)
+                except FileNotFoundError:
+                    continue
+                with self.fs_events.ignore(
+                    FileModifiedEvent(dir_path), recursive=False
+                ):
+                    os.chmod(dir_path, cur | 0o700)
+        else:
+            with self.fs_events.ignore(
+                FileModifiedEvent(local_path), recursive=False
+            ):
+                os.chmod(local_path, top_mode | 0o200)
 
     def _is_read_only_event(self, event: SyncEvent) -> bool:
         """Returns whether the index entry for ``event`` is marked
@@ -3822,6 +3849,12 @@ class SyncEngine:
                 status = SyncStatus.Done
 
             if isdir(event.local_path):
+                # A previous download may have left this directory (or any of
+                # its children) read-only (view-only shared item). Restore
+                # write permission recursively before deleting it, or the
+                # delete below would silently fail with EACCES/EPERM on the
+                # first read-only nested directory and leave the item stuck.
+                self._restore_writable(event.local_path)
                 with self.fs_events.ignore(DirDeletedEvent(event.local_path)):
                     delete(
                         event.local_path,

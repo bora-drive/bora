@@ -2220,6 +2220,62 @@ def test_restore_writable_missing_file_is_noop(sync_engine: SyncEngine) -> None:
     sync_engine._restore_writable(local)  # should not raise
 
 
+def test_restore_writable_recurses_into_nested_read_only_dirs(
+    sync_engine: SyncEngine,
+) -> None:
+    """_restore_writable must restore write permission on EVERY directory in
+    a subtree, not just the top-level path (review gap 1). A shared folder
+    has every nested level independently chmod'd 0o555 by _apply_read_only,
+    so a shallow restore leaves nested dirs read-only and a subsequent
+    shutil.rmtree of the subtree raises PermissionError on the first
+    read-only nested directory, leaving the item stuck."""
+    import shutil
+    import stat as _stat
+
+    top = osp.join(sync_engine.sync_path, "Shared with me", "folder")
+    nested = osp.join(top, "sub", "subsub")
+    os.makedirs(nested, exist_ok=True)
+    with open(osp.join(nested, "file.txt"), "w") as f:
+        f.write("x")
+
+    # Simulate what _apply_read_only(is_dir=True) does at every level of a
+    # downloaded read-only shared folder tree.
+    for dirpath, _dirnames, _filenames in os.walk(top, topdown=False):
+        os.chmod(dirpath, 0o555)
+    os.chmod(top, 0o555)
+
+    sync_engine._restore_writable(top)
+
+    for dirpath, _dirnames, _filenames in os.walk(top):
+        mode = _stat.S_IMODE(os.lstat(dirpath).st_mode)
+        assert mode & 0o200, f"{dirpath} should be writable after restore"
+
+    # The whole point: deleting the subtree must now succeed without
+    # raising PermissionError on a still-read-only nested directory.
+    shutil.rmtree(top)
+    assert not os.path.exists(top)
+
+
+def test_restore_writable_single_file_still_uses_owner_write_bit(
+    sync_engine: SyncEngine,
+) -> None:
+    """Non-directory targets keep the existing narrow restore (mode | 0o200)
+    -- the recursive directory-walk logic must not be applied to files."""
+    import stat as _stat
+
+    local = osp.join(sync_engine.sync_path, "Shared with me", "solo.txt")
+    os.makedirs(osp.dirname(local), exist_ok=True)
+    with open(local, "w") as f:
+        f.write("x")
+    os.chmod(local, 0o444)
+
+    sync_engine._restore_writable(local)
+
+    mode = _stat.S_IMODE(os.lstat(local).st_mode)
+    assert mode & 0o200
+    assert not (mode & 0o111)  # exec bits untouched, unlike the dir path
+
+
 def test_is_read_only_event_reads_index_entry(sync_engine: SyncEngine) -> None:
     """_is_read_only_event must consult the index entry at
     event.remote_path_lower rather than any flag on the SyncEvent itself."""
