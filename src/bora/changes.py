@@ -31,6 +31,7 @@ from googleapiclient.errors import HttpError
 from .core import DeletedMetadata, FileMetadata, FolderMetadata, ListFolderResult
 from .exceptions import CursorResetError
 from .native_docs import GOOGLE_FOLDER_MIME_TYPE, is_google_native
+from .path_cache import SHARED_WITH_ME_ID
 from .path_codec import compose_path, fold_path
 
 if TYPE_CHECKING:
@@ -152,6 +153,9 @@ def classify(
     parents = file.get("parents") or []
     in_scope = any(path_cache.id_to_path(p) is not None for p in parents)
     if not in_scope:
+        if file.get("sharedWithMe"):
+            # A new shared-with-me attach point: in scope under the virtual root.
+            return ChangeDecision.APPLY
         if path_cache.id_to_path(file["id"]) is not None:
             return ChangeDecision.DELETE
         return ChangeDecision.OUT_OF_SCOPE
@@ -234,6 +238,9 @@ def _emit_apply(
         (p for p in parents if path_cache.id_to_path(p) is not None),
         None,
     )
+    if parent_id is None and file.get("sharedWithMe"):
+        # New shared-with-me attach point — mount under the virtual root.
+        parent_id = SHARED_WITH_ME_ID
     parent_path = path_cache.id_to_path(parent_id)
     new_path = compose_path(parent_path, file["name"])
     old_path = path_cache.id_to_path(file["id"])
