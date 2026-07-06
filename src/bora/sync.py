@@ -3826,8 +3826,10 @@ class SyncEngine:
                 FileCreatedEvent(event.local_path), recursive=False
             ):
                 with convert_api_errors(remote_path=event.remote_path):
-                    write_platform_symlink(event.symlink_target, event.local_path)
-                    stat = os.lstat(event.local_path)
+                    written_path = write_platform_symlink(
+                        event.symlink_target, event.local_path
+                    )
+                    stat = os.lstat(written_path)
             status = SyncStatus.Done
         else:
             # We download to a temporary file first (this may take some time).
