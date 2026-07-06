@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import posixpath
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
@@ -30,7 +31,12 @@ from googleapiclient.errors import HttpError
 
 from .core import DeletedMetadata, FileMetadata, FolderMetadata, ListFolderResult
 from .exceptions import CursorResetError
-from .native_docs import GOOGLE_FOLDER_MIME_TYPE, is_google_native
+from .native_docs import (
+    GOOGLE_FOLDER_MIME_TYPE,
+    GOOGLE_SHORTCUT_MIME_TYPE,
+    is_google_native,
+    is_shortcut,
+)
 from .path_cache import SHARED_WITH_ME_ID
 from .path_codec import compose_path, fold_path
 
@@ -217,20 +223,26 @@ def _emit_apply(
     """Apply an in-scope create / content-update / move: write the path
     cache and append the projected metadata.
 
-    Native docs and shortcuts are dropped (no cache write, no entry).
-    The caller invokes this only when :func:`classify` returned
-    ``APPLY``, which guarantees at least one in-scope parent.
+    Shortcuts are projected into symlink metadata via
+    :func:`_emit_shortcut`. Other native docs (Docs/Sheets/…) are still
+    dropped (no cache write, no entry). The caller invokes this only
+    when :func:`classify` returned ``APPLY``, which guarantees at least
+    one in-scope parent.
 
     Returns ``True`` when the change was consumed (metadata emitted, or
-    intentionally dropped as a native doc / shortcut) and ``False`` when
-    the path cache rejected the write — a move-out delete later in the
-    same batch may vacate the path, so the caller can retry. Retrying
-    callers pass ``warn_on_conflict=False`` so the duplicate-name
-    warning fires only when the entry is finally dropped for good.
+    intentionally dropped as a non-shortcut native doc) and ``False``
+    when the path cache rejected the write, or a shortcut's parent /
+    target does not resolve yet — a move-out delete later in the same
+    batch may vacate the path, or a later change in the batch may
+    resolve the target, so the caller can retry. Retrying callers pass
+    ``warn_on_conflict=False`` so the duplicate-name warning fires only
+    when the entry is finally dropped for good.
     """
     file = change["file"]
     mime = file.get("mimeType")
-    # is_google_native already covers shortcuts via the wildcard.
+    if is_shortcut(mime):
+        return _emit_shortcut(change, path_cache, out_entries)
+    # Other Google-native docs (Docs/Sheets/…) are still dropped.
     if is_google_native(mime):
         return True
     parents = file.get("parents") or []
@@ -274,6 +286,70 @@ def _emit_apply(
     return True
 
 
+def _emit_shortcut(
+    change: dict[str, Any],
+    path_cache: "PathIDCache",
+    out_entries: list[Any],
+) -> bool:
+    """Project a Drive shortcut into symlink FileMetadata.
+
+    Resolves ``shortcutDetails.targetId`` to the target's cache path and
+    emits a FileMetadata whose ``symlink_target`` is that path *relative to
+    the symlink's own directory*. Returns False (defer) when the shortcut's
+    own parent or its target does not resolve yet — the fixpoint retries.
+    Resolves ONE hop only: a shortcut-to-shortcut target is refused.
+    """
+    file = change["file"]
+    parents = file.get("parents") or []
+    parent_id = None
+    parent_path = None
+    for p in parents:
+        candidate = path_cache.id_to_path(p)
+        if candidate is not None:
+            parent_id, parent_path = p, candidate
+            break
+    if parent_id is None or parent_path is None:
+        return False  # parent not resolved yet; defer
+    new_path = compose_path(parent_path, file["name"])
+
+    details = file.get("shortcutDetails") or {}
+    if details.get("targetMimeType") == GOOGLE_SHORTCUT_MIME_TYPE:
+        logger.warning(
+            "Shortcut %r points at another shortcut; not following the chain",
+            file.get("name"),
+        )
+        return True
+
+    target_id = details.get("targetId")
+    target_path = path_cache.id_to_path(target_id) if target_id else None
+    if target_path is None:
+        # Target excluded / not yet resolved. Defer; the fixpoint or a later
+        # batch may materialize it. A permanently-missing target is logged by
+        # the caller's stall handler.
+        return False
+
+    # Store the shortcut node itself in the cache so its own children (none,
+    # for a shortcut) and future change-detection resolve; then emit metadata.
+    old_path = path_cache.id_to_path(file["id"])
+    if old_path is None:
+        stored = path_cache.set(
+            new_path, file["id"], parent_id, file["name"], is_folder=False
+        )
+    elif old_path != new_path:
+        stored = path_cache.move(old_path, new_path)
+    else:
+        stored = True
+    if not stored:
+        return False
+
+    rel_target = posixpath.relpath(target_path, posixpath.dirname(new_path))
+    md = to_file_metadata(file, new_path)
+    md.symlink_target = rel_target
+    md.is_downloadable = False
+    out_entries.append(md)
+    return True
+
+
 def iter_remote_changes(
     service_factory: "Callable[[], Any]",
     retry: "Callable[[Callable[[], Any]], Any]",
@@ -286,8 +362,10 @@ def iter_remote_changes(
 
     Each yielded entry has its path resolved via *path_cache*, and the
     cache is mutated as a side effect (``set`` / ``move`` / ``remove``).
-    Native docs and shortcuts are dropped. The cursor on the single
-    yielded result is the ``newStartPageToken`` to resume polling from.
+    Non-shortcut native docs are dropped; shortcuts are projected into
+    symlink metadata (see :func:`_emit_shortcut`). The cursor on the
+    single yielded result is the ``newStartPageToken`` to resume polling
+    from.
 
     ``changes.list`` does not guarantee parent-before-child ordering —
     a file created inside a brand-new folder can arrive before the

@@ -44,7 +44,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from . import changes, oauth
 from .changes import FILE_FIELDS, parse_drive_time, to_file_metadata, to_folder_metadata
 from .config import BoraState
-from .native_docs import is_google_folder, is_google_native
+from .native_docs import is_google_folder, is_google_native, is_shortcut
 from .path_cache import PathIDCache
 from .path_codec import compose_path, fold_path
 from .utils import natural_size
@@ -1116,6 +1116,9 @@ class GoogleDriveClient:
         # Drop the sync root itself (it is implicit) and, unless asked
         # otherwise, Google-native docs. populate_from_listing keeps
         # folders regardless; is_google_native already excludes folders.
+        # Shortcuts are kept even though is_google_native covers them: the
+        # change-feed's _emit_shortcut projects them into symlink metadata,
+        # so bootstrap must not filter them out.
         filtered = [
             it
             for it in raw_items
@@ -1123,6 +1126,7 @@ class GoogleDriveClient:
             and (
                 include_non_downloadable_files
                 or not is_google_native(it.get("mimeType"))
+                or is_shortcut(it.get("mimeType"))
             )
         ]
 
