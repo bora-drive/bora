@@ -2585,6 +2585,32 @@ class SyncEngine:
             for md in result.entries:
                 self.update_index_from_remote_metadata(md)
 
+    def _target_remote_path(self, event: SyncEvent) -> str | None:
+        """Resolve a local symlink's on-disk target text to a remote path.
+
+        ``event.symlink_target`` (``os.readlink()`` on ``event.local_path``) is
+        relative to the symlink's own directory (or, less commonly, absolute --
+        ``os.path.join`` discards the first component when the second is
+        absolute, so this handles both uniformly). Reuses ``self.to_remote_path``
+        -- the SAME local -> remote conversion :class:`SyncEvent` itself uses to
+        derive ``remote_path`` from ``local_path`` (see
+        ``SyncEvent.from_dir_entry`` in models.py: ``remote_path =
+        sync_engine.to_remote_path(to_path)``) -- so the shortcut's target
+        resolves through the identical encode/case/prefix-strip logic as every
+        other remote path in the engine.
+
+        :returns: The target's remote path, or ``None`` if it lies outside the
+            sync folder.
+        """
+        assert event.symlink_target is not None
+        local_target = os.path.normpath(
+            os.path.join(os.path.dirname(event.local_path), event.symlink_target)
+        )
+        try:
+            return self.to_remote_path(local_target)
+        except ValueError:
+            return None
+
     def _on_local_file_modified(self, event: SyncEvent) -> SyncStatus:
         """
         Call when a local file is created or modified.
@@ -2597,23 +2623,62 @@ class SyncEngine:
         check_change_type(event, {ChangeType.Added, ChangeType.Modified})
         check_encoding(event.local_path)
 
-        # Google Drive has no native symlink representation and the write client
-        # does not store a symlink target, so a local symlink cannot be synced.
-        # Surface it as a SymlinkError rather than silently skipping (a broken
-        # symlink would otherwise just fail to read and be ignored) -- unless
-        # it matches a KNOWN shortcut (an index row with a symlink_target),
-        # in which case M2 is download-only: ignore the local mutation
-        # silently (M3 will propagate it).
+        # Google Drive has no native symlink representation; local symlinks are
+        # propagated as Drive shortcuts (M3). A KNOWN shortcut (an index row
+        # with a symlink_target) whose target TEXT is unchanged is a no-op
+        # (M2 behaviour, Task 15) -- most local symlink "modified" events are
+        # just an mtime touch, not a retarget. A known shortcut whose target
+        # text changed is retargeted in place. A brand-new local symlink (no
+        # index row, or a row that is not itself a symlink) creates a new
+        # shortcut -- unless its target does not map to any Drive item known
+        # to us, which remains genuinely unsupported (SymlinkError, as before
+        # M3): there is nothing we could point a shortcut at.
         if event.symlink_target is not None:
             entry = self._index_table.get(event.remote_path_lower)
+
             if entry is not None and entry.is_symlink:
-                return SyncStatus.Skipped
-            error = SymlinkError(
-                "Could not upload item",
-                "Syncing symlinks is not supported.",
-            )
-            error.local_path = event.local_path
-            raise error
+                if event.symlink_target == entry.symlink_target:
+                    return SyncStatus.Skipped
+
+                target_remote = self._target_remote_path(event)
+                if (
+                    target_remote is None
+                    or self.client._path_cache.path_to_id(target_remote) is None
+                ):
+                    # The shortcut was previously working; its new target just
+                    # doesn't resolve to a synced item (yet). Leave the local
+                    # symlink and the remote shortcut untouched rather than
+                    # erroring -- a later sync cycle may resolve the target
+                    # once it has synced (Task 18 covers the write-access
+                    # gate; this is not that).
+                    self._logger.warning(
+                        'Symlink target for "%s" is not a synced Drive item; '
+                        "leaving the existing shortcut untouched.",
+                        event.remote_path,
+                    )
+                    return SyncStatus.Skipped
+
+                md_new = self.client.retarget_shortcut(
+                    event.remote_path, target_remote
+                )
+                self.update_index_from_remote_metadata(md_new)
+                return SyncStatus.Done
+
+            target_remote = self._target_remote_path(event)
+            if (
+                target_remote is None
+                or self.client._path_cache.path_to_id(target_remote) is None
+            ):
+                error = SymlinkError(
+                    "Could not upload item",
+                    "Syncing symlinks is not supported.",
+                )
+                error.local_path = event.local_path
+                raise error
+
+            md_new = self.client.create_shortcut(event.remote_path, target_remote)
+            self.update_index_from_remote_metadata(md_new)
+            return SyncStatus.Done
 
         if self._handle_selective_sync_conflict(event):
             return SyncStatus.Conflict

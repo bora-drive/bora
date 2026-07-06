@@ -842,6 +842,83 @@ def test_upload_resumable_shutdown_aborts(client, cache):
     _os.unlink(local)
 
 
+# ==== create_shortcut / retarget_shortcut (Task 17, M3) ===================
+
+def test_create_shortcut_sends_shortcut_body_and_updates_cache(client, cache):
+    cache.set("/Docs", "F-docs", parent_id="ROOT", name="Docs", is_folder=True)
+    cache.set(
+        "/Docs/report.pdf", "F-target", parent_id="F-docs", name="report.pdf",
+        is_folder=False,
+    )
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "F-shortcut",
+        "name": "link",
+        "mimeType": "application/vnd.google-apps.shortcut",
+        "shortcutDetails": {"targetId": "F-target"},
+    }
+    client._get_service = Mock(return_value=svc)
+
+    result = client._writes.create_shortcut("/Docs/link", "/Docs/report.pdf")
+
+    create = svc.files.return_value.create
+    body = create.call_args.kwargs["body"]
+    assert body["name"] == "link"
+    assert body["mimeType"] == "application/vnd.google-apps.shortcut"
+    assert body["parents"] == ["F-docs"]
+    assert body["shortcutDetails"] == {"targetId": "F-target"}
+    assert "id" in body
+
+    assert cache.path_to_id("/Docs/link") == "F-shortcut"
+    assert result.id == "F-shortcut"
+    assert result.symlink_target == "report.pdf"
+    assert result.is_downloadable is False
+
+
+def test_create_shortcut_missing_target_raises_not_found(client, cache):
+    cache.set("/Docs", "F-docs", parent_id="ROOT", name="Docs", is_folder=True)
+    client._get_service = Mock(return_value=fake_service())
+    with pytest.raises(NotFoundError):
+        client._writes.create_shortcut("/Docs/link", "/Docs/nope.pdf")
+
+
+def test_retarget_shortcut_sends_update_body(client, cache):
+    cache.set(
+        "/Docs/link", "F-shortcut", parent_id="F-docs", name="link", is_folder=False,
+    )
+    cache.set(
+        "/Docs/other.pdf", "F-other", parent_id="F-docs", name="other.pdf",
+        is_folder=False,
+    )
+    svc = fake_service()
+    svc.files.return_value.update.return_value.execute.return_value = {
+        "id": "F-shortcut",
+        "name": "link",
+        "mimeType": "application/vnd.google-apps.shortcut",
+        "shortcutDetails": {"targetId": "F-other"},
+    }
+    client._get_service = Mock(return_value=svc)
+
+    result = client._writes.retarget_shortcut("/Docs/link", "/Docs/other.pdf")
+
+    update = svc.files.return_value.update
+    assert update.call_args.kwargs["fileId"] == "F-shortcut"
+    assert update.call_args.kwargs["body"] == {
+        "shortcutDetails": {"targetId": "F-other"}
+    }
+    assert result.symlink_target == "other.pdf"
+
+
+def test_retarget_shortcut_missing_shortcut_raises_not_found(client, cache):
+    cache.set(
+        "/Docs/other.pdf", "F-other", parent_id="ROOT", name="other.pdf",
+        is_folder=False,
+    )
+    client._get_service = Mock(return_value=fake_service())
+    with pytest.raises(NotFoundError):
+        client._writes.retarget_shortcut("/Docs/link", "/Docs/other.pdf")
+
+
 # ==== make_dir_batch ======================================================
 
 def _batch_request_double(responses_per_id: dict):

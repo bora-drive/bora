@@ -237,6 +237,16 @@ class FakeDrive:
                 return fid
         raise KeyError(f"no child {name!r} under {parent_id}")
 
+    def id_of(self, path: str) -> str:
+        """Return the file id at *path* (a plain, decoded path like
+        ``/Docs/report.pdf``)."""
+        parent_id, name = self._resolve_path_to_parent_and_name(path)
+        return self._child_by_name(parent_id, name)
+
+    def get_by_path(self, path: str) -> dict[str, Any]:
+        """Return the raw backing-store record at *path*."""
+        return self.files[self.id_of(path)]
+
     def add_folder(self, path: str) -> str:
         parent_id, name = self._resolve_path_to_parent_and_name(path)
         return self._insert(name, parent_id, FOLDER_MIME, b"")
@@ -591,6 +601,8 @@ class _FilesResource:
                 "content": content, "revisions": [],
                 "lastModifyingUser": {"permissionId": "perm-1"},
             }
+            if "shortcutDetails" in body_:
+                rec["shortcutDetails"] = dict(body_["shortcutDetails"])
             if not is_folder:
                 rec["revisions"].append(self._d._revision_dict(rec))
             self._d.files[fid] = rec
@@ -663,6 +675,8 @@ class _FilesResource:
                 rec["trashed"] = body_["trashed"]
             if "modifiedTime" in body_:
                 rec["modifiedTime"] = body_["modifiedTime"]
+            if "shortcutDetails" in body_:
+                rec.setdefault("shortcutDetails", {}).update(body_["shortcutDetails"])
             if removeParents:
                 rec["parents"] = [p for p in rec["parents"] if p != removeParents]
             if addParents:

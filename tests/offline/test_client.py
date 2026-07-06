@@ -1047,6 +1047,34 @@ def test_restore_delegates_to_helper(client, monkeypatch):
     assert captured == {"remote_path": "/a.txt", "rev": "rev5"}
 
 
+def test_create_shortcut_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "create_shortcut",
+        lambda remote_path, target_remote_path, *, autorename=False: captured.update(
+            remote_path=remote_path, target_remote_path=target_remote_path,
+            autorename=autorename,
+        ) or "sentinel",
+    )
+    assert client.create_shortcut("/link", "/Docs/report.pdf", autorename=True) == "sentinel"
+    assert captured == {
+        "remote_path": "/link", "target_remote_path": "/Docs/report.pdf",
+        "autorename": True,
+    }
+
+
+def test_retarget_shortcut_delegates_to_helper(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client._writes, "retarget_shortcut",
+        lambda remote_path, target_remote_path: captured.update(
+            remote_path=remote_path, target_remote_path=target_remote_path,
+        ) or "sentinel",
+    )
+    assert client.retarget_shortcut("/link", "/Docs/new.pdf") == "sentinel"
+    assert captured == {"remote_path": "/link", "target_remote_path": "/Docs/new.pdf"}
+
+
 # ==== FakeDrive round-trip tests ==========================================
 # These tests wire the real GoogleDriveClient to the in-memory FakeDrive
 # via the `client_on_fake` conftest fixture. They exercise real translation
@@ -1298,6 +1326,41 @@ def test_download_via_fake_writes_correct_bytes(client_on_fake, tmp_path):
     assert isinstance(result, FileMetadata)
     assert result.id == file_id
     assert result.content_hash == hashlib.md5(content).hexdigest()
+
+
+# ==== Task 17: create/retarget Drive shortcuts (M3) =======================
+
+def test_create_shortcut_sets_target(client_on_fake):
+    client, fake = client_on_fake.client, client_on_fake.fake
+    # Seed a target file and its cache entry.
+    fake.add_folder("/Docs")
+    fake.add_file("/Docs/report.pdf", content=b"x")
+    # Bootstrap the cache so path_to_id resolves /Docs and /Docs/report.pdf.
+    list(client.list_folder_iterator("/", recursive=True))
+    result = client.create_shortcut("/Docs/link", "/Docs/report.pdf")
+    assert result.symlink_target == "report.pdf"
+    assert result.is_downloadable is False
+    # The created Drive object is a shortcut pointing at the target's id.
+    created = fake.get_by_path("/Docs/link")
+    assert created["mimeType"] == "application/vnd.google-apps.shortcut"
+    assert created["shortcutDetails"]["targetId"] == fake.id_of("/Docs/report.pdf")
+    # Cache write-through so a following retarget/remove resolves the shortcut.
+    assert client._path_cache.path_to_id("/Docs/link") == created["id"]
+
+
+def test_retarget_shortcut_updates_target_id(client_on_fake):
+    client, fake = client_on_fake.client, client_on_fake.fake
+    fake.add_folder("/Docs")
+    fake.add_file("/Docs/report.pdf", content=b"x")
+    fake.add_file("/Docs/other.pdf", content=b"y")
+    list(client.list_folder_iterator("/", recursive=True))
+    client.create_shortcut("/Docs/link", "/Docs/report.pdf")
+
+    result = client.retarget_shortcut("/Docs/link", "/Docs/other.pdf")
+
+    assert result.symlink_target == "other.pdf"
+    updated = fake.get_by_path("/Docs/link")
+    assert updated["shortcutDetails"]["targetId"] == fake.id_of("/Docs/other.pdf")
 
 
 # ==== list_folder_iterator (recursive scoped — review F1) =================
