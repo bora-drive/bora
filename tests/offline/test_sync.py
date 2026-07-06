@@ -278,6 +278,34 @@ def _download_event(
     )
 
 
+def _symlink_event(
+    sync: SyncEngine,
+    remote_path: str,
+    target: str,
+    rev: str | None = "r1",
+) -> SyncEvent:
+    """Build a download SyncEvent for a Drive shortcut, carrying a
+    ``symlink_target`` (mirrors ``_download_event``, but for shortcuts a
+    shortcut has no content_hash of its own -- the fetch is a local symlink
+    write, not a download)."""
+    return SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id="id:remote-shortcut",
+        local_path=sync.to_local_path_from_cased(remote_path),
+        rev=rev,
+        content_hash=None,
+        symlink_target=target,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+
 def test_conflict_equal_rev_is_local_newer_or_identical(sync_engine: SyncEngine):
     """Most load-bearing assertion: equal headRevisionId => skip the download.
 
@@ -2408,4 +2436,48 @@ def test_read_only_gate_discards_activity_and_clears_sync_errors(
     # The stale sync error for this path must be cleared, exactly as it would
     # be on the normal (non-gated) success path.
     assert sync_engine.has_sync_errors() is False
+
+
+# ==== Task 14: download path materializes shortcuts via the platform writer ==
+
+
+def test_symlink_download_uses_platform_writer(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """_on_remote_file's symlink branch must call write_platform_symlink
+    (imported at module scope in sync.py so Windows can fall back to a
+    .lnk), not a bare os.symlink."""
+    calls: list[tuple[str, str]] = []
+    import bora.sync as sync_mod
+
+    def fake_write_platform_symlink(target: str, link_path: str) -> None:
+        calls.append((target, link_path))
+        # _on_remote_file unconditionally os.lstat()s event.local_path right
+        # after this call (to feed _save_local_hash's inode/mtime), so the
+        # fake still has to leave something on disk at link_path -- this
+        # verifies write_platform_symlink was called with the right args
+        # without depending on its real (unpatched) POSIX-symlink behavior.
+        os.symlink(target, link_path)
+
+    monkeypatch.setattr(
+        sync_mod, "write_platform_symlink", fake_write_platform_symlink
+    )
+
+    remote_path = "/Shared with me/link"
+    local_path = sync_engine.to_local_path_from_cased(remote_path)
+    # The parent "Shared with me" mount is normally materialized by
+    # ensure_shared_with_me_dir_present() before a download cycle runs;
+    # _ensure_parent cannot create it (it's a virtual root with no remote
+    # metadata), so create it directly here -- mirrors the pattern used for
+    # other direct _on_remote_file-adjacent tests (e.g. _write_local_file).
+    os.makedirs(osp.dirname(local_path), exist_ok=True)
+
+    event = _symlink_event(sync_engine, remote_path, target="../Docs/report.pdf")
+
+    status = sync_engine._on_remote_file(event)
+
+    assert status == SyncStatus.Done
+    assert calls == [("../Docs/report.pdf", local_path)]
+    assert os.path.islink(local_path)
+    assert os.readlink(local_path) == "../Docs/report.pdf"
 

@@ -136,6 +136,7 @@ from .utils.path import (
     to_existing_unnormalized_path,
     walk,
 )
+from .utils.shortcuts import write_platform_symlink
 
 __all__ = [
     "Conflict",
@@ -3819,12 +3820,13 @@ class SyncEngine:
         self._ensure_parent(event)
 
         if event.symlink_target is not None:
-            # Don't download but reproduce symlink locally.
+            # Don't download but reproduce the shortcut locally (symlink on
+            # POSIX, .lnk fallback on Windows).
             with self.fs_events.ignore(
                 FileCreatedEvent(event.local_path), recursive=False
             ):
                 with convert_api_errors(remote_path=event.remote_path):
-                    os.symlink(event.symlink_target, event.local_path)
+                    write_platform_symlink(event.symlink_target, event.local_path)
                     stat = os.lstat(event.local_path)
             status = SyncStatus.Done
         else:
