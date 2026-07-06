@@ -2428,6 +2428,12 @@ class SyncEngine:
 
         event.status = SyncStatus.Syncing
 
+        if self._is_read_only_event(event):
+            # View-only shared item: never propagate local mutations. Skip
+            # silently — no error, no retry storm (spec §5).
+            event.status = SyncStatus.Skipped
+            return event
+
         try:
             if event.is_file and (event.is_added or event.is_changed):
                 status = self._on_local_file_modified(event)

@@ -233,6 +233,7 @@ def _seed_index_entry(
     rev: str,
     content_hash: str | None,
     last_sync: float,
+    read_only: int = 0,
 ) -> None:
     """Insert an IndexEntry for ``remote_path`` directly via the engine's index API."""
     remote_path_lower = remote_path.lower()
@@ -245,7 +246,7 @@ def _seed_index_entry(
         rev=rev,
         content_hash=content_hash,
         symlink_target=None,
-        read_only=0,
+        read_only=read_only,
     )
     with sync._database_access():
         sync._index_table.update(entry)
@@ -2307,4 +2308,50 @@ def test_is_read_only_event_false_when_no_index_entry(
     event = _download_event(sync_engine, "/nope.pdf", "r1", "h")
 
     assert sync_engine._is_read_only_event(event) is False
+
+
+# ==== Task 9: gate uploads on the read_only index flag ======================
+
+
+def test_read_only_local_change_is_skipped_not_uploaded(
+    sync_engine: SyncEngine,
+) -> None:
+    """_create_remote_entry must gate local mutations to a view-only shared
+    item: the index row is read-only, so the event is marked Skipped and the
+    upload handler (_on_local_file_modified) must never be invoked."""
+    remote_path = "/shared with me/v.txt"
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=_md5(b"remote content"),
+        last_sync=0.0,
+        read_only=1,
+    )
+    event = _local_modified_event(sync_engine, remote_path, _md5(b"local edit"))
+
+    called = []
+    sync_engine._on_local_file_modified = lambda e: called.append(e)  # type: ignore[method-assign]
+
+    result = sync_engine._create_remote_entry(event)
+
+    assert result.status == SyncStatus.Skipped
+    assert called == []
+
+
+def test_editable_local_change_is_not_gated(sync_engine: SyncEngine) -> None:
+    """A local change to an item with no index entry (i.e. not read-only)
+    must fall through to the normal upload path unchanged."""
+    remote_path = "/shared with me/editable.txt"
+    event = _local_modified_event(sync_engine, remote_path, _md5(b"local edit"))
+
+    called = []
+    sync_engine._on_local_file_modified = lambda e: (  # type: ignore[method-assign]
+        called.append(e) or SyncStatus.Done
+    )
+
+    result = sync_engine._create_remote_entry(event)
+
+    assert result.status == SyncStatus.Done
+    assert called == [event]
 
