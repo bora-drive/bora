@@ -118,5 +118,5 @@ profile = "black"
 # explicitly with `pytest --benchmark-enable` when you want to measure.
 addopts = "--benchmark-disable"
 markers = [
-    "load: slow, large-scale load/correctness tests (deselect with -m 'not load')",
+    "load: slow, large-scale load/correctness tests. Skipped by default; run with --run-load.",
 ]
