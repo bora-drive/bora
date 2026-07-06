@@ -113,10 +113,10 @@ target-version = ["py310", "py311", "py312", "py313"]
 profile = "black"
 
 [tool.pytest.ini_options]
-# Benchmarks are disabled by default so a plain `pytest` run never executes
-# pytest-benchmark timing loops (which take many minutes). Opt back in
-# explicitly with `pytest --benchmark-enable` when you want to measure.
-addopts = "--benchmark-disable"
+# Slow tests (large-scale load/correctness runs and pytest-benchmark timing
+# loops, each many minutes) are deselected by default so a plain `pytest` run
+# stays fast. Include them explicitly with `pytest -m slow`.
+addopts = '-m "not slow"'
 markers = [
-    "load: slow, large-scale load/correctness tests. Skipped by default; run with --run-load.",
+    "slow: slow tests (load/correctness at scale, benchmark timing loops). Deselected by default; run with -m slow.",
 ]

@@ -4,8 +4,8 @@ Drives SyncEngine.download_sync_cycle through a full initial index of a
 ~10,000-entry fake-Drive tree and proves the end state is complete and
 uncorrupted — under a rate-limit storm (S1) and across a crash/resume (S2).
 
-Two slow scenarios are marked @pytest.mark.load and excluded from the normal
-offline run (run them with `-m load`). Tiny non-slow S0 guards run the SAME
+Two slow scenarios are marked @pytest.mark.slow and excluded from the normal
+offline run (run them with `-m slow`). Tiny non-slow S0 guards run the SAME
 helpers at N~=150 so harness/assertion regressions surface in the green loop.
 
 Sleep neutralisation: _retry_transient backs off via _poll_event.wait().
@@ -258,7 +258,7 @@ def test_s0_storm_small(sync_engine: SyncEngine):
     _run_storm(sync_engine, fake, expected_folders, expected_files)
 
 
-@pytest.mark.load
+@pytest.mark.slow
 def test_s1_storm_load(sync_engine: SyncEngine):
     """S1 (slow, N=10k): full initial sync under a rate-limit storm completes
     correctly. Soft guards: hang-guard wall-clock + tracemalloc peak ceiling."""
@@ -366,7 +366,7 @@ def test_s0_crash_resume_small(sync_engine: SyncEngine, monkeypatch):
     )
 
 
-@pytest.mark.load
+@pytest.mark.slow
 def test_s2_crash_resume_load(sync_engine: SyncEngine, monkeypatch):
     """S2 (slow, N=10k): crash mid-index, then resume; the re-index is
     idempotent and the final state is complete and uncorrupted. With page_size
