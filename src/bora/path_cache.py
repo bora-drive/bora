@@ -379,6 +379,7 @@ class PathIDCache:
         # keep their real parent and resolve into /Shared with me for free.
         by_id: dict[str, dict[str, Any]] = {}
         children_of: dict[str, list[dict[str, Any]]] = {}
+        shared_root_ids: set[str] = set()
 
         for item in items:
             fid = item["id"]
@@ -386,6 +387,7 @@ class PathIDCache:
 
             if item.get("sharedWithMe"):
                 parent_id: str | None = SHARED_WITH_ME_ID
+                shared_root_ids.add(fid)
             else:
                 parents = item.get("parents", [])
                 parent_id = parents[0] if parents else None
@@ -434,6 +436,19 @@ class PathIDCache:
 
                 raw_name = child["name"]
                 encoded_path = compose_path(parent_path, raw_name)
+                # The virtual root owns "/Shared with me"; a real My-Drive
+                # folder that folds to it gets a conflict suffix (spec §8).
+                if (
+                    fold_path(encoded_path) == fold_path(SHARED_WITH_ME_PATH)
+                    and cid not in shared_root_ids
+                ):
+                    raw_name = f"{raw_name} (name conflict)"
+                    encoded_path = compose_path(parent_path, raw_name)
+                    logger.warning(
+                        "Real folder %r collides with the reserved "
+                        "'/Shared with me' path; renamed to %r locally",
+                        child["name"], raw_name,
+                    )
                 is_folder = (
                     child.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE
                 )
