@@ -373,7 +373,10 @@ class PathIDCache:
             )
         root_id = self._root_id  # snapshot once; unlocked phases 1-2 are self-consistent
 
-        # Phase 1: index by id and by parent.
+        # Phase 1: index by id and by parent. Shared-with-me attach points
+        # (sharedWithMe == true) are re-parented onto the virtual root; Drive
+        # sets that flag only on the top of each shared subtree, so descendants
+        # keep their real parent and resolve into /Shared with me for free.
         by_id: dict[str, dict[str, Any]] = {}
         children_of: dict[str, list[dict[str, Any]]] = {}
 
@@ -381,8 +384,11 @@ class PathIDCache:
             fid = item["id"]
             by_id[fid] = item
 
-            parents = item.get("parents", [])
-            parent_id = parents[0] if parents else None
+            if item.get("sharedWithMe"):
+                parent_id: str | None = SHARED_WITH_ME_ID
+            else:
+                parents = item.get("parents", [])
+                parent_id = parents[0] if parents else None
 
             if parent_id is not None:
                 children_of.setdefault(parent_id, []).append(item)
@@ -410,9 +416,13 @@ class PathIDCache:
                     seen[key] = kid["id"]
 
         # BFS plan; build PathCacheEntry instances without writing yet.
+        # Seed from the real root AND the virtual shared-with-me root.
         plan: list[PathCacheEntry] = []
-        queue: list[tuple[str, str]] = [(root_id, "/")]
-        visited: set[str] = {root_id}
+        queue: list[tuple[str, str]] = [
+            (root_id, "/"),
+            (SHARED_WITH_ME_ID, SHARED_WITH_ME_PATH),
+        ]
+        visited: set[str] = {root_id, SHARED_WITH_ME_ID}
 
         while queue:
             folder_id, parent_path = queue.pop(0)
