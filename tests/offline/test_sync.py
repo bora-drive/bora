@@ -1030,6 +1030,42 @@ def _seed_entry(
         sync._index_table.update(entry)
 
 
+def test_update_index_from_remote_metadata_evicts_stale_same_remote_id(
+    sync_engine: SyncEngine,
+):
+    """update_index_from_remote_metadata must uphold the one-remote_id ->
+    one-path invariant: writing a row for a remote_id that is already indexed
+    at a DIFFERENT path evicts the stale row instead of inserting a duplicate
+    that violates the UNIQUE(remote_id) constraint (DatabaseError crash).
+
+    Regression: the download path records the read_only bit via this method
+    before update_index_from_sync_event runs, so an occupied-target / stale-
+    cache remote move (stale old-path row still present) crashed here."""
+    data = b"content"
+    file_id = "file-1"
+    # Stale row: same remote_id indexed at the OLD path.
+    _seed_entry(
+        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1",
+        content_hash=_md5(data),
+    )
+
+    md = FileMetadata(
+        name="b.txt", path_lower="/b.txt", path_display="/b.txt", id=file_id,
+        modified=datetime.now(timezone.utc), rev="rev-1", size=len(data),
+        symlink_target=None, shared=False, modified_by=None,
+        is_downloadable=True, content_hash=_md5(data), can_edit=True,
+    )
+    # Must not raise DatabaseError (UNIQUE(remote_id)).
+    sync_engine.update_index_from_remote_metadata(md)
+
+    assert sync_engine.get_index_entry("/a.txt") is None
+    new_entry = sync_engine.get_index_entry("/b.txt")
+    assert new_entry is not None and new_entry.remote_id == file_id
+    with sync_engine._database_access():
+        rows = sync_engine._index_table.select_sql("WHERE remote_id = ?", file_id)
+    assert len(rows) == 1
+
+
 def test_remote_file_rename_moves_local_file(sync_engine: SyncEngine):
     """A remote rename (same id, new path) must move the local file and
     re-key the index — not leave the old copy on disk forever (review F3)."""

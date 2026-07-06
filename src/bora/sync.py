@@ -1129,6 +1129,20 @@ class SyncEngine:
             # Construct correct display path from ancestors.
             remote_path_cased = self.correct_case(md.path_display)
 
+            # Uphold the one-remote_id -> one-path invariant (UNIQUE(remote_id)):
+            # evict any OTHER row already holding this id at a different path
+            # before inserting. Mirrors update_index_from_sync_event's eviction.
+            # The download path records read_only here (before
+            # update_index_from_sync_event runs), so an occupied-target / stale-
+            # cache remote move — where _apply_remote_move returns without
+            # re-keying and leaves a stale old-path row with the same remote_id —
+            # would otherwise violate UNIQUE(remote_id) and raise DatabaseError.
+            for stale in self._index_table.select(
+                MatchQuery(IndexEntry.remote_id, md_id)
+            ):
+                if stale.remote_path_lower != md.path_lower:
+                    self._index_table.delete_primary_key(stale.remote_path_lower)
+
             # Update existing entry or create new entry.
             entry = IndexEntry(
                 remote_path_cased=remote_path_cased,
