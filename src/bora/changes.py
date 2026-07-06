@@ -241,7 +241,9 @@ def _emit_apply(
     file = change["file"]
     mime = file.get("mimeType")
     if is_shortcut(mime):
-        return _emit_shortcut(change, path_cache, out_entries)
+        return _emit_shortcut(
+            change, path_cache, out_entries, warn_on_conflict=warn_on_conflict
+        )
     # Other Google-native docs (Docs/Sheets/…) are still dropped.
     if is_google_native(mime):
         return True
@@ -290,6 +292,8 @@ def _emit_shortcut(
     change: dict[str, Any],
     path_cache: "PathIDCache",
     out_entries: list[Any],
+    *,
+    warn_on_conflict: bool = True,
 ) -> bool:
     """Project a Drive shortcut into symlink FileMetadata.
 
@@ -298,6 +302,12 @@ def _emit_shortcut(
     the symlink's own directory*. Returns False (defer) when the shortcut's
     own parent or its target does not resolve yet — the fixpoint retries.
     Resolves ONE hop only: a shortcut-to-shortcut target is refused.
+
+    ``warn_on_conflict`` mirrors :func:`_emit_apply`'s parameter of the same
+    name: the fixpoint's retrying calls pass ``False`` so a target that is
+    merely not-yet-resolved stays silent, and only the final leftover pass
+    (default ``True``) logs a per-item warning when the target never
+    resolves and the shortcut is dropped for good.
     """
     file = change["file"]
     parents = file.get("parents") or []
@@ -324,8 +334,17 @@ def _emit_shortcut(
     target_path = path_cache.id_to_path(target_id) if target_id else None
     if target_path is None:
         # Target excluded / not yet resolved. Defer; the fixpoint or a later
-        # batch may materialize it. A permanently-missing target is logged by
-        # the caller's stall handler.
+        # batch may materialize it. If the target never resolves, the
+        # caller's final leftover pass retries with warn_on_conflict=True
+        # (the default) and we log the drop here — the fixpoint's own
+        # retries pass warn_on_conflict=False so this stays silent while
+        # a later change in the batch might still resolve the target.
+        if warn_on_conflict:
+            logger.warning(
+                "Shortcut %r targets %s which is not synced; not creating "
+                "a symlink",
+                file.get("name"), target_id,
+            )
         return False
 
     # Store the shortcut node itself in the cache so its own children (none,

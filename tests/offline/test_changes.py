@@ -121,7 +121,7 @@ def test_to_folder_metadata_reads_can_edit():
 
 import sqlite3
 
-from bora.changes import ChangeDecision, _emit_apply, classify
+from bora.changes import ChangeDecision, _emit_apply, _emit_shortcut, classify
 from bora.database.core import Database
 from bora.path_cache import SHARED_WITH_ME_ID, PathIDCache
 
@@ -237,6 +237,26 @@ def test_shortcut_to_shortcut_chain_is_refused():
     # Consumed (not retried) but not emitted, and not cached as a symlink.
     assert _emit_apply(change, cache, out) is True
     assert out == []
+
+
+def test_shortcut_cross_subtree_relative_target():
+    """Task-12 brief example: a shortcut under the Shared-with-me virtual
+    root whose target resolves under the real sync root needs a '../' hop
+    to reach it (the two live in different subtrees)."""
+    cache = _cache()  # root_id="ROOT"; SHARED_WITH_ME_ID resolves via the
+    # sentinel without seeding (see PathIDCache.id_to_path).
+    cache.set("/Docs", "D", "ROOT", "Docs", True)
+    cache.set("/Docs/report.pdf", "T", "D", "report.pdf", False)
+    out: list = []
+    change = {"file": {
+        "id": "SL", "name": "link", "parents": [SHARED_WITH_ME_ID],
+        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
+        "shortcutDetails": {"targetId": "T",
+                            "targetMimeType": "application/pdf"}}}
+    assert _emit_apply(change, cache, out) is True
+    md = out[-1]
+    assert md.path_display == "/Shared with me/link"
+    assert md.symlink_target == "../Docs/report.pdf"
 
 
 def test_unshare_removed_true_deletes_from_cache():
@@ -664,6 +684,77 @@ def test_create_at_path_vacated_by_move_out_same_batch(caplog, create_first):
     assert entries.index(deletes[0]) < entries.index(files[0])
     # B was deferred, not dropped — the change-feed conflict warning
     # must not fire (path_cache's own internal warning is out of scope).
+    assert not [
+        r for r in caplog.records
+        if r.name == "bora.changes" and r.levelno >= logging.WARNING
+    ]
+
+
+# ==== shortcut permanent-unresolved-target warning (Task 12 review fix) ==
+
+
+def test_iter_changes_shortcut_unresolved_target_warns_once(caplog):
+    """A shortcut whose target never resolves must be dropped with exactly
+    one per-item WARNING naming the shortcut and its unresolved target,
+    once the final leftover pass gives up on it (task brief: "dropped with
+    a sync-error-worthy log"; spec §"record a sync error"). The fixpoint's
+    own retries (warn_on_conflict=False) must not have already logged it."""
+    cache = _cache()
+    change = {
+        "fileId": "SL",
+        "file": {
+            "id": "SL", "name": "link", "parents": ["ROOT"],
+            "mimeType": "application/vnd.google-apps.shortcut",
+            "trashed": False,
+            "shortcutDetails": {"targetId": "MISSING"},
+        },
+    }
+    pages = [{"changes": [change], "newStartPageToken": "t2"}]
+
+    class _Svc:
+        def changes(self):
+            return self
+
+        def list(self, **kw):
+            return self
+
+        def execute(self):
+            return pages.pop(0)
+
+    with caplog.at_level(logging.WARNING, logger="bora.changes"):
+        results = list(
+            iter_remote_changes(lambda: _Svc(), lambda fn: fn(), cache, "t1")
+        )
+
+    entries = [e for r in results for e in r.entries]
+    assert entries == [], "unresolved-target shortcut must not be emitted"
+    warnings = [
+        r for r in caplog.records
+        if r.name == "bora.changes" and r.levelno >= logging.WARNING
+    ]
+    assert len(warnings) == 1, warnings
+    message = warnings[0].getMessage()
+    assert "link" in message
+    assert "MISSING" in message
+
+
+def test_emit_shortcut_unresolved_target_silent_while_deferring(caplog):
+    """The fixpoint's retrying calls pass warn_on_conflict=False; a shortcut
+    target that is merely not-yet-resolved must stay silent so later
+    batches / passes can still resolve it without spamming a warning on
+    every iteration."""
+    cache = _cache()
+    out: list = []
+    change = {"file": {
+        "id": "SL", "name": "link", "parents": ["ROOT"],
+        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
+        "shortcutDetails": {"targetId": "MISSING"}}}
+
+    with caplog.at_level(logging.WARNING, logger="bora.changes"):
+        result = _emit_shortcut(change, cache, out, warn_on_conflict=False)
+
+    assert result is False
+    assert out == []
     assert not [
         r for r in caplog.records
         if r.name == "bora.changes" and r.levelno >= logging.WARNING
