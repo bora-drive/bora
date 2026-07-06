@@ -29,7 +29,7 @@ from bora.models import (
     SyncEvent,
     SyncStatus,
 )
-from bora.path_cache import PathIDCache
+from bora.path_cache import SHARED_WITH_ME_ID, PathIDCache
 from bora.path_codec import encode_path, fold_path
 from bora.sync import ActivityNode, ActivityTree, Conflict, SyncEngine
 from bora.utils.appdirs import get_home_dir
@@ -2050,4 +2050,74 @@ def test_ensure_shared_with_me_dir_idempotent(sync_engine: SyncEngine) -> None:
     sync_engine.ensure_shared_with_me_dir_present()
     sync_engine.ensure_shared_with_me_dir_present()  # no raise on second call
     assert os.path.isdir(os.path.join(sync_engine.sync_path, "Shared with me"))
+
+
+def test_get_remote_item_creates_shared_with_me_mount(
+    sync_engine: SyncEngine,
+) -> None:
+    """Regression for the review gap on Task 5: ``get_remote_item`` is an
+    alternate download entry point (invoked from manager.py's startup/resume/
+    retry loops) that runs BEFORE ``download_sync_cycle``. Without its own
+    call to ``ensure_shared_with_me_dir_present``, downloading a shared item
+    whose local "/Shared with me" mount is absent used to blow up:
+    ``_ensure_parent`` cannot materialize the virtual-root parent (it has no
+    remote metadata), so the final ``move()`` into place raised
+    ``FileNotFoundError`` because "Shared with me" itself doesn't exist on
+    disk.
+
+    This drives a real end-to-end single-file download (FakeDrive-backed
+    ``client.download`` -> MD5-verified content on disk) through
+    ``get_remote_item`` for a file directly under "/Shared with me", rather
+    than mocking/spying on ``ensure_shared_with_me_dir_present`` -- so it
+    proves the fix actually unblocks the on-disk write it gates, not just
+    that the method got called.
+
+    (A shared *folder* with a child would exercise ``_get_remote_folder`` /
+    ``apply_remote_changes`` instead, but that path fans out through a
+    thread pool (``do_parallel``) and the fixture's in-memory sqlite
+    connections aren't safe to touch from worker threads -- an unrelated,
+    pre-existing fixture limitation. The file path below still calls
+    ``_create_local_entry`` synchronously and exercises the exact
+    ``_ensure_parent`` / mount-materialization gap the fix closes.)
+    """
+    shared_dir = os.path.join(sync_engine.sync_path, "Shared with me")
+    # Defensive: the fixture never creates this dir, but assert + remove any
+    # pre-existing one so the test is a true regression check regardless of
+    # fixture changes.
+    if os.path.exists(shared_dir):
+        delete(shared_dir)
+    assert not os.path.exists(shared_dir)
+
+    fake = FakeDrive()
+    # A file shared directly (not inside a shared folder) -- a real "Shared
+    # with me" shape, and its remote parent is the virtual root itself, so
+    # ``_ensure_parent`` walks straight into the mount-materialization gap.
+    content = b"shared file content"
+    file_id = fake._insert("report.txt", "OTHER_ROOT", "text/plain", content)
+    fake.files[file_id]["sharedWithMe"] = True
+    fake.files[file_id]["ownedByMe"] = False
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+    sync_engine.client._path_cache.set(
+        "/Shared with me/report.txt",
+        file_id,
+        parent_id=SHARED_WITH_ME_ID,
+        name="report.txt",
+        is_folder=False,
+    )
+
+    success = sync_engine.get_remote_item("/Shared with me/report.txt")
+
+    assert success, "download of shared file must succeed"
+    assert os.path.isdir(shared_dir), "mount point must be created"
+    local_file = os.path.join(shared_dir, "report.txt")
+    assert os.path.isfile(local_file)
+    with open(local_file, "rb") as f:
+        assert f.read() == content
 

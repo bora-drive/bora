@@ -2960,6 +2960,8 @@ class SyncEngine:
         self._logger.info(f"Syncing ↓ {remote_path}")
 
         with self.sync_lock:
+            self.ensure_shared_with_me_dir_present()
+
             # ``get_metadata`` raises ``NotFoundError`` for a path the cache
             # does not know (e.g. a stale/bogus entry in the pending-download
             # queue); treat that like a ``None`` result so we fall through to
