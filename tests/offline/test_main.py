@@ -1,4 +1,5 @@
-from unittest.mock import patch
+import os
+from unittest.mock import PropertyMock, patch
 
 import pytest
 import requests
@@ -10,7 +11,7 @@ from bora.exceptions import NotLinkedError
 from bora.main import Bora
 from bora.models import IndexEntry, ItemType
 from bora.path_cache import PathIDCache
-from bora.path_codec import encode_path, fold_path
+from bora.path_codec import encode_path, fold_human, fold_path
 
 
 def test_check_for_updates(m: Bora) -> None:
@@ -89,10 +90,18 @@ def test_shutdown_daemon_calls_client_close(m: Bora) -> None:
 
 def _bypass_link_checks():
     """exclude/include_items guard on a linked account and a sync dir; neither
-    exists in the offline harness, and neither is needed by the code under test."""
+    exists in the offline harness, and neither is needed by the code under test.
+
+    Also stubs ``Bora.pending_link`` to False: in production, exclude/include_items
+    only reach their body after ``_check_linked()`` has confirmed the account is
+    linked, so ``Bora.sync_path`` (which returns "" while ``pending_link`` is
+    True) always sees a real path there. Without this, offline tests that never
+    actually link an account would see ``self.sync_path`` silently collapse to
+    "" inside ``_remove_after_excluded``, masking real local-path handling."""
     return (
         patch.object(Bora, "_check_linked"),
         patch.object(Bora, "_check_sync_dir"),
+        patch.object(Bora, "pending_link", new_callable=PropertyMock, return_value=False),
     )
 
 
@@ -105,8 +114,8 @@ def test_include_items_casefold_divergent_name(m: Bora) -> None:
     m.sync.excluded_items = ["/Straße"]
     assert m.sync.excluded_items == {"/strasse"}
 
-    check_linked, check_sync_dir = _bypass_link_checks()
-    with check_linked, check_sync_dir:
+    check_linked, check_sync_dir, no_pending_link = _bypass_link_checks()
+    with check_linked, check_sync_dir, no_pending_link:
         m.include_items("/Straße")
 
     assert m.sync.excluded_items == set()
@@ -119,8 +128,8 @@ def test_include_items_literal_percent_name(m: Bora) -> None:
     m.sync.excluded_items = ["/a%20b"]
     assert m.sync.excluded_items == {"/a%20b"}
 
-    check_linked, check_sync_dir = _bypass_link_checks()
-    with check_linked, check_sync_dir:
+    check_linked, check_sync_dir, no_pending_link = _bypass_link_checks()
+    with check_linked, check_sync_dir, no_pending_link:
         m.include_items("/a%20b")
 
     assert m.sync.excluded_items == set()
@@ -145,8 +154,8 @@ def test_exclude_items_removes_index_entries_by_fold_path_key(m: Bora) -> None:
     with m.sync._database_access():
         m.sync._index_table.update(entry)
 
-    check_linked, check_sync_dir = _bypass_link_checks()
-    with check_linked, check_sync_dir:
+    check_linked, check_sync_dir, no_pending_link = _bypass_link_checks()
+    with check_linked, check_sync_dir, no_pending_link:
         m.exclude_items("/Ördner")
 
     assert m.sync.excluded_items == {"/ördner"}
@@ -179,10 +188,11 @@ def test_include_items_readds_children_in_fold_human_form(m: Bora) -> None:
         cursor="",
     )
 
-    check_linked, check_sync_dir = _bypass_link_checks()
+    check_linked, check_sync_dir, no_pending_link = _bypass_link_checks()
     with (
         check_linked,
         check_sync_dir,
+        no_pending_link,
         patch.object(
             m.client, "list_folder_iterator", return_value=iter([listing])
         ) as mock_list,
@@ -194,3 +204,87 @@ def test_include_items_readds_children_in_fold_human_form(m: Bora) -> None:
     # The sibling is re-added in fold_human (decoded) form, not as the dead
     # encoded entry '/übergeordnet/%c3%b6rdner %282%29'.
     assert m.sync.excluded_items == {"/übergeordnet/ördner (2)"}
+
+
+def test_exclude_shared_with_me_subfolder_removes_index_and_local(
+    m: Bora, tmp_path
+) -> None:
+    """Guard test: '/Shared with me/...' paths are ordinary paths as far as
+    selective sync is concerned. No new config surface is needed for
+    excluding a shared item — the existing exclude_items pipeline must prune
+    both the index row and the local tree exactly as it does for any other
+    remote path, via the same fold_path(encode_path(fold_human(...))) bridge
+    documented on _remove_after_excluded."""
+    m.sync.sync_path = str(tmp_path)
+
+    remote_path = "/Shared with me/Team"
+    local_path = os.path.join(m.sync.sync_path, "Shared with me", "Team")
+    os.makedirs(local_path, exist_ok=True)
+
+    encoded = encode_path(remote_path)
+    folded = fold_path(encoded)
+    entry = IndexEntry(
+        remote_path_cased=encoded,
+        remote_path_lower=folded,
+        remote_id="id:shared-team",
+        item_type=ItemType.Folder,
+        last_sync=0.0,
+        rev="rev-1",
+        content_hash=None,
+        symlink_target=None,
+        read_only=1,
+    )
+    with m.sync._database_access():
+        m.sync._index_table.update(entry)
+
+    check_linked, check_sync_dir, no_pending_link = _bypass_link_checks()
+    with check_linked, check_sync_dir, no_pending_link:
+        m.exclude_items(remote_path)
+
+    assert m.sync.excluded_items == {fold_human(remote_path)}
+    assert not os.path.exists(local_path), (
+        "local tree under 'Shared with me' was not deleted on exclusion"
+    )
+    assert m.sync.get_index_entry(folded) is None, (
+        "index entry for the shared item was not removed on exclusion"
+    )
+
+
+def test_exclude_shared_with_me_root_disables_whole_feature(m: Bora, tmp_path) -> None:
+    """Excluding the '/Shared with me' virtual root itself must be treated
+    like excluding any other top-level folder: it disables sync of
+    everything below it, and removes the local mount point along with any
+    already-materialized children."""
+    m.sync.sync_path = str(tmp_path)
+
+    local_root = os.path.join(m.sync.sync_path, "Shared with me")
+    local_child = os.path.join(local_root, "Team")
+    os.makedirs(local_child, exist_ok=True)
+
+    encoded = encode_path("/Shared with me/Team")
+    folded = fold_path(encoded)
+    entry = IndexEntry(
+        remote_path_cased=encoded,
+        remote_path_lower=folded,
+        remote_id="id:shared-team",
+        item_type=ItemType.Folder,
+        last_sync=0.0,
+        rev="rev-1",
+        content_hash=None,
+        symlink_target=None,
+        read_only=1,
+    )
+    with m.sync._database_access():
+        m.sync._index_table.update(entry)
+
+    check_linked, check_sync_dir, no_pending_link = _bypass_link_checks()
+    with check_linked, check_sync_dir, no_pending_link:
+        m.exclude_items("/Shared with me")
+
+    assert m.sync.excluded_items == {"/shared with me"}
+    assert not os.path.exists(local_root), (
+        "'Shared with me' mount point was not removed when the root was excluded"
+    )
+    assert m.sync.get_index_entry(folded) is None, (
+        "index entry for the shared child was not removed when the root was excluded"
+    )
