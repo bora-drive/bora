@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 from pathspec import PathSpec
+from watchdog.events import FileMovedEvent
 
 from bora.client import GoogleDriveClient
 from bora.config import remove_configuration
@@ -3046,6 +3047,76 @@ def test_delete_local_symlink_deletes_remote_shortcut(
 
     assert status == SyncStatus.Done
     assert calls == [remote_path]
+
+
+def test_delete_local_symlink_of_real_shortcut_skips_rev_check(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """A real Drive shortcut's index row carries rev="" (``create_shortcut``),
+    while Drive/FakeDrive assign the shortcut a ``headRevisionId``. A rev-checked
+    remove (``parent_rev=""``) compares ``headRevisionId != ""`` and raises
+    ``DataChangedError``, so the delete would be skipped and the local symlink
+    resurrected on the next download. The delete path must skip the rev-check for
+    a symlink row (like it does for folders) and actually trash the shortcut.
+
+    Unlike ``test_delete_local_symlink_deletes_remote_shortcut`` above, which
+    monkeypatches ``client.remove`` and so never exercises the rev-check, this
+    drives the REAL ``client.remove`` against FakeDrive.
+    """
+    remote_path = "/Shared with me/link"
+
+    fake = FakeDrive()
+    # A real Drive shortcut is a non-folder record, so FakeDrive gives it a
+    # headRevisionId that can never equal the index row's rev="".
+    sid = fake._insert("link", ROOT_ID, "application/vnd.google-apps.shortcut", b"")
+    assert fake.files[sid]["headRevisionId"], "shortcut must have a headRevisionId"
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._path_cache.set(
+        remote_path, sid, parent_id=ROOT_ID, name="link", is_folder=False
+    )
+
+    # Index row exactly as create_shortcut leaves it: rev="", is_symlink.
+    _seed_index_entry(
+        sync_engine, remote_path, rev="", content_hash=None, last_sync=0.0,
+        remote_id=sid, symlink_target="../Docs/report.pdf",
+    )
+
+    # get_metadata drives the delete branch; the shortcut projects as a symlink
+    # FileMetadata (matching the change feed / get_metadata projection).
+    md_remote = _make_shortcut_metadata(remote_path, sid, "../Docs/report.pdf")
+    monkeypatch.setattr(
+        sync_engine.client, "get_metadata", lambda path, **kwargs: md_remote
+    )
+
+    event = _local_deleted_event(sync_engine, remote_path, remote_id=sid)
+
+    status = sync_engine._on_local_deleted(event)
+
+    assert status == SyncStatus.Done
+    assert fake.files[sid]["trashed"] is True, (
+        "shortcut delete must skip the rev-check and trash the Drive shortcut"
+    )
+
+
+def test_moved_symlink_event_reads_target_from_destination(
+    sync_engine: SyncEngine,
+) -> None:
+    """For a MOVED symlink, ``SyncEvent.from_file_system_event`` must read the
+    symlink target from the destination (``to_path``), not ``src_path`` -- the
+    old path no longer exists on disk after the move, so reading it drops
+    ``symlink_target`` to None and the moved shortcut is misclassified as a
+    regular file (``is_symlink`` False), breaking retarget/recognition.
+    """
+    src_local = sync_engine.to_local_path_from_cased("/orig_link")
+    dest_local = sync_engine.to_local_path_from_cased("/moved_link")
+    # Only the destination exists on disk (the move already happened); src is gone.
+    os.symlink("../Docs/report.pdf", dest_local)
+
+    event = FileMovedEvent(src_path=src_local, dest_path=dest_local)
+    sync_event = SyncEvent.from_file_system_event(event, sync_engine)
+
+    assert sync_event.change_type is ChangeType.Moved
+    assert sync_event.symlink_target == "../Docs/report.pdf"
 
 
 # ==== Task 18: gate reverse shortcut propagation on write access (M3) =======

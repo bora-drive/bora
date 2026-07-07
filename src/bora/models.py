@@ -443,7 +443,14 @@ class SyncEvent(Model):
             change_time = stat.st_ctime if stat else None
             size = stat.st_size if stat else 0
             try:
-                symlink_target = os.readlink(os.fsdecode(event.src_path))
+                # Use `to_path`, not `event.src_path`: for a MOVED event
+                # `src_path` is the OLD path, which no longer exists on disk
+                # after the move, so readlink would always raise and silently
+                # drop the symlink target (misclassifying a moved shortcut as a
+                # regular file / a spurious content change). `to_path` is the
+                # destination; for non-moved events `to_path == event.src_path`,
+                # so this is a no-op there.
+                symlink_target = os.readlink(os.fsdecode(to_path))
             except OSError:
                 symlink_target = None
 
