@@ -2,7 +2,7 @@ import hashlib
 import os
 import os.path as osp
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from queue import Queue
 from unittest.mock import Mock
 
