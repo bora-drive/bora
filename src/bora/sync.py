@@ -2995,11 +2995,21 @@ class SyncEngine:
 
             return SyncStatus.Skipped
 
+        # A shortcut (a materialized symlink) carries rev="" from
+        # ``create_shortcut`` and has no ``headRevisionId`` on Drive, so a
+        # rev-checked remove (``parent_rev=""``) always fails the
+        # ``headRevisionId != parent_rev`` guard in ``client.remove`` (None !=
+        # "") and raises ``DataChangedError`` -- the delete would be skipped and
+        # the symlink resurrected instead of propagating. Like folders, skip the
+        # rev-check for a symlink delete by passing ``parent_rev=None``.
+        is_symlink = deleted_entry is not None and deleted_entry.is_symlink
+
         redownload = False
         try:
             # Will only perform delete if remote rev matches `local_rev`.
             self.client.remove(
-                event.remote_path, parent_rev=local_rev if event.is_file else None
+                event.remote_path,
+                parent_rev=local_rev if event.is_file and not is_symlink else None,
             )
             status = SyncStatus.Done
         except NotFoundError:
