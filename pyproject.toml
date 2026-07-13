@@ -41,7 +41,7 @@ dependencies = [
     "setuptools",
     "survey>=4.0,<6.0",
     "typing_extensions",
-    "watchdog>=2.0.1",
+    "watchdog>=6.0.0",
     "xattr",
 ]
 
