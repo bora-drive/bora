@@ -54,11 +54,3 @@ the bundled values still say "cumulus":
 - [ ] Build artifacts: `python -m build` → sdist + wheel in `dist/`.
 - [ ] (Optional) Upload to PyPI; create a GitHub release using the CHANGELOG
       v0.1.0 notes.
-
-## Post-release backlog (deferred from v0.1.0)
-
-- [ ] **Drive sharing API** — re-introduce `sharelink` (create/revoke/list)
-      built on Drive's permissions API (`permissions().create` → `webViewLink`,
-      revoke, list), with CLI options modeled on Drive's sharing model rather
-      than Dropbox link semantics. Cut from v0.1.0 (see the Stage 8 spec §4.1).
-- [ ] **Shared Drives (team drive) support.**
