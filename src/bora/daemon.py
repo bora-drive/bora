@@ -417,6 +417,17 @@ def start_bora_daemon(
         if IS_MACOS:
             dlogger.debug("Integrating with CFEventLoop")
 
+            # rubicon.objc.eventloop resolves the AppKit class NSEvent at import
+            # time but never loads AppKit itself, relying on it having been
+            # loaded incidentally beforehand. The daemon subprocess is spawned
+            # with PYTHONOPTIMIZE=2 (see constants.ENV), under which that
+            # incidental load does not happen, so load AppKit explicitly first.
+            # Without this the import raises "ObjC Class NSEvent couldn't be
+            # found" and the daemon dies before creating its Pyro socket.
+            from rubicon.objc.runtime import load_library
+
+            load_library("AppKit")
+
             from rubicon.objc.eventloop import EventLoopPolicy
 
             event_loop_policy = EventLoopPolicy()
