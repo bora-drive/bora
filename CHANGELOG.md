@@ -17,6 +17,14 @@ Dropbox API to the Google Drive API.
 - Remote-change detection polls every 180 seconds (Google Drive has no
   long-poll equivalent), so remote edits appear locally within ~3 minutes.
 
+### Fixed
+- macOS daemon startup: the daemon subprocess is spawned with
+  `PYTHONOPTIMIZE=2`, under which AppKit was no longer loaded incidentally
+  before `rubicon.objc.eventloop` imports. That import resolves the AppKit class
+  `NSEvent` at load time, so it failed with "ObjC Class NSEvent couldn't be
+  found" and the daemon died before creating its Pyro socket. AppKit is now
+  loaded explicitly first. (Surfaced by CI on macOS + Python 3.14.)
+
 ### Known limitations
 - Shared links are not supported yet (no `sharelink` command).
 - Shared Drives (team drives) are not supported.
