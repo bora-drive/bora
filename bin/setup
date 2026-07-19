@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Reproduce the GitHub Actions environment locally.
+#
+# Creates ./.venv and installs the package plus lint and test extras the
+# same way the "Linting" and "Run tests" workflows do. Re-run at any time
+# to refresh the environment; bin/lint and bin/test use this venv.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PYTHON="${PYTHON:-python3}"
+
+if [ ! -x .venv/bin/python ]; then
+    "$PYTHON" -m venv .venv
+fi
+
+# Same steps as the workflows: upgrade pip, then install the package with
+# the extras each job uses (non-editable, matching CI).
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -U '.[lint]' '.[test]'
+
+echo
+echo "Done. Run bin/lint and bin/test to verify before opening a PR."
