@@ -1476,6 +1476,7 @@ class GoogleDriveClient:
                 self._path_cache,
                 last_cursor,
                 resolve_deleted_path=resolve_deleted_path,
+                export_opts=self.export_opts,
             )
 
     # ---- Utilities -------------------------------------------------------------------
