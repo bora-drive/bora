@@ -114,13 +114,9 @@ def sync_engine():
     local_dir = osp.join(get_home_dir(), "fault_auth_dir")
     os.mkdir(local_dir)
 
-    cache = PathIDCache(
-        Database(sqlite3.connect(":memory:", check_same_thread=False))
-    )
+    cache = PathIDCache(Database(sqlite3.connect(":memory:", check_same_thread=False)))
     cache.root_id = ROOT_ID
-    sync = SyncEngine(
-        GoogleDriveClient(_CONFIG, CredentialStorage(_CONFIG), cache)
-    )
+    sync = SyncEngine(GoogleDriveClient(_CONFIG, CredentialStorage(_CONFIG), cache))
     sync.sync_path = local_dir
     sync.local_cursor = 0.0
 
@@ -138,9 +134,7 @@ def _wire_fake(sync: SyncEngine, fake: FakeDrive) -> None:
 
 def _start(fake: FakeDrive) -> str:
     """Return the current startPageToken from the fake."""
-    return (
-        fake.service().changes().getStartPageToken().execute()["startPageToken"]
-    )
+    return fake.service().changes().getStartPageToken().execute()["startPageToken"]
 
 
 def _seed_entry(
@@ -217,7 +211,10 @@ def test_scenario_a1_unit_401_raises_token_revoked_error():
     assert isinstance(excinfo.value, TokenRevokedError)
     assert isinstance(excinfo.value, AuthError)
     # The message references re-linking.
-    assert "link" in excinfo.value.message.lower() or "re-link" in excinfo.value.message.lower()
+    assert (
+        "link" in excinfo.value.message.lower()
+        or "re-link" in excinfo.value.message.lower()
+    )
 
     remove_configuration(_CONFIG + "-unit-a1")
 
@@ -244,9 +241,7 @@ def test_scenario_a1_no_fault_no_spurious_token_revoked():
     try:
         client.list_remote_changes(start)
     except TokenRevokedError:
-        pytest.fail(
-            "TokenRevokedError raised without a 401 — mapping fires spuriously"
-        )
+        pytest.fail("TokenRevokedError raised without a 401 — mapping fires spuriously")
 
     remove_configuration(_CONFIG + "-unit-a1g")
 
@@ -283,15 +278,27 @@ def test_scenario_a2_engine_401_raises_fatal_token_revoked(sync_engine: SyncEngi
 
     # Seed index entries for these files (simulate already-synced state).
     _seed_entry(
-        sync_engine, "/alpha.txt", fid_a, ItemType.File, "rev-1",
+        sync_engine,
+        "/alpha.txt",
+        fid_a,
+        ItemType.File,
+        "rev-1",
         _md5(b"content-a"),
     )
     _seed_entry(
-        sync_engine, "/beta.txt", fid_b, ItemType.File, "rev-2",
+        sync_engine,
+        "/beta.txt",
+        fid_b,
+        ItemType.File,
+        "rev-2",
         _md5(b"content-b"),
     )
     _seed_entry(
-        sync_engine, "/gamma.txt", fid_c, ItemType.File, "rev-3",
+        sync_engine,
+        "/gamma.txt",
+        fid_c,
+        ItemType.File,
+        "rev-3",
         _md5(b"content-c"),
     )
 
@@ -304,9 +311,9 @@ def test_scenario_a2_engine_401_raises_fatal_token_revoked(sync_engine: SyncEngi
 
     # --- Cursor un-advanced check ---
     # The 401 fires BEFORE apply_remote_changes, so the cursor must not move.
-    assert sync_engine.remote_cursor == start_cursor, (
-        "Cursor must NOT be advanced when 401 aborts before apply_remote_changes"
-    )
+    assert (
+        sync_engine.remote_cursor == start_cursor
+    ), "Cursor must NOT be advanced when 401 aborts before apply_remote_changes"
 
     # --- No partial corruption: index must be intact ---
     idx_a = sync_engine.get_index_entry_by_remote_id(fid_a)
@@ -350,7 +357,9 @@ def test_scenario_a3_resumable_after_relink(sync_engine: SyncEngine):
     with pytest.raises(TokenRevokedError):
         sync_engine.download_sync_cycle()
 
-    assert sync_engine.remote_cursor == start_cursor, "Cursor must be un-advanced after 401"
+    assert (
+        sync_engine.remote_cursor == start_cursor
+    ), "Cursor must be un-advanced after 401"
 
     # --- Relink simulation: clear any remaining faults, re-run same cursor ---
     # (In production: daemon re-links, persisted cursor is un-changed, daemon restarts)
@@ -360,9 +369,9 @@ def test_scenario_a3_resumable_after_relink(sync_engine: SyncEngine):
     sync_engine.download_sync_cycle()
 
     # Cursor must have advanced past the batch.
-    assert sync_engine.remote_cursor != start_cursor, (
-        "Cursor must advance after successful relink-and-retry cycle"
-    )
+    assert (
+        sync_engine.remote_cursor != start_cursor
+    ), "Cursor must advance after successful relink-and-retry cycle"
 
     # Files must have been applied to the local sync folder.
     local_a = sync_engine.to_local_path_from_cased("/doc-a.txt")
@@ -489,7 +498,9 @@ def test_scenario_b1_unit_refresh_error_maps_to_token_revoked():
     # Replace _get_service to raise RefreshError when called.
     # This fires inside the lambda in iter_remote_changes, inside _retry_transient,
     # inside the convert_api_errors context manager in list_remote_changes_iterator.
-    client._get_service = Mock(side_effect=RefreshError("invalid_grant: Token has been expired or revoked."))
+    client._get_service = Mock(
+        side_effect=RefreshError("invalid_grant: Token has been expired or revoked.")
+    )
 
     start = _start(fake)  # obtained before wiring the fault
 
@@ -497,16 +508,16 @@ def test_scenario_b1_unit_refresh_error_maps_to_token_revoked():
         client.list_remote_changes(start)
 
     # Must be the specific type — NOT a raw RefreshError.
-    assert isinstance(excinfo.value, TokenRevokedError), (
-        f"Expected TokenRevokedError, got {type(excinfo.value).__name__}"
-    )
+    assert isinstance(
+        excinfo.value, TokenRevokedError
+    ), f"Expected TokenRevokedError, got {type(excinfo.value).__name__}"
     assert isinstance(excinfo.value, AuthError)
 
     # The original RefreshError must be chained as __cause__ (by the
     # `raise TokenRevokedError(...) from exc` in convert_api_errors).
-    assert isinstance(excinfo.value.__cause__, RefreshError), (
-        "TokenRevokedError must chain the original RefreshError as __cause__"
-    )
+    assert isinstance(
+        excinfo.value.__cause__, RefreshError
+    ), "TokenRevokedError must chain the original RefreshError as __cause__"
 
     remove_configuration(_CONFIG + "-unit-b1")
 
@@ -560,11 +571,19 @@ def test_scenario_b2_engine_refresh_error_raises_fatal_token_revoked(
 
     # Seed index to simulate consistent pre-fault state.
     _seed_entry(
-        sync_engine, "/refresh-test-a.txt", fid_a, ItemType.File, "rev-a",
+        sync_engine,
+        "/refresh-test-a.txt",
+        fid_a,
+        ItemType.File,
+        "rev-a",
         _md5(b"data-a"),
     )
     _seed_entry(
-        sync_engine, "/refresh-test-b.txt", fid_b, ItemType.File, "rev-b",
+        sync_engine,
+        "/refresh-test-b.txt",
+        fid_b,
+        ItemType.File,
+        "rev-b",
         _md5(b"data-b"),
     )
 
@@ -580,9 +599,9 @@ def test_scenario_b2_engine_refresh_error_raises_fatal_token_revoked(
         sync_engine.download_sync_cycle()
 
     # Cursor must be un-advanced.
-    assert sync_engine.remote_cursor == start_cursor, (
-        "Cursor must NOT be advanced when RefreshError aborts the feed-fetch"
-    )
+    assert (
+        sync_engine.remote_cursor == start_cursor
+    ), "Cursor must NOT be advanced when RefreshError aborts the feed-fetch"
 
     # Index must be intact (no partial corruption).
     idx_a = sync_engine.get_index_entry_by_remote_id(fid_a)
@@ -614,15 +633,15 @@ def test_scenario_b3_restart_from_persisted_cursor_after_refresh_error(
     sync_engine.remote_cursor = start_cursor
 
     # --- Fault pass: RefreshError mid-sync ---
-    sync_engine.client._get_service = Mock(
-        side_effect=RefreshError("invalid_grant")
-    )
+    sync_engine.client._get_service = Mock(side_effect=RefreshError("invalid_grant"))
 
     with pytest.raises(TokenRevokedError):
         sync_engine.download_sync_cycle()
 
     cursor_after_fault = sync_engine.remote_cursor
-    assert cursor_after_fault == start_cursor, "Cursor must be un-advanced after RefreshError"
+    assert (
+        cursor_after_fault == start_cursor
+    ), "Cursor must be un-advanced after RefreshError"
 
     # --- Relink: restore _get_service (simulates relink clearing the fault) ---
     sync_engine.client._get_service = Mock(return_value=fake.service())
@@ -630,9 +649,9 @@ def test_scenario_b3_restart_from_persisted_cursor_after_refresh_error(
     # Re-run from the persisted cursor → must succeed.
     sync_engine.download_sync_cycle()
 
-    assert sync_engine.remote_cursor != start_cursor, (
-        "Cursor must advance after successful restart post-relink"
-    )
+    assert (
+        sync_engine.remote_cursor != start_cursor
+    ), "Cursor must advance after successful restart post-relink"
 
     # Files must have been applied.
     local_a = sync_engine.to_local_path_from_cased("/relink-a.txt")
@@ -672,9 +691,7 @@ def test_scenario_b4_teeth_refresh_error_type_pins_convert_api_errors_wiring(
     _wire_fake(sync_engine, fake)
     sync_engine.remote_cursor = start_cursor
 
-    sync_engine.client._get_service = Mock(
-        side_effect=RefreshError("invalid_grant")
-    )
+    sync_engine.client._get_service = Mock(side_effect=RefreshError("invalid_grant"))
 
     raised = None
     try:
@@ -720,23 +737,21 @@ def test_scenario_b4_teeth_401_vs_refresh_parity(sync_engine: SyncEngine):
     except Exception as exc:
         raised_401 = exc
 
-    assert isinstance(raised_401, TokenRevokedError), (
-        f"401 must surface as TokenRevokedError; got {type(raised_401).__name__}"
-    )
+    assert isinstance(
+        raised_401, TokenRevokedError
+    ), f"401 must surface as TokenRevokedError; got {type(raised_401).__name__}"
 
     # --- RefreshError variant (same engine, cursor still un-advanced) ---
-    sync_engine.client._get_service = Mock(
-        side_effect=RefreshError("invalid_grant")
-    )
+    sync_engine.client._get_service = Mock(side_effect=RefreshError("invalid_grant"))
     raised_refresh = None
     try:
         sync_engine.download_sync_cycle()
     except Exception as exc:
         raised_refresh = exc
 
-    assert isinstance(raised_refresh, TokenRevokedError), (
-        f"RefreshError must surface as TokenRevokedError; got {type(raised_refresh).__name__}"
-    )
+    assert isinstance(
+        raised_refresh, TokenRevokedError
+    ), f"RefreshError must surface as TokenRevokedError; got {type(raised_refresh).__name__}"
 
     # Both must be the same type (parity).
     assert type(raised_401) is type(raised_refresh), (

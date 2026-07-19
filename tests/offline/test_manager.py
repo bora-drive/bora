@@ -1,6 +1,5 @@
 import os
 import os.path as osp
-from threading import Event
 from unittest.mock import Mock
 
 import pytest
@@ -9,12 +8,11 @@ from bora import notify, oauth
 from bora.exceptions import CursorResetError, NoSyncDirError
 from bora.main import Bora
 from bora.utils.appdirs import get_home_dir
-from bora.utils.path import delete
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _fake_linked(m: Bora) -> None:
     """Store a valid (offline) refresh-token blob so that m.client.linked is
@@ -64,9 +62,7 @@ def test_ensure_sync_folder_present_raises_when_dir_missing(
         m.sync.ensure_sync_folder_present()
 
 
-def test_ensure_sync_folder_present_passes_when_dir_exists(
-    m: Bora, tmp_path
-) -> None:
+def test_ensure_sync_folder_present_passes_when_dir_exists(m: Bora, tmp_path) -> None:
     """ensure_sync_folder_present must not raise when the sync folder is
     present on disk."""
     local_dir = str(tmp_path / "SyncRoot")
@@ -98,8 +94,8 @@ def test_cursor_reset_triggers_reindex_and_autostart(m: Bora, tmp_path) -> None:
     with manager._handle_sync_thread_errors(running, autostart):
         raise CursorResetError("Sync cursor reset", "token expired")
 
-    assert m.sync.remote_cursor == ""        # full re-index scheduled
-    assert manager.autostart.is_set()       # sync will resume
+    assert m.sync.remote_cursor == ""  # full re-index scheduled
+    assert manager.autostart.is_set()  # sync will resume
     manager.desktop_notifier.notify.assert_called_once()
     assert manager.desktop_notifier.notify.call_args.kwargs["level"] == notify.INFO
 
@@ -131,11 +127,12 @@ def test_persistent_cursor_reset_trips_circuit_breaker(m: Bora, tmp_path) -> Non
     with manager._handle_sync_thread_errors(running, autostart):
         raise CursorResetError("Sync cursor reset", "token expired")
 
-    assert not manager.autostart.is_set(), (
-        "circuit-breaker must NOT re-arm autostart after the budget is exhausted"
-    )
+    assert (
+        not manager.autostart.is_set()
+    ), "circuit-breaker must NOT re-arm autostart after the budget is exhausted"
     error_calls = [
-        c for c in manager.desktop_notifier.notify.call_args_list
+        c
+        for c in manager.desktop_notifier.notify.call_args_list
         if c.kwargs.get("level") == notify.ERROR
     ]
     assert error_calls, "breaker must surface a visible ERROR notification"
@@ -166,6 +163,6 @@ def test_cursor_reset_counter_resets_on_healthy_cycle(m: Bora, tmp_path) -> None
     manager.autostart.clear()
     with manager._handle_sync_thread_errors(running, autostart):
         raise CursorResetError("Sync cursor reset", "token expired")
-    assert manager.autostart.is_set(), (
-        "counter must reset on a healthy cycle, so this reset is within budget"
-    )
+    assert (
+        manager.autostart.is_set()
+    ), "counter must reset on a healthy cycle, so this reset is within budget"

@@ -495,8 +495,7 @@ def test_occupied_target_folder_move_creates_duplicate_id_row(sync_engine: SyncE
 
     # Occupant preserved as a conflicted copy (not silently adopted).
     cc_dirs = [
-        name for name in os.listdir(sync_engine.sync_path)
-        if "conflicted copy" in name
+        name for name in os.listdir(sync_engine.sync_path) if "conflicted copy" in name
     ]
     assert cc_dirs, "occupant must be conflict-copied, not adopted"
 
@@ -526,12 +525,20 @@ def test_duplicate_remote_id_rows_rejected_at_db(sync_engine: SyncEngine):
     _write_local_file(sync_engine, "/path_a.txt", data)
 
     _seed_entry(
-        sync_engine, "/path_a.txt", file_id, ItemType.File, rev="rev-1",
+        sync_engine,
+        "/path_a.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
         content_hash=_md5(data),
     )
     with pytest.raises(DatabaseError) as excinfo:
         _seed_entry(
-            sync_engine, "/path_b.txt", file_id, ItemType.File, rev="rev-1",
+            sync_engine,
+            "/path_b.txt",
+            file_id,
+            ItemType.File,
+            rev="rev-1",
             content_hash=_md5(data),
         )
     # The DatabaseError wraps the schema-level UNIQUE violation.
@@ -558,24 +565,33 @@ def test_remote_id_move_via_create_rekeys_not_duplicates(sync_engine: SyncEngine
 
     _write_local_file(sync_engine, "/dup_a.txt", data)
     _seed_entry(
-        sync_engine, "/dup_a.txt", file_id, ItemType.File, rev="rev-1",
+        sync_engine,
+        "/dup_a.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
         content_hash=_md5(data),
     )
 
     # Apply an index update for the same id at a new path (as the download path
     # does after writing the file). Eviction must drop the /dup_a.txt row.
     event = _make_move_event(
-        sync_engine, "/dup_c.txt", file_id, ItemType.File, rev="rev-1",
-        content_hash=_md5(data), size=len(data),
+        sync_engine,
+        "/dup_c.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
+        content_hash=_md5(data),
+        size=len(data),
     )
     _write_local_file(sync_engine, "/dup_c.txt", data)
     sync_engine.update_index_from_sync_event(event)
 
     with sync_engine._database_access():
         rows_after = sync_engine._index_table.select_sql("WHERE remote_id = ?", file_id)
-    assert len(rows_after) == 1, (
-        f"expected 1 row, got {[r.remote_path_lower for r in rows_after]}"
-    )
+    assert (
+        len(rows_after) == 1
+    ), f"expected 1 row, got {[r.remote_path_lower for r in rows_after]}"
     assert sync_engine.get_index_entry("/dup_c.txt") is not None
     assert sync_engine.get_index_entry("/dup_a.txt") is None
     # Resolution by id is now unambiguous.
@@ -645,7 +661,9 @@ def test_missing_parent_reindexed_on_demand(sync_engine: SyncEngine):
 
     # The parent folder must exist on disk.
     parent_local = sync_engine.to_local_path_from_cased("/parentdir")
-    assert osp.isdir(parent_local), "parent directory must be created on disk by _ensure_parent"
+    assert osp.isdir(
+        parent_local
+    ), "parent directory must be created on disk by _ensure_parent"
 
     # The child file must also be present (index + disk).
     child_entry = sync_engine.get_index_entry("/parentdir/child.txt")
@@ -677,7 +695,11 @@ def test_missing_parent_teeth(sync_engine: SyncEngine):
 
     _wire_fake(sync_engine, fake)
     sync_engine.client._path_cache.set(
-        "/teeth_parentdir", dir_id, parent_id=ROOT_ID, name="teeth_parentdir", is_folder=True
+        "/teeth_parentdir",
+        dir_id,
+        parent_id=ROOT_ID,
+        name="teeth_parentdir",
+        is_folder=True,
     )
     sync_engine.client._path_cache.set(
         "/teeth_parentdir/teeth_child.txt",
@@ -715,7 +737,9 @@ def test_missing_parent_teeth(sync_engine: SyncEngine):
     finally:
         sync_engine._ensure_parent = original_ensure_parent  # type: ignore[method-assign]
 
-    child_local = sync_engine.to_local_path_from_cased("/teeth_parentdir/teeth_child.txt")
+    child_local = sync_engine.to_local_path_from_cased(
+        "/teeth_parentdir/teeth_child.txt"
+    )
     assert not osp.isfile(child_local), (
         "child file must be absent when _ensure_parent is neutered — "
         "proves the green test's reindex is doing real work"
@@ -739,7 +763,12 @@ def test_occupied_target_folder_move_conflict_copies_occupant(sync_engine: SyncE
 
     # Moved folder's OLD location, tracked in the index.
     _seed_entry(
-        sync_engine, "/src_cc", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
+        sync_engine,
+        "/src_cc",
+        dir_id,
+        ItemType.Folder,
+        rev="folder",
+        content_hash="folder",
     )
     _write_local_dir(sync_engine, "/src_cc")
     # Untracked occupant at the move target.
@@ -753,7 +782,8 @@ def test_occupied_target_folder_move_conflict_copies_occupant(sync_engine: SyncE
     # Occupant preserved as a conflicted copy (the user's folder is not lost).
     sync_root = sync_engine.sync_path
     cc_dirs = [
-        name for name in os.listdir(sync_root)
+        name
+        for name in os.listdir(sync_root)
         if "conflicted copy" in name and osp.isdir(osp.join(sync_root, name))
     ]
     assert cc_dirs, (

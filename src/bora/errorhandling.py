@@ -17,34 +17,25 @@ import requests
 from googleapiclient.errors import HttpError
 
 from .exceptions import (
-    BadInputError,
-    ConflictError,
-    CursorResetError,
-    DataChangedError,
-    DataCorruptionError,
     AuthError,
+    BadInputError,
+    BoraApiError,
+    ConflictError,
     ConnectionError,
-    ServerError,
-    FileConflictError,
+    DataChangedError,
     FileReadError,
     FileSizeError,
-    FolderConflictError,
     InsufficientPermissionsError,
     InsufficientSpaceError,
-    InvalidDbidError,
     IsAFolderError,
-    BoraApiError,
     NotAFolderError,
     NotFoundError,
     OutOfMemoryError,
     PathError,
     RestrictedContentError,
-    SharedLinkError,
+    ServerError,
     SymlinkError,
-    SyncError,
-    TokenExpiredError,
     TokenRevokedError,
-    UnsupportedFileError,
 )
 from .utils.path import fs_max_lengths_for_path
 
@@ -344,6 +335,4 @@ def google_api_to_bora_error(
     :param local_path: Local path associated with the error.
     :returns: Converted exception.
     """
-    raise NotImplementedError(
-        "Google API error handling not yet implemented (Phase 6)"
-    )
+    raise NotImplementedError("Google API error handling not yet implemented (Phase 6)")

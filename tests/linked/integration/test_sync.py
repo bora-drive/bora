@@ -79,7 +79,6 @@ from bora.utils.path import (
     to_existing_unnormalized_path,
     walk,
 )
-
 from tests.linked.conftest import LOCK_NAME, _make_client, requires_account, wait_until
 
 # mypy cannot yet check recursive type definitions...
@@ -740,7 +739,10 @@ def test_remote_file_replaced_by_folder(m: Bora) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, 0/6 attempts): the conflict signal is never raised. Drive's change feed lags the remote replacement, so the engine first uploads the locally-modified file via files.update against the old (now trashed) file id — trashing does not change the rev, so the rev guard passes, no DataChangedError is raised, no upload error is recorded, and the change is marked synced. When the DeletedMetadata + FolderMetadata for /file.txt then arrive, _check_download_conflict finds no unsynced local changes ('remote item is newer') and _on_remote_deleted deletes the locally-modified file, so no conflicted copy is created; the modified content survives only inside the trashed remote file. Log: /tmp/cluster-a-task5-remote_file_replaced_by_folder-run{1,2}.log", strict=False)
+@pytest.mark.xfail(
+    reason="Cluster-A pinned (2026-06-10, 0/6 attempts): the conflict signal is never raised. Drive's change feed lags the remote replacement, so the engine first uploads the locally-modified file via files.update against the old (now trashed) file id — trashing does not change the rev, so the rev guard passes, no DataChangedError is raised, no upload error is recorded, and the change is marked synced. When the DeletedMetadata + FolderMetadata for /file.txt then arrive, _check_download_conflict finds no unsynced local changes ('remote item is newer') and _on_remote_deleted deletes the locally-modified file, so no conflicted copy is created; the modified content survives only inside the trashed remote file. Log: /tmp/cluster-a-task5-remote_file_replaced_by_folder-run{1,2}.log",
+    strict=False,
+)
 def test_remote_file_replaced_by_folder_and_unsynced_local_changes(m: Bora) -> None:
     """
     Tests the download sync when a file is replaced by a folder and the local file has
@@ -807,7 +809,10 @@ def test_remote_folder_replaced_by_file(m: Bora) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, 0/6 attempts): same family as the file case — before the change feed reports the remote replacement, the engine uploads the unsynced local child (/folder/subfolder) under the old folder id; Drive allows creating children under a trashed parent, so the upload succeeds (no DataChangedError, no upload error recorded) and the child is marked synced but is orphaned in the trash. The subsequent DeletedMetadata for /folder then passes _check_download_conflict with 'no unsynced changes' and _on_remote_deleted recursively deletes the local folder, so no conflicted copy is created. Log: /tmp/cluster-a-task5-remote_folder_replaced_by_file-run{1,2}.log", strict=False)
+@pytest.mark.xfail(
+    reason="Cluster-A pinned (2026-06-10, 0/6 attempts): same family as the file case — before the change feed reports the remote replacement, the engine uploads the unsynced local child (/folder/subfolder) under the old folder id; Drive allows creating children under a trashed parent, so the upload succeeds (no DataChangedError, no upload error recorded) and the child is marked synced but is orphaned in the trash. The subsequent DeletedMetadata for /folder then passes _check_download_conflict with 'no unsynced changes' and _on_remote_deleted recursively deletes the local folder, so no conflicted copy is created. Log: /tmp/cluster-a-task5-remote_folder_replaced_by_file-run{1,2}.log",
+    strict=False,
+)
 def test_remote_folder_replaced_by_file_and_unsynced_local_changes(m: Bora) -> None:
     """
     Tests the download sync when a folder is replaced by a file and the local folder has
@@ -883,7 +888,10 @@ def test_local_folder_file_deleted_event(m: Bora) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, flaky: 3/4 invocations green, 1 failed all reruns, 1 passed only on rerun): _on_local_deleted intentionally replaces the remote folder without checking it for unsynced remote children (upstream Dropbox behavior the test relies on). The flaky failure is a Drive duplicate-name race: the test mutator's refresh listing lags Drive's eventual consistency, so make_dir creates a second folder also named 'folder' (Drive permits same-name siblings) and uploads file.txt into it; the engine's id-based deletion removes only the indexed folder, leaving the server with both a folder and a file at /folder, and sync settles diverged (remote folder vs local file: 'different content for /folder'). Log: /tmp/cluster-a-task5-local_folder_replaced_by_file-run2.log", strict=False)
+@pytest.mark.xfail(
+    reason="Cluster-A pinned (2026-06-10, flaky: 3/4 invocations green, 1 failed all reruns, 1 passed only on rerun): _on_local_deleted intentionally replaces the remote folder without checking it for unsynced remote children (upstream Dropbox behavior the test relies on). The flaky failure is a Drive duplicate-name race: the test mutator's refresh listing lags Drive's eventual consistency, so make_dir creates a second folder also named 'folder' (Drive permits same-name siblings) and uploads file.txt into it; the engine's id-based deletion removes only the indexed folder, leaving the server with both a folder and a file at /folder, and sync settles diverged (remote folder vs local file: 'different content for /folder'). Log: /tmp/cluster-a-task5-local_folder_replaced_by_file-run2.log",
+    strict=False,
+)
 def test_local_folder_replaced_by_file_and_unsynced_remote_changes(m: Bora) -> None:
     """
     Tests the upload sync when a local folder is replaced by a file and the remote
@@ -949,7 +957,10 @@ def test_local_file_folder_deleted_event(m: Bora) -> None:
 
 
 @requires_account
-@pytest.mark.xfail(reason="Cluster-A pinned (2026-06-10, flaky: 3/4 invocations green, 1 failed all reruns, 1 passed only on rerun): the Cluster-A rev-guard fix works here — _on_local_deleted raises DataChangedError (remote file was modified) and records an Up sync error, though the replacement folder is still uploaded as a duplicate-named remote sibling. Recovery depends on the remote file's modification arriving via the change feed (the download-conflict path then materializes it locally — the passing case). In failing runs, the changes.list fetch right after the failed deletion advanced the cursor past the not-yet-materialized file-modification entry, the change was not delivered within the test window, so the modified remote file is never downloaded and the recorded upload error persists. Log: /tmp/cluster-a-task5-local_file_replaced_by_folder-run1.log", strict=False)
+@pytest.mark.xfail(
+    reason="Cluster-A pinned (2026-06-10, flaky: 3/4 invocations green, 1 failed all reruns, 1 passed only on rerun): the Cluster-A rev-guard fix works here — _on_local_deleted raises DataChangedError (remote file was modified) and records an Up sync error, though the replacement folder is still uploaded as a duplicate-named remote sibling. Recovery depends on the remote file's modification arriving via the change feed (the download-conflict path then materializes it locally — the passing case). In failing runs, the changes.list fetch right after the failed deletion advanced the cursor past the not-yet-materialized file-modification entry, the change was not delivered within the test window, so the modified remote file is never downloaded and the recorded upload error persists. Log: /tmp/cluster-a-task5-local_file_replaced_by_folder-run1.log",
+    strict=False,
+)
 def test_local_file_replaced_by_folder_and_unsynced_remote_changes(m: Bora) -> None:
     """
     Tests the upload sync when a local file is replaced by a folder and the remote
@@ -1686,7 +1697,9 @@ def _assert_synced_once(m: Bora, tree: DirTreeType | None = None) -> None:
         remote_rev = md1.rev if isinstance(md1, FileMetadata) else "folder"
 
         # Check if revs are equal on server and locally.
-        assert entry.rev == remote_rev, f'different revs for "{entry.remote_path_lower}"'
+        assert (
+            entry.rev == remote_rev
+        ), f'different revs for "{entry.remote_path_lower}"'
 
         # Check if casing on drive is the same as in index. ``remote_path_cased``
         # is the encoded virtual path; map it to the decoded local path the same

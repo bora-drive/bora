@@ -304,9 +304,9 @@ class PathIDCache:
             old_prefix = old_fold + "/"
             children = self._select_children(old_fold)
             for child in children:
-                fold_suffix = child.remote_path_fold[len(old_prefix):]
+                fold_suffix = child.remote_path_fold[len(old_prefix) :]
                 child.remote_path_fold = new_fold + "/" + fold_suffix
-                cased_suffix = child.remote_path[len(old_path) + 1:]
+                cased_suffix = child.remote_path[len(old_path) + 1 :]
                 child.remote_path = new_path + "/" + cased_suffix
                 self._table.update(child)
 
@@ -371,7 +371,9 @@ class PathIDCache:
             raise RuntimeError(
                 "root_id must be set before calling populate_from_listing"
             )
-        root_id = self._root_id  # snapshot once; unlocked phases 1-2 are self-consistent
+        root_id = (
+            self._root_id
+        )  # snapshot once; unlocked phases 1-2 are self-consistent
 
         # Phase 1: index by id and by parent. Shared-with-me attach points
         # (sharedWithMe == true) are re-parented onto the virtual root; Drive
@@ -447,11 +449,10 @@ class PathIDCache:
                     logger.warning(
                         "Real folder %r collides with the reserved "
                         "'/Shared with me' path; renamed to %r locally",
-                        child["name"], raw_name,
+                        child["name"],
+                        raw_name,
                     )
-                is_folder = (
-                    child.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE
-                )
+                is_folder = child.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE
 
                 plan.append(
                     PathCacheEntry(
@@ -471,11 +472,7 @@ class PathIDCache:
         # from root). Behavior: silently dropped from the plan,
         # observability via warning log.
         for item_id, item in by_id.items():
-            if (
-                item_id in visited
-                or item_id in skip_ids
-                or item_id == root_id
-            ):
+            if item_id in visited or item_id in skip_ids or item_id == root_id:
                 continue
             parents = item.get("parents", [])
             parent_repr = parents[0] if parents else None

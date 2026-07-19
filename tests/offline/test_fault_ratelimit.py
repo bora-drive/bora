@@ -26,10 +26,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
+from bora.client import _MAX_RETRY_ATTEMPTS, GoogleDriveClient
 from bora.config import remove_configuration
-from bora.errorhandling import RETRYABLE_403_REASONS
 from bora.database.core import Database
+from bora.errorhandling import RETRYABLE_403_REASONS
 from bora.exceptions import ConnectionError as BoraConnectionError
 from bora.exceptions import InsufficientSpaceError
 from bora.keyring import CredentialStorage
@@ -106,9 +106,9 @@ def test_429_storm_on_feed_converges(cof):
 
     # Sleep was called (the neutralised wait) for each retry, confirming
     # backoff was applied rather than a tight spin.
-    assert client._poll_event.wait.call_count >= 4, (
-        "wait() must be called once per backoff sleep (429 storm had 4 faults)"
-    )
+    assert (
+        client._poll_event.wait.call_count >= 4
+    ), "wait() must be called once per backoff sleep (429 storm had 4 faults)"
 
 
 def test_429_storm_bounded_raises_teeth(cof):
@@ -168,7 +168,9 @@ def test_429_storm_on_move_bounded_raises_teeth(cof):
         client._writes.move("/orig.txt", "/moved.txt")
 
     # Rename must not have been applied.
-    assert fake.files[fid]["name"] == "orig.txt", "file name must be unchanged after exhausted retries"
+    assert (
+        fake.files[fid]["name"] == "orig.txt"
+    ), "file name must be unchanged after exhausted retries"
 
 
 def test_403_user_rate_limit_exceeded_retries_and_converges(cof):
@@ -181,7 +183,10 @@ def test_403_user_rate_limit_exceeded_retries_and_converges(cof):
 
     fid = fake.add_file("/rate-limited.txt", b"data")
     client._path_cache.set(
-        "/rate-limited.txt", fid, parent_id=ROOT_ID, name="rate-limited.txt",
+        "/rate-limited.txt",
+        fid,
+        parent_id=ROOT_ID,
+        name="rate-limited.txt",
         is_folder=False,
     )
 
@@ -216,9 +221,9 @@ def test_403_user_rate_limit_exceeded_bounded_raises_teeth(cof):
     with pytest.raises(BoraConnectionError):
         client._writes.move("/rl-teeth.txt", "/rl-teeth-dst.txt")
 
-    assert fake.files[fid]["name"] == "rl-teeth.txt", (
-        "file name must be unchanged after exhausted userRateLimitExceeded retries"
-    )
+    assert (
+        fake.files[fid]["name"] == "rl-teeth.txt"
+    ), "file name must be unchanged after exhausted userRateLimitExceeded retries"
 
 
 # ===========================================================================
@@ -275,7 +280,10 @@ def test_daily_limit_exceeded_teeth(cof):
 
     fid = fake.add_file("/daily-teeth.txt", b"data")
     client._path_cache.set(
-        "/daily-teeth.txt", fid, parent_id=ROOT_ID, name="daily-teeth.txt",
+        "/daily-teeth.txt",
+        fid,
+        parent_id=ROOT_ID,
+        name="daily-teeth.txt",
         is_folder=False,
     )
 
@@ -286,13 +294,13 @@ def test_daily_limit_exceeded_teeth(cof):
         client._writes.move("/daily-teeth.txt", "/daily-teeth-dst.txt")
 
     # Fault rule was consumed (fired exactly once → removed from _fail_rules).
-    assert not fake._fail_rules, (
-        "dailyLimitExceeded fault rule must have been consumed (fired once, not retried past)"
-    )
+    assert (
+        not fake._fail_rules
+    ), "dailyLimitExceeded fault rule must have been consumed (fired once, not retried past)"
     # File unchanged — the move was never committed.
-    assert fake.files[fid]["name"] == "daily-teeth.txt", (
-        "file name must be unchanged: dailyLimitExceeded must not have been retried through"
-    )
+    assert (
+        fake.files[fid]["name"] == "daily-teeth.txt"
+    ), "file name must be unchanged: dailyLimitExceeded must not have been retried through"
 
 
 def test_storage_quota_exceeded_raises_insufficient_space(cof):
@@ -311,7 +319,9 @@ def test_storage_quota_exceeded_raises_insufficient_space(cof):
         "/quota.txt", fid, parent_id=ROOT_ID, name="quota.txt", is_folder=False
     )
 
-    fake.fail_next("files.update", make_http_error(403, "storageQuotaExceeded"), count=1)
+    fake.fail_next(
+        "files.update", make_http_error(403, "storageQuotaExceeded"), count=1
+    )
 
     wait_before = client._poll_event.wait.call_count
 
@@ -319,9 +329,9 @@ def test_storage_quota_exceeded_raises_insufficient_space(cof):
         client._writes.move("/quota.txt", "/quota-dst.txt")
 
     wait_after = client._poll_event.wait.call_count
-    assert wait_after == wait_before, (
-        "storageQuotaExceeded must NOT trigger any retry backoff sleep"
-    )
+    assert (
+        wait_after == wait_before
+    ), "storageQuotaExceeded must NOT trigger any retry backoff sleep"
 
 
 def test_storage_quota_exceeded_teeth(cof):
@@ -338,12 +348,18 @@ def test_storage_quota_exceeded_teeth(cof):
 
     fid_a = fake.add_file("/contrast-a.txt", b"data")
     client._path_cache.set(
-        "/contrast-a.txt", fid_a, parent_id=ROOT_ID, name="contrast-a.txt",
+        "/contrast-a.txt",
+        fid_a,
+        parent_id=ROOT_ID,
+        name="contrast-a.txt",
         is_folder=False,
     )
     fid_b = fake.add_file("/contrast-b.txt", b"data")
     client._path_cache.set(
-        "/contrast-b.txt", fid_b, parent_id=ROOT_ID, name="contrast-b.txt",
+        "/contrast-b.txt",
+        fid_b,
+        parent_id=ROOT_ID,
+        name="contrast-b.txt",
         is_folder=False,
     )
 
@@ -353,7 +369,9 @@ def test_storage_quota_exceeded_teeth(cof):
     assert result.id == fid_a  # converged: not fatal
 
     # storageQuotaExceeded: count=1 → raises immediately.
-    fake.fail_next("files.update", make_http_error(403, "storageQuotaExceeded"), count=1)
+    fake.fail_next(
+        "files.update", make_http_error(403, "storageQuotaExceeded"), count=1
+    )
     with pytest.raises(InsufficientSpaceError):
         client._writes.move("/contrast-b.txt", "/contrast-b-dst.txt")
 
@@ -373,19 +391,22 @@ def test_request_count_increments_per_request(cof):
 
     assert client._request_count == 0, "counter must start at zero"
     # These are the specific client-side budget attrs F14 removed; not an exhaustive guard.
-    assert not hasattr(client, "quota_budget"), (
-        "no client-side quota_budget attribute should exist (F14 fix)"
-    )
-    assert not hasattr(client, "_daily_budget"), (
-        "no client-side _daily_budget attribute should exist (F14 fix)"
-    )
+    assert not hasattr(
+        client, "quota_budget"
+    ), "no client-side quota_budget attribute should exist (F14 fix)"
+    assert not hasattr(
+        client, "_daily_budget"
+    ), "no client-side _daily_budget attribute should exist (F14 fix)"
 
     # Issue several operations.
     for i in range(5):
         fid = fake.add_file(f"/counter-{i}.txt", b"data")
         client._path_cache.set(
-            f"/counter-{i}.txt", fid, parent_id=ROOT_ID,
-            name=f"counter-{i}.txt", is_folder=False,
+            f"/counter-{i}.txt",
+            fid,
+            parent_id=ROOT_ID,
+            name=f"counter-{i}.txt",
+            is_folder=False,
         )
         client._writes.move(f"/counter-{i}.txt", f"/counter-{i}-done.txt")
 
@@ -410,14 +431,17 @@ def test_no_preemptive_client_side_quota_rejection(cof):
     for i in range(20):
         fid = fake.add_file(f"/nobulk-{i}.txt", b"data")
         client._path_cache.set(
-            f"/nobulk-{i}.txt", fid, parent_id=ROOT_ID,
-            name=f"nobulk-{i}.txt", is_folder=False,
+            f"/nobulk-{i}.txt",
+            fid,
+            parent_id=ROOT_ID,
+            name=f"nobulk-{i}.txt",
+            is_folder=False,
         )
         # No fault armed — must succeed every time.
         client._writes.move(f"/nobulk-{i}.txt", f"/nobulk-{i}-done.txt")
 
     # All 20 moves completed without pre-emptive rejection.
     for i in range(20):
-        assert client._path_cache.path_to_id(f"/nobulk-{i}-done.txt") is not None, (
-            f"op {i} must succeed with no client-side quota rejection"
-        )
+        assert (
+            client._path_cache.path_to_id(f"/nobulk-{i}-done.txt") is not None
+        ), f"op {i} must succeed with no client-side quota rejection"

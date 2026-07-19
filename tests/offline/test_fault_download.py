@@ -26,7 +26,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from bora.client import GoogleDriveClient, _DOWNLOAD_CHUNK_SIZE
+from bora.client import _DOWNLOAD_CHUNK_SIZE, GoogleDriveClient
 from bora.config import remove_configuration
 from bora.database.core import Database
 from bora.exceptions import DataCorruptionError
@@ -121,7 +121,9 @@ def test_truncated_download_teeth(cof, tmp_path):
     assert osp.exists(local)
     with open(local, "rb") as fh:
         on_disk = fh.read()
-    assert on_disk == truncated, "teeth: truncated bytes were committed without the check"
+    assert (
+        on_disk == truncated
+    ), "teeth: truncated bytes were committed without the check"
 
 
 # ===========================================================================
@@ -220,7 +222,9 @@ def test_mid_chunk_timeout_retries_and_produces_correct_file(cof, tmp_path):
     result = client.download("/multi.bin", local)
 
     # File committed correctly.
-    assert osp.exists(local), "file must exist after successful download with mid-chunk retry"
+    assert osp.exists(
+        local
+    ), "file must exist after successful download with mid-chunk retry"
     assert not osp.exists(local + ".bora-part"), "no sidecar should remain"
 
     with open(local, "rb") as fh:
@@ -257,5 +261,7 @@ def test_mid_chunk_timeout_teeth(cof, tmp_path):
     with pytest.raises(_BoraConnError):
         client.download("/multi.bin", local)
 
-    assert not osp.exists(local), "no file should be committed when all retries exhausted"
+    assert not osp.exists(
+        local
+    ), "no file should be committed when all retries exhausted"
     assert not osp.exists(local + ".bora-part"), "sidecar must be cleaned up on error"

@@ -36,17 +36,13 @@ class TestTransaction:
         rows = db.execute("SELECT val FROM t").fetchall()
         assert rows == []
 
-    def test_execute_outside_transaction_still_auto_commits(
-        self, db: Database
-    ) -> None:
+    def test_execute_outside_transaction_still_auto_commits(self, db: Database) -> None:
         # Existing behavior preserved.
         db.execute("INSERT INTO t (val) VALUES (?)", "a")
         rows = db.execute("SELECT val FROM t").fetchall()
         assert [r["val"] for r in rows] == ["a"]
 
-    def test_nested_transaction_does_not_double_commit(
-        self, db: Database
-    ) -> None:
+    def test_nested_transaction_does_not_double_commit(self, db: Database) -> None:
         # Re-entrant: inner is a no-op flag-wise; outer commits/rolls back.
         with pytest.raises(RuntimeError):
             with db.transaction():

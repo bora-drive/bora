@@ -5,6 +5,7 @@ new generic names. The transitional backward-compat aliases (DropboxClient,
 Dropbox*Error, dbx_path) were removed in Stage 8.
 """
 
+
 def _load_pyproject():
     try:
         import tomllib
@@ -19,26 +20,31 @@ def _load_pyproject():
 
 def test_server_error_exists():
     from bora.exceptions import ServerError
+
     assert issubclass(ServerError, Exception)
 
 
 def test_connection_error_exists():
     from bora.exceptions import ConnectionError
+
     assert issubclass(ConnectionError, Exception)
 
 
 def test_auth_error_exists():
     from bora.exceptions import AuthError
+
     assert issubclass(AuthError, Exception)
 
 
 def test_no_sync_dir_error_exists():
     from bora.exceptions import NoSyncDirError
+
     assert issubclass(NoSyncDirError, Exception)
 
 
 def test_token_errors_inherit_from_auth_error():
     from bora.exceptions import AuthError, TokenExpiredError, TokenRevokedError
+
     assert issubclass(TokenExpiredError, AuthError)
     assert issubclass(TokenRevokedError, AuthError)
 
@@ -65,38 +71,39 @@ def test_sync_event_has_remote_path_field():
     """SyncEvent should use remote_path instead of dbx_path."""
     from bora.models import SyncEvent
 
-    assert hasattr(SyncEvent, 'remote_path')
-    assert hasattr(SyncEvent, 'remote_path_lower')
-    assert hasattr(SyncEvent, 'remote_path_from')
-    assert hasattr(SyncEvent, 'remote_path_from_lower')
+    assert hasattr(SyncEvent, "remote_path")
+    assert hasattr(SyncEvent, "remote_path_lower")
+    assert hasattr(SyncEvent, "remote_path_from")
+    assert hasattr(SyncEvent, "remote_path_from_lower")
 
 
 def test_index_entry_has_remote_path_field():
     """IndexEntry should use remote_path instead of dbx_path."""
     from bora.models import IndexEntry
 
-    assert hasattr(IndexEntry, 'remote_path_lower')
-    assert hasattr(IndexEntry, 'remote_path_cased')
-    assert hasattr(IndexEntry, 'remote_id')
+    assert hasattr(IndexEntry, "remote_path_lower")
+    assert hasattr(IndexEntry, "remote_path_cased")
+    assert hasattr(IndexEntry, "remote_id")
 
 
 def test_sync_error_entry_has_remote_path_field():
     """SyncErrorEntry should use remote_path instead of dbx_path."""
     from bora.models import SyncErrorEntry
 
-    assert hasattr(SyncErrorEntry, 'remote_path')
-    assert hasattr(SyncErrorEntry, 'remote_path_lower')
-    assert hasattr(SyncErrorEntry, 'remote_path_from')
-    assert hasattr(SyncErrorEntry, 'remote_path_from_lower')
+    assert hasattr(SyncErrorEntry, "remote_path")
+    assert hasattr(SyncErrorEntry, "remote_path_lower")
+    assert hasattr(SyncErrorEntry, "remote_path_from")
+    assert hasattr(SyncErrorEntry, "remote_path_from_lower")
 
 
 def test_core_metadata_has_remote_fields():
     """Core Metadata dataclasses should not reference 'dbx'."""
-    from bora.core import FileMetadata, FolderMetadata, ListFolderResult
-
     # These are dataclasses with path_lower, path_display etc - no dbx prefix.
     # Just verify they still work.
     import datetime
+
+    from bora.core import FileMetadata
+
     fm = FileMetadata(
         name="test.txt",
         path_lower="/test.txt",
@@ -145,12 +152,14 @@ def test_pyproject_description_not_dropbox():
 def test_constants_no_dropbox_app_key():
     """constants should not have a DROPBOX_APP_KEY."""
     from bora import constants
-    assert not hasattr(constants, 'DROPBOX_APP_KEY')
+
+    assert not hasattr(constants, "DROPBOX_APP_KEY")
 
 
 def test_exceptions_docstrings_no_dropbox():
     """Exception docstrings should not reference Dropbox."""
     import bora.exceptions as exc
+
     for name in dir(exc):
         obj = getattr(exc, name)
         if isinstance(obj, type) and issubclass(obj, Exception):
@@ -161,7 +170,8 @@ def test_exceptions_docstrings_no_dropbox():
 def test_package_importable_as_bora():
     """The package should be importable as 'bora'."""
     import bora
-    assert hasattr(bora, '__version__')
+
+    assert hasattr(bora, "__version__")
 
 
 def test_bora_cli_entry_point():
@@ -176,10 +186,12 @@ def test_bora_cli_entry_point():
 def test_bora_constants():
     """APP_NAME should be Bora."""
     from bora.constants import APP_NAME
+
     assert APP_NAME == "Bora"
 
 
 def test_bora_config_dir():
     """Config directory should use 'bora' not 'maestral'."""
     from bora.config.main import CONFIG_DIR_NAME
+
     assert CONFIG_DIR_NAME == "bora"

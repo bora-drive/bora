@@ -60,7 +60,9 @@ def status(m: Bora) -> None:
         sync_errors_table = rich_table("Path", "Error")
 
         for error in sync_errors:
-            sync_errors_table.add_row(error.remote_path, f"{error.title}. {error.message}")
+            sync_errors_table.add_row(
+                error.remote_path, f"{error.title}. {error.message}"
+            )
 
         console.print(sync_errors_table)
         console.print("")

@@ -190,8 +190,12 @@ def _assert_complete_index(
 
     # 2) Every folder present in the index and on disk.
     for path in expected_folders:
-        assert sync.get_index_entry(path.lower()) is not None, f"missing folder row {path}"
-        assert osp.isdir(sync.to_local_path_from_cased(path)), f"missing folder dir {path}"
+        assert (
+            sync.get_index_entry(path.lower()) is not None
+        ), f"missing folder row {path}"
+        assert osp.isdir(
+            sync.to_local_path_from_cased(path)
+        ), f"missing folder dir {path}"
 
     # 3) Every file present in the index, on disk, with bytes matching its md5.
     for path, expected_md5 in expected_files.items():
@@ -253,9 +257,9 @@ def _run_storm(
     total_fires = list_rule["fires"] + media_rule["fires"]
     assert total_fires > 0, "storm never fired — backoff path was not exercised"
     # And the neutralised backoff sleep was invoked at least once per fire.
-    assert sync.client._poll_event.wait.call_count >= total_fires, (
-        "at least one backoff wait() per injected fault"
-    )
+    assert (
+        sync.client._poll_event.wait.call_count >= total_fires
+    ), "at least one backoff wait() per injected fault"
 
 
 def test_s0_storm_small(sync_engine: SyncEngine):
@@ -270,9 +274,7 @@ def test_s1_storm_load(sync_engine: SyncEngine):
     """S1 (slow, N=10k): full initial sync under a rate-limit storm completes
     correctly. Soft guards: hang-guard wall-clock + tracemalloc peak ceiling."""
     fake = FakeDrive()
-    expected_folders, expected_files = build_tree(
-        fake, n_folders=2000, n_files=8000
-    )
+    expected_folders, expected_files = build_tree(fake, n_folders=2000, n_files=8000)
 
     tracemalloc.start()
     start = time.monotonic()
@@ -285,9 +287,9 @@ def test_s1_storm_load(sync_engine: SyncEngine):
     tracemalloc.stop()
 
     # Soft guards: catch hangs/leaks, not performance.
-    assert elapsed < _HANG_GUARD_SECONDS, (
-        f"initial sync took {elapsed:.1f}s (> {_HANG_GUARD_SECONDS}s hang guard)"
-    )
+    assert (
+        elapsed < _HANG_GUARD_SECONDS
+    ), f"initial sync took {elapsed:.1f}s (> {_HANG_GUARD_SECONDS}s hang guard)"
     assert _peak < _MEMORY_CEILING_BYTES, (
         f"peak python allocation {_peak / 1e6:.0f}MB exceeded the "
         f"{_MEMORY_CEILING_BYTES / 1e6:.0f}MB ceiling — possible O(N) leak"
@@ -338,9 +340,9 @@ def _run_crash_resume(
     partial_ids = [e.remote_id for e in sync.iter_index()]
     assert len(partial_ids) == len(set(partial_ids)), "duplicate rows after crash"
     assert sync.index_count() > 0, "some entries must have been applied before crash"
-    assert sync.index_count() < len(expected_folders) + len(expected_files), (
-        "crash must leave a PARTIAL index"
-    )
+    assert sync.index_count() < len(expected_folders) + len(
+        expected_files
+    ), "crash must leave a PARTIAL index"
     # Files applied so far must already be intact on disk. Look up by the
     # cased path (the key-space expected_files uses) so the integrity check
     # cannot silently skip an applied file under a casing mismatch.
@@ -368,8 +370,13 @@ def test_s0_crash_resume_small(sync_engine: SyncEngine, monkeypatch):
     fake = FakeDrive()
     expected_folders, expected_files = build_tree(fake, n_folders=30, n_files=120)
     _run_crash_resume(
-        sync_engine, fake, expected_folders, expected_files, monkeypatch,
-        page_size=50, crash_after_chunks=1,
+        sync_engine,
+        fake,
+        expected_folders,
+        expected_files,
+        monkeypatch,
+        page_size=50,
+        crash_after_chunks=1,
     )
 
 
@@ -379,15 +386,18 @@ def test_s2_crash_resume_load(sync_engine: SyncEngine, monkeypatch):
     idempotent and the final state is complete and uncorrupted. With page_size
     1000 the 10k tree is ~10 pages; crash after 3 leaves a non-final partial."""
     fake = FakeDrive()
-    expected_folders, expected_files = build_tree(
-        fake, n_folders=2000, n_files=8000
-    )
+    expected_folders, expected_files = build_tree(fake, n_folders=2000, n_files=8000)
 
     tracemalloc.start()
     start = time.monotonic()
     _run_crash_resume(
-        sync_engine, fake, expected_folders, expected_files, monkeypatch,
-        page_size=1000, crash_after_chunks=3,
+        sync_engine,
+        fake,
+        expected_folders,
+        expected_files,
+        monkeypatch,
+        page_size=1000,
+        crash_after_chunks=3,
     )
     elapsed = time.monotonic() - start
     # _peak spans the whole run including _assert_complete_index, which md5-reads
@@ -396,9 +406,9 @@ def test_s2_crash_resume_load(sync_engine: SyncEngine, monkeypatch):
     _peak = tracemalloc.get_traced_memory()[1]
     tracemalloc.stop()
 
-    assert elapsed < _HANG_GUARD_SECONDS, (
-        f"crash/resume sync took {elapsed:.1f}s (> {_HANG_GUARD_SECONDS}s hang guard)"
-    )
+    assert (
+        elapsed < _HANG_GUARD_SECONDS
+    ), f"crash/resume sync took {elapsed:.1f}s (> {_HANG_GUARD_SECONDS}s hang guard)"
     assert _peak < _MEMORY_CEILING_BYTES, (
         f"peak python allocation {_peak / 1e6:.0f}MB exceeded the "
         f"{_MEMORY_CEILING_BYTES / 1e6:.0f}MB ceiling — possible O(N) leak"

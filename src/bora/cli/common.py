@@ -94,7 +94,7 @@ def inject_proxy(
 ) -> Callable[[Callable[P, T]], Callable[P, Any]]:
     def decorator(f: Callable[P, T]) -> Callable[P, Any]:
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
-            from ..daemon import CommunicationError, BoraProxy
+            from ..daemon import BoraProxy, CommunicationError
 
             ctx = click.get_current_context()
 

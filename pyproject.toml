@@ -95,6 +95,8 @@ bora = ["resources/*.json", "resources/*.png", "py.typed"]
 
 [tool.flake8]
 ignore = "E203,E501,E704,W503,H306"
+# Tests import mid-file on purpose (after fixture/env setup); allow it there.
+per-file-ignores = "tests/*:E402"
 statistics = "True"
 
 [tool.mypy]

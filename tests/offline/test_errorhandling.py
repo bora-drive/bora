@@ -18,8 +18,8 @@ from bora.errorhandling import (
 )
 from bora.exceptions import (
     BadInputError,
-    ConnectionError,
     BoraApiError,
+    ConnectionError,
     InsufficientPermissionsError,
     InsufficientSpaceError,
     NotFoundError,
@@ -28,8 +28,8 @@ from bora.exceptions import (
     TokenRevokedError,
 )
 
-
 # ---- extract_http_reason --------------------------------------------------
+
 
 def test_extract_reason_reads_drive_sub_reason(make_http_error):
     exc = make_http_error(403, reason="rateLimitExceeded")
@@ -42,6 +42,7 @@ def test_extract_reason_empty_when_absent(make_http_error):
 
 
 # ---- http_error_to_bora mapping table ----------------------------------
+
 
 @pytest.mark.parametrize(
     "status, reason, expected_cls",
@@ -90,6 +91,7 @@ def test_convert_api_errors_preserves_cause(make_http_error):
 
 
 # ---- os_to_bora_error (unchanged behavior, pinned here) ----------------
+
 
 def test_os_error_permission_maps_to_insufficient_permissions():
     exc = PermissionError("denied")

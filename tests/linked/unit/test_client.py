@@ -42,7 +42,6 @@ from bora.exceptions import (
     NotFoundError,
 )
 from bora.utils.path import normalize
-
 from tests.linked.conftest import requires_account, wait_until
 
 resources = os.path.dirname(os.path.dirname(__file__)) + "/resources"
@@ -51,6 +50,7 @@ resources = os.path.dirname(os.path.dirname(__file__)) + "/resources"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _md5(path: str) -> str:
     """Compute MD5 hex digest of a local file (mirrors Drive's md5Checksum)."""
@@ -64,6 +64,7 @@ def _md5(path: str) -> str:
 # ---------------------------------------------------------------------------
 # Upload
 # ---------------------------------------------------------------------------
+
 
 @requires_account
 def test_upload(client: GoogleDriveClient) -> None:
@@ -91,9 +92,7 @@ def test_upload_resumable(client: GoogleDriveClient) -> None:
 
 
 @requires_account
-def test_upload_hash_mismatch(
-    client: GoogleDriveClient, monkeypatch
-) -> None:
+def test_upload_hash_mismatch(client: GoogleDriveClient, monkeypatch) -> None:
     """DataCorruptionError raised when Drive's md5Checksum doesn't match local.
 
     The write path (writes._WriteHelper.upload) computes a local MD5 via the
@@ -118,6 +117,7 @@ def test_upload_hash_mismatch(
 # ---------------------------------------------------------------------------
 # Download
 # ---------------------------------------------------------------------------
+
 
 @requires_account
 def test_download(client: GoogleDriveClient, tmp_path) -> None:
@@ -170,6 +170,7 @@ def test_download_hash_mismatch(
 # get_metadata
 # ---------------------------------------------------------------------------
 
+
 @requires_account
 def test_get_metadata_file(client: GoogleDriveClient) -> None:
     """get_metadata returns FileMetadata after upload."""
@@ -201,6 +202,7 @@ def test_get_metadata_nonexistent_raises(client: GoogleDriveClient) -> None:
 # list_folder
 # ---------------------------------------------------------------------------
 
+
 @requires_account
 def test_list_folder(client: GoogleDriveClient) -> None:
     """list_folder returns uploaded files and sub-folders."""
@@ -218,6 +220,7 @@ def test_list_folder(client: GoogleDriveClient) -> None:
 # Change feed
 # ---------------------------------------------------------------------------
 
+
 @requires_account
 def test_change_feed(client: GoogleDriveClient) -> None:
     """Upload a file then verify it appears in the change feed.
@@ -231,9 +234,7 @@ def test_change_feed(client: GoogleDriveClient) -> None:
 
     def _has_change() -> bool:
         result = client.list_remote_changes(cursor)
-        return any(
-            getattr(e, "id", None) == uploaded.id for e in result.entries
-        )
+        return any(getattr(e, "id", None) == uploaded.id for e in result.entries)
 
     wait_until(_has_change, timeout=60, interval=3)
 
@@ -241,6 +242,7 @@ def test_change_feed(client: GoogleDriveClient) -> None:
 # ---------------------------------------------------------------------------
 # move
 # ---------------------------------------------------------------------------
+
 
 @requires_account
 def test_move(client: GoogleDriveClient) -> None:
@@ -264,6 +266,7 @@ def test_move(client: GoogleDriveClient) -> None:
 # ---------------------------------------------------------------------------
 # remove + restore
 # ---------------------------------------------------------------------------
+
 
 @requires_account
 def test_remove(client: GoogleDriveClient) -> None:
@@ -301,6 +304,7 @@ def test_restore(client: GoogleDriveClient, tmp_path) -> None:
 # make_dir
 # ---------------------------------------------------------------------------
 
+
 @requires_account
 def test_make_dir(client: GoogleDriveClient) -> None:
     """make_dir creates a folder; get_metadata returns FolderMetadata."""
@@ -317,6 +321,7 @@ def test_make_dir(client: GoogleDriveClient) -> None:
 # Batch methods
 # ---------------------------------------------------------------------------
 
+
 @requires_account
 def test_batch_methods(client: GoogleDriveClient) -> None:
     """make_dir_batch creates 20 folders; remove_batch trashes them.
@@ -332,9 +337,9 @@ def test_batch_methods(client: GoogleDriveClient) -> None:
 
     assert len(res_create) == 20
     for i, item in enumerate(res_create):
-        assert isinstance(item, FolderMetadata), (
-            f"slot {i} expected FolderMetadata, got {type(item)}: {item}"
-        )
+        assert isinstance(
+            item, FolderMetadata
+        ), f"slot {i} expected FolderMetadata, got {type(item)}: {item}"
         assert item.path_lower == normalize(folders[i])
 
     # Remove in batch (20 valid + 1 nonexistent = 21 entries).
@@ -343,9 +348,9 @@ def test_batch_methods(client: GoogleDriveClient) -> None:
 
     assert len(res_remove) == 21
     for i in range(20):
-        assert isinstance(res_remove[i], FolderMetadata), (
-            f"remove slot {i} expected FolderMetadata, got {type(res_remove[i])}"
-        )
+        assert isinstance(
+            res_remove[i], FolderMetadata
+        ), f"remove slot {i} expected FolderMetadata, got {type(res_remove[i])}"
         assert res_remove[i].path_lower == normalize(folders[i])
 
     assert isinstance(res_remove[20], NotFoundError)

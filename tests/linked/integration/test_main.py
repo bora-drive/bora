@@ -43,9 +43,7 @@ from bora.exceptions import (
 )
 from bora.main import Bora
 from bora.utils.integration import get_inotify_limits
-
 from tests.linked.conftest import requires_account, wait_until
-
 
 # ---------------------------------------------------------------------------
 # Helpers

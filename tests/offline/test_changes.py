@@ -139,34 +139,42 @@ def test_classify_removed_true_is_delete():
 
 def test_classify_trashed_is_delete():
     cache = _cache()
-    change = {"removed": False, "fileId": "F1",
-              "file": {"id": "F1", "name": "a", "parents": ["ROOT"],
-                       "trashed": True}}
+    change = {
+        "removed": False,
+        "fileId": "F1",
+        "file": {"id": "F1", "name": "a", "parents": ["ROOT"], "trashed": True},
+    }
     assert classify(change, cache) is ChangeDecision.DELETE
 
 
 def test_classify_move_out_is_delete():
     cache = _cache()
     cache.set("/a.pdf", "F1", "ROOT", "a.pdf", False)
-    change = {"removed": False, "fileId": "F1",
-              "file": {"id": "F1", "name": "a.pdf",
-                       "parents": ["OUTSIDE"], "trashed": False}}
+    change = {
+        "removed": False,
+        "fileId": "F1",
+        "file": {"id": "F1", "name": "a.pdf", "parents": ["OUTSIDE"], "trashed": False},
+    }
     assert classify(change, cache) is ChangeDecision.DELETE
 
 
 def test_classify_never_in_scope_is_out_of_scope():
     cache = _cache()
-    change = {"removed": False, "fileId": "F9",
-              "file": {"id": "F9", "name": "x", "parents": ["OUTSIDE"],
-                       "trashed": False}}
+    change = {
+        "removed": False,
+        "fileId": "F9",
+        "file": {"id": "F9", "name": "x", "parents": ["OUTSIDE"], "trashed": False},
+    }
     assert classify(change, cache) is ChangeDecision.OUT_OF_SCOPE
 
 
 def test_classify_in_scope_is_apply():
     cache = _cache()
-    change = {"removed": False, "fileId": "F1",
-              "file": {"id": "F1", "name": "a.pdf", "parents": ["ROOT"],
-                       "trashed": False}}
+    change = {
+        "removed": False,
+        "fileId": "F1",
+        "file": {"id": "F1", "name": "a.pdf", "parents": ["ROOT"], "trashed": False},
+    }
     assert classify(change, cache) is ChangeDecision.APPLY
 
 
@@ -178,20 +186,34 @@ def test_classify_missing_file_body_is_unknown():
 
 def test_classify_shared_with_me_is_apply_without_parent():
     cache = _cache()  # root_id="ROOT"
-    change = {"removed": False, "fileId": "SR", "file": {
-        "id": "SR", "name": "Team", "parents": ["OTHER"],
-        "mimeType": "application/vnd.google-apps.folder",
-        "trashed": False, "sharedWithMe": True}}
+    change = {
+        "removed": False,
+        "fileId": "SR",
+        "file": {
+            "id": "SR",
+            "name": "Team",
+            "parents": ["OTHER"],
+            "mimeType": "application/vnd.google-apps.folder",
+            "trashed": False,
+            "sharedWithMe": True,
+        },
+    }
     assert classify(change, cache) is ChangeDecision.APPLY
 
 
 def test_emit_apply_attaches_shared_root_to_sentinel():
     cache = _cache()
     out: list = []
-    change = {"file": {
-        "id": "SR", "name": "Team", "parents": ["OTHER"],
-        "mimeType": "application/vnd.google-apps.folder",
-        "trashed": False, "sharedWithMe": True}}
+    change = {
+        "file": {
+            "id": "SR",
+            "name": "Team",
+            "parents": ["OTHER"],
+            "mimeType": "application/vnd.google-apps.folder",
+            "trashed": False,
+            "sharedWithMe": True,
+        }
+    }
     assert _emit_apply(change, cache, out) is True
     assert cache.id_to_path("SR") == "/Shared with me/Team"
 
@@ -201,11 +223,16 @@ def test_shortcut_emits_relative_symlink_metadata():
     cache.set("/Docs", "D", "ROOT", "Docs", True)
     cache.set("/Docs/report.pdf", "T", "D", "report.pdf", False)
     out: list = []
-    change = {"file": {
-        "id": "SL", "name": "link", "parents": ["ROOT"],
-        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
-        "shortcutDetails": {"targetId": "T",
-                            "targetMimeType": "application/pdf"}}}
+    change = {
+        "file": {
+            "id": "SL",
+            "name": "link",
+            "parents": ["ROOT"],
+            "mimeType": "application/vnd.google-apps.shortcut",
+            "trashed": False,
+            "shortcutDetails": {"targetId": "T", "targetMimeType": "application/pdf"},
+        }
+    }
     assert _emit_apply(change, cache, out) is True
     md = out[-1]
     assert md.symlink_target == "Docs/report.pdf"  # relative to "/" dir
@@ -214,10 +241,16 @@ def test_shortcut_emits_relative_symlink_metadata():
 def test_shortcut_with_unresolved_target_is_not_emitted():
     cache = _cache()
     out: list = []
-    change = {"file": {
-        "id": "SL", "name": "link", "parents": ["ROOT"],
-        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
-        "shortcutDetails": {"targetId": "MISSING"}}}
+    change = {
+        "file": {
+            "id": "SL",
+            "name": "link",
+            "parents": ["ROOT"],
+            "mimeType": "application/vnd.google-apps.shortcut",
+            "trashed": False,
+            "shortcutDetails": {"targetId": "MISSING"},
+        }
+    }
     # Returns False -> deferred by the fixpoint; nothing emitted this pass.
     assert _emit_apply(change, cache, out) is False
     assert out == []
@@ -227,13 +260,19 @@ def test_shortcut_to_shortcut_chain_is_refused():
     cache = _cache()
     cache.set("/other-link", "OTHER", "ROOT", "other-link", False)
     out: list = []
-    change = {"file": {
-        "id": "SL", "name": "link", "parents": ["ROOT"],
-        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
-        "shortcutDetails": {
-            "targetId": "OTHER",
-            "targetMimeType": "application/vnd.google-apps.shortcut",
-        }}}
+    change = {
+        "file": {
+            "id": "SL",
+            "name": "link",
+            "parents": ["ROOT"],
+            "mimeType": "application/vnd.google-apps.shortcut",
+            "trashed": False,
+            "shortcutDetails": {
+                "targetId": "OTHER",
+                "targetMimeType": "application/vnd.google-apps.shortcut",
+            },
+        }
+    }
     # Consumed (not retried) but not emitted, and not cached as a symlink.
     assert _emit_apply(change, cache, out) is True
     assert out == []
@@ -248,11 +287,16 @@ def test_shortcut_cross_subtree_relative_target():
     cache.set("/Docs", "D", "ROOT", "Docs", True)
     cache.set("/Docs/report.pdf", "T", "D", "report.pdf", False)
     out: list = []
-    change = {"file": {
-        "id": "SL", "name": "link", "parents": [SHARED_WITH_ME_ID],
-        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
-        "shortcutDetails": {"targetId": "T",
-                            "targetMimeType": "application/pdf"}}}
+    change = {
+        "file": {
+            "id": "SL",
+            "name": "link",
+            "parents": [SHARED_WITH_ME_ID],
+            "mimeType": "application/vnd.google-apps.shortcut",
+            "trashed": False,
+            "shortcutDetails": {"targetId": "T", "targetMimeType": "application/pdf"},
+        }
+    }
     assert _emit_apply(change, cache, out) is True
     md = out[-1]
     assert md.path_display == "/Shared with me/link"
@@ -264,19 +308,18 @@ def test_unshare_removed_true_deletes_from_cache():
     cache.set("/Shared with me/Team", "SR", SHARED_WITH_ME_ID, "Team", True)
     out: list = []
     from bora.changes import _emit_delete
+
     _emit_delete({"removed": True, "fileId": "SR"}, cache, out, None)
     assert cache.id_to_path("SR") is None
-    assert any(getattr(e, "path_display", None) == "/Shared with me/Team"
-               for e in out)
+    assert any(getattr(e, "path_display", None) == "/Shared with me/Team" for e in out)
 
 
 # ==== iter_remote_changes — FakeDrive-driven tests ========================
 
-import sqlite3
 from unittest.mock import patch
 
 from bora.changes import iter_remote_changes
-from bora.core import DeletedMetadata, FileMetadata, FolderMetadata
+from bora.core import DeletedMetadata
 from tests.fake_drive import ROOT_ID, FakeDrive
 
 
@@ -299,6 +342,7 @@ def _drain(
     resolve_deleted_path=None,
 ) -> list:
     """Run iter_remote_changes to exhaustion; return all applied entries."""
+
     def factory():
         return fake.service()
 
@@ -359,7 +403,7 @@ def test_iter_changes_intra_batch_dependency():
     cache = _fake_cache()
     start = _start(fake)
     # Folder change recorded first, then file — parent-before-child.
-    did = fake.add_folder("/Docs")
+    fake.add_folder("/Docs")
     fid = fake.add_file("/Docs/a.pdf", content=b"x")
     entries, pages = _drain(fake, cache, start)
     assert cache.path_to_id("/Docs/a.pdf") == fid
@@ -425,8 +469,8 @@ def test_iter_changes_move_into_new_folder_is_not_a_delete():
     log = fake._change_log
     did_pos = next(i for i, (_, id_) in enumerate(log) if id_ == did)
     # Find the last occurrence of fid (the move event, not the original create).
-    fid_pos = len(log) - 1 - next(
-        i for i, (_, id_) in enumerate(reversed(log)) if id_ == fid
+    fid_pos = (
+        len(log) - 1 - next(i for i, (_, id_) in enumerate(reversed(log)) if id_ == fid)
     )
     did_seq, _ = log[did_pos]
     fid_seq, _ = log[fid_pos]
@@ -538,12 +582,14 @@ def test_iter_changes_paginates():
     import bora.changes as _changes_mod
 
     with patch.object(_changes_mod, "_CHANGE_PAGE_SIZE", 1):
-        pages = list(iter_remote_changes(
-            lambda: fake.service(),
-            lambda fn: fn(),
-            cache,
-            start,
-        ))
+        pages = list(
+            iter_remote_changes(
+                lambda: fake.service(),
+                lambda fn: fn(),
+                cache,
+                start,
+            )
+        )
 
     assert len(pages) == 1, "all Drive pages are drained into a single result"
     assert pages[0].has_more is False
@@ -590,8 +636,11 @@ def test_fold_conflicting_change_is_not_emitted():
     change = {
         "fileId": "id-B",
         "file": {
-            "id": "id-B", "name": "report.pdf", "parents": ["ROOT"],
-            "mimeType": "text/plain", "trashed": False,
+            "id": "id-B",
+            "name": "report.pdf",
+            "parents": ["ROOT"],
+            "mimeType": "text/plain",
+            "trashed": False,
         },
     }
     _emit_apply(change, cache, out)
@@ -613,14 +662,17 @@ def test_move_to_conflicting_path_is_not_emitted():
     change = {
         "fileId": "id-B",
         "file": {
-            "id": "id-B", "name": "report.pdf", "parents": ["ROOT"],
-            "mimeType": "text/plain", "trashed": False,
+            "id": "id-B",
+            "name": "report.pdf",
+            "parents": ["ROOT"],
+            "mimeType": "text/plain",
+            "trashed": False,
         },
     }
     _emit_apply(change, cache, out)
 
     assert out == [], "rejected move leaked into the feed output"
-    assert cache.path_to_id("/other.txt") == "id-B"   # original path kept
+    assert cache.path_to_id("/other.txt") == "id-B"  # original path kept
     assert cache.path_to_id("/report.pdf") == "id-A"  # original owner untouched
 
 
@@ -644,15 +696,21 @@ def test_create_at_path_vacated_by_move_out_same_batch(caplog, create_first):
     create_b = {
         "fileId": "id-b",
         "file": {
-            "id": "id-b", "name": "report.txt", "parents": ["ROOT"],
-            "mimeType": "text/plain", "trashed": False,
+            "id": "id-b",
+            "name": "report.txt",
+            "parents": ["ROOT"],
+            "mimeType": "text/plain",
+            "trashed": False,
         },
     }
     move_out_a = {
         "fileId": "id-a",
         "file": {
-            "id": "id-a", "name": "report.txt", "parents": ["OUTSIDE"],
-            "mimeType": "text/plain", "trashed": False,
+            "id": "id-a",
+            "name": "report.txt",
+            "parents": ["OUTSIDE"],
+            "mimeType": "text/plain",
+            "trashed": False,
         },
     }
     changes = [create_b, move_out_a] if create_first else [move_out_a, create_b]
@@ -685,7 +743,8 @@ def test_create_at_path_vacated_by_move_out_same_batch(caplog, create_first):
     # B was deferred, not dropped — the change-feed conflict warning
     # must not fire (path_cache's own internal warning is out of scope).
     assert not [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.name == "bora.changes" and r.levelno >= logging.WARNING
     ]
 
@@ -703,7 +762,9 @@ def test_iter_changes_shortcut_unresolved_target_warns_once(caplog):
     change = {
         "fileId": "SL",
         "file": {
-            "id": "SL", "name": "link", "parents": ["ROOT"],
+            "id": "SL",
+            "name": "link",
+            "parents": ["ROOT"],
             "mimeType": "application/vnd.google-apps.shortcut",
             "trashed": False,
             "shortcutDetails": {"targetId": "MISSING"},
@@ -729,7 +790,8 @@ def test_iter_changes_shortcut_unresolved_target_warns_once(caplog):
     entries = [e for r in results for e in r.entries]
     assert entries == [], "unresolved-target shortcut must not be emitted"
     warnings = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.name == "bora.changes" and r.levelno >= logging.WARNING
     ]
     assert len(warnings) == 1, warnings
@@ -745,10 +807,16 @@ def test_emit_shortcut_unresolved_target_silent_while_deferring(caplog):
     every iteration."""
     cache = _cache()
     out: list = []
-    change = {"file": {
-        "id": "SL", "name": "link", "parents": ["ROOT"],
-        "mimeType": "application/vnd.google-apps.shortcut", "trashed": False,
-        "shortcutDetails": {"targetId": "MISSING"}}}
+    change = {
+        "file": {
+            "id": "SL",
+            "name": "link",
+            "parents": ["ROOT"],
+            "mimeType": "application/vnd.google-apps.shortcut",
+            "trashed": False,
+            "shortcutDetails": {"targetId": "MISSING"},
+        }
+    }
 
     with caplog.at_level(logging.WARNING, logger="bora.changes"):
         result = _emit_shortcut(change, cache, out, warn_on_conflict=False)
@@ -756,7 +824,8 @@ def test_emit_shortcut_unresolved_target_silent_while_deferring(caplog):
     assert result is False
     assert out == []
     assert not [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.name == "bora.changes" and r.levelno >= logging.WARNING
     ]
 
@@ -774,6 +843,7 @@ def test_child_before_parent_across_pages_is_not_dropped():
     in the cache when the fixpoint runs.
     """
     import sqlite3
+
     from bora.database.core import Database
     from bora.path_cache import PathIDCache
 
@@ -783,15 +853,21 @@ def test_child_before_parent_across_pages_is_not_dropped():
     child = {
         "fileId": "id-c",
         "file": {
-            "id": "id-c", "name": "kid.txt", "parents": ["id-p"],
-            "mimeType": "text/plain", "trashed": False,
+            "id": "id-c",
+            "name": "kid.txt",
+            "parents": ["id-p"],
+            "mimeType": "text/plain",
+            "trashed": False,
         },
     }
     parent = {
         "fileId": "id-p",
         "file": {
-            "id": "id-p", "name": "newdir", "parents": ["root"],
-            "mimeType": "application/vnd.google-apps.folder", "trashed": False,
+            "id": "id-p",
+            "name": "newdir",
+            "parents": ["root"],
+            "mimeType": "application/vnd.google-apps.folder",
+            "trashed": False,
         },
     }
     pages = [

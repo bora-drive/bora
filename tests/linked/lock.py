@@ -62,11 +62,7 @@ class DriveTestLock:
 
     def _create_lock(self) -> str:
         svc = self._client._get_service()
-        resp = (
-            svc.files()
-            .create(body={"name": self._name}, fields="id")
-            .execute()
-        )
+        resp = svc.files().create(body={"name": self._name}, fields="id").execute()
         return resp["id"]
 
     def _delete(self, file_id: str) -> None:

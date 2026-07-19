@@ -7,6 +7,7 @@ from bora.core import Account, FullAccount
 
 def test_file_metadata_has_single_modified_field():
     from datetime import datetime, timezone
+
     from bora.core import FileMetadata
 
     md = FileMetadata(

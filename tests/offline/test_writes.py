@@ -66,7 +66,6 @@ def fake_service() -> MagicMock:
     create paths after Task 6) work without any extra setup, and the Task 7
     conflict probe sees no existing folder by default.
     """
-    global _fake_id_counter
     svc = MagicMock(name="drive-service")
 
     def _gen_ids(count=1, **_):
@@ -86,6 +85,7 @@ def fake_service() -> MagicMock:
 
 
 # ==== make_dir ============================================================
+
 
 def test_make_dir_creates_folder_and_updates_cache(client, cache):
     svc = fake_service()
@@ -119,7 +119,8 @@ def test_make_dir_decodes_name_segment(client, cache):
     # must decode before sending to Drive.
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-x", "name": "a/b",
+        "id": "F-x",
+        "name": "a/b",
         "mimeType": "application/vnd.google-apps.folder",
     }
     client._get_service = Mock(return_value=svc)
@@ -140,7 +141,8 @@ def test_make_dir_autorename_single_collision(client, cache):
     cache.set("/foo", "F-existing", parent_id="ROOT", name="foo", is_folder=True)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "foo (1)",
+        "id": "F-new",
+        "name": "foo (1)",
         "mimeType": "application/vnd.google-apps.folder",
     }
     client._get_service = Mock(return_value=svc)
@@ -162,7 +164,8 @@ def test_make_dir_autorename_multi_collision(client, cache):
     cache.set("/foo %282%29", "F3", parent_id="ROOT", name="foo (2)", is_folder=True)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "foo (3)",
+        "id": "F-new",
+        "name": "foo (3)",
         "mimeType": "application/vnd.google-apps.folder",
     }
     client._get_service = Mock(return_value=svc)
@@ -183,7 +186,8 @@ def test_make_dir_collision_without_autorename_creates_duplicate_name(client, ca
     cache.set("/foo", "F1", parent_id="ROOT", name="foo", is_folder=True)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "foo",
+        "id": "F-new",
+        "name": "foo",
         "mimeType": "application/vnd.google-apps.folder",
     }
     client._get_service = Mock(return_value=svc)
@@ -205,7 +209,9 @@ def test_make_dir_autorename_bounded_at_999(client, cache):
     cache.set("/foo", "F0", parent_id="ROOT", name="foo", is_folder=True)
     for n in range(1, 1000):
         encoded_path = f"/foo %28{n}%29"
-        cache.set(encoded_path, f"F{n}", parent_id="ROOT", name=f"foo ({n})", is_folder=True)
+        cache.set(
+            encoded_path, f"F{n}", parent_id="ROOT", name=f"foo ({n})", is_folder=True
+        )
     client._get_service = Mock(return_value=fake_service())
 
     with pytest.raises(BadInputError):
@@ -215,7 +221,8 @@ def test_make_dir_autorename_bounded_at_999(client, cache):
 def test_make_dir_counts_request(client, cache):
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "foo",
+        "id": "F-new",
+        "name": "foo",
         "mimeType": "application/vnd.google-apps.folder",
     }
     client._get_service = Mock(return_value=svc)
@@ -234,12 +241,15 @@ def test_make_dir_counts_request(client, cache):
 
 # ==== remove ==============================================================
 
+
 def test_remove_trashes_by_default(client, cache):
     cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "foo.txt",
-        "mimeType": "application/pdf", "trashed": True,
+        "id": "F1",
+        "name": "foo.txt",
+        "mimeType": "application/pdf",
+        "trashed": True,
     }
     client._get_service = Mock(return_value=svc)
 
@@ -266,11 +276,14 @@ def test_remove_parent_rev_match_succeeds(client, cache):
     cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
-        "headRevisionId": "REV-X", "mimeType": "application/pdf",
+        "headRevisionId": "REV-X",
+        "mimeType": "application/pdf",
     }
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "foo.txt",
-        "mimeType": "application/pdf", "trashed": True,
+        "id": "F1",
+        "name": "foo.txt",
+        "mimeType": "application/pdf",
+        "trashed": True,
     }
     client._get_service = Mock(return_value=svc)
 
@@ -283,7 +296,8 @@ def test_remove_parent_rev_mismatch_raises_data_changed(client, cache):
     cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
-        "headRevisionId": "REV-NEW", "mimeType": "application/pdf",
+        "headRevisionId": "REV-NEW",
+        "mimeType": "application/pdf",
     }
     client._get_service = Mock(return_value=svc)
 
@@ -319,11 +333,14 @@ def test_hard_delete_primitive(client, cache):
 
 # ==== move ================================================================
 
+
 def test_move_renames_in_place(client, cache):
     cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "bar.txt", "mimeType": "application/pdf",
+        "id": "F1",
+        "name": "bar.txt",
+        "mimeType": "application/pdf",
     }
     client._get_service = Mock(return_value=svc)
 
@@ -347,7 +364,9 @@ def test_move_changes_parent(client, cache):
     cache.set("/src/foo.txt", "F1", parent_id="DSRC", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "foo.txt", "mimeType": "application/pdf",
+        "id": "F1",
+        "name": "foo.txt",
+        "mimeType": "application/pdf",
     }
     client._get_service = Mock(return_value=svc)
 
@@ -367,7 +386,9 @@ def test_move_combined_rename_and_reparent(client, cache):
     cache.set("/src/foo.txt", "F1", parent_id="DSRC", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "bar.txt", "mimeType": "application/pdf",
+        "id": "F1",
+        "name": "bar.txt",
+        "mimeType": "application/pdf",
     }
     client._get_service = Mock(return_value=svc)
 
@@ -396,10 +417,14 @@ def test_move_autorename_on_dest_collision(client, cache):
     cache.set("/src", "DSRC", parent_id="ROOT", name="src", is_folder=True)
     cache.set("/dst", "DDST", parent_id="ROOT", name="dst", is_folder=True)
     cache.set("/src/foo.txt", "F1", parent_id="DSRC", name="foo.txt", is_folder=False)
-    cache.set("/dst/foo.txt", "Fexisting", parent_id="DDST", name="foo.txt", is_folder=False)
+    cache.set(
+        "/dst/foo.txt", "Fexisting", parent_id="DDST", name="foo.txt", is_folder=False
+    )
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "foo (1).txt", "mimeType": "application/pdf",
+        "id": "F1",
+        "name": "foo (1).txt",
+        "mimeType": "application/pdf",
     }
     client._get_service = Mock(return_value=svc)
 
@@ -417,7 +442,9 @@ def test_move_decodes_new_name_segment(client, cache):
     cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "a/b", "mimeType": "application/pdf",
+        "id": "F1",
+        "name": "a/b",
+        "mimeType": "application/pdf",
     }
     client._get_service = Mock(return_value=svc)
 
@@ -447,7 +474,8 @@ def test_upload_add_creates_new_file(client, cache):
     md5 = _md5_hex(data)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "hello.txt",
+        "id": "F-new",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         "md5Checksum": md5,
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -471,8 +499,9 @@ def test_upload_add_creates_new_file(client, cache):
 
 
 def test_upload_add_existing_without_autorename_raises_file_conflict(client, cache):
-    cache.set("/hello.txt", "F-existing",
-              parent_id="ROOT", name="hello.txt", is_folder=False)
+    cache.set(
+        "/hello.txt", "F-existing", parent_id="ROOT", name="hello.txt", is_folder=False
+    )
     local = _write_tempfile(b"x")
     client._get_service = Mock(return_value=fake_service())
     from bora.core import WriteMode
@@ -484,13 +513,15 @@ def test_upload_add_existing_without_autorename_raises_file_conflict(client, cac
 
 
 def test_upload_add_existing_with_autorename_picks_unique_name(client, cache):
-    cache.set("/hello.txt", "F-existing",
-              parent_id="ROOT", name="hello.txt", is_folder=False)
+    cache.set(
+        "/hello.txt", "F-existing", parent_id="ROOT", name="hello.txt", is_folder=False
+    )
     data = b"x"
     local = _write_tempfile(data)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "hello (1).txt",
+        "id": "F-new",
+        "name": "hello (1).txt",
         "mimeType": "text/plain",
         "md5Checksum": _md5_hex(data),
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -500,7 +531,9 @@ def test_upload_add_existing_with_autorename_picks_unique_name(client, cache):
     client._get_service = Mock(return_value=svc)
     from bora.core import WriteMode
 
-    client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add, autorename=True)
+    client._writes.upload(
+        local, "/hello.txt", write_mode=WriteMode.Add, autorename=True
+    )
 
     body = svc.files.return_value.create.call_args.kwargs["body"]
     # Drive gets decoded name.
@@ -511,13 +544,13 @@ def test_upload_add_existing_with_autorename_picks_unique_name(client, cache):
 
 
 def test_upload_update_existing(client, cache):
-    cache.set("/hello.txt", "F1",
-              parent_id="ROOT", name="hello.txt", is_folder=False)
+    cache.set("/hello.txt", "F1", parent_id="ROOT", name="hello.txt", is_folder=False)
     data = b"new"
     local = _write_tempfile(data)
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "hello.txt",
+        "id": "F1",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         "md5Checksum": _md5_hex(data),
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -551,7 +584,8 @@ def test_upload_overwrite_creates_when_missing(client, cache):
     local = _write_tempfile(data)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "hello.txt",
+        "id": "F-new",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         "md5Checksum": _md5_hex(data),
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -568,13 +602,13 @@ def test_upload_overwrite_creates_when_missing(client, cache):
 
 
 def test_upload_overwrite_updates_when_existing(client, cache):
-    cache.set("/hello.txt", "F1",
-              parent_id="ROOT", name="hello.txt", is_folder=False)
+    cache.set("/hello.txt", "F1", parent_id="ROOT", name="hello.txt", is_folder=False)
     data = b"x"
     local = _write_tempfile(data)
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "hello.txt",
+        "id": "F1",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         "md5Checksum": _md5_hex(data),
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -595,7 +629,8 @@ def test_upload_md5_mismatch_raises_data_corruption(client, cache):
     local = _write_tempfile(data)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "hello.txt",
+        "id": "F-new",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         "md5Checksum": "0" * 32,  # deliberate mismatch
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -616,7 +651,8 @@ def test_upload_missing_md5_warns_and_succeeds(client, cache, caplog):
     local = _write_tempfile(data)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "hello.txt",
+        "id": "F-new",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         # md5Checksum deliberately omitted
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -624,21 +660,19 @@ def test_upload_missing_md5_warns_and_succeeds(client, cache, caplog):
         "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
-    from bora.core import WriteMode
     import logging as _logging
 
+    from bora.core import WriteMode
+
     with caplog.at_level(_logging.WARNING, logger="bora.writes"):
-        result = client._writes.upload(
-            local, "/hello.txt", write_mode=WriteMode.Add
-        )
+        result = client._writes.upload(local, "/hello.txt", write_mode=WriteMode.Add)
     assert result.id == "F-new"
     assert any("md5" in r.message.lower() for r in caplog.records)
     _os.unlink(local)
 
 
 def test_upload_update_rev_mismatch_raises_data_changed(client, cache):
-    cache.set("/hello.txt", "F1",
-              parent_id="ROOT", name="hello.txt", is_folder=False)
+    cache.set("/hello.txt", "F1", parent_id="ROOT", name="hello.txt", is_folder=False)
     local = _write_tempfile(b"x")
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
@@ -649,8 +683,10 @@ def test_upload_update_rev_mismatch_raises_data_changed(client, cache):
 
     with pytest.raises(DataChangedError):
         client._writes.upload(
-            local, "/hello.txt",
-            write_mode=WriteMode.Update, update_rev="rev-old",
+            local,
+            "/hello.txt",
+            write_mode=WriteMode.Update,
+            update_rev="rev-old",
         )
     # Upload was never attempted.
     svc.files.return_value.update.assert_not_called()
@@ -662,7 +698,8 @@ def test_upload_decodes_name_segment(client, cache):
     local = _write_tempfile(data)
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "a/b",
+        "id": "F-new",
+        "name": "a/b",
         "mimeType": "text/plain",
         "md5Checksum": _md5_hex(data),
         "modifiedTime": "2026-05-30T12:00:00.000Z",
@@ -682,6 +719,7 @@ def test_upload_decodes_name_segment(client, cache):
 
 # ==== upload — resumable (>5MB) ===========================================
 
+
 def _big_tempfile(size_bytes: int) -> str:
     """Sparse-ish big file for size-threshold tests. Content is the byte 'a'."""
     fd, path = tempfile.mkstemp()
@@ -697,11 +735,13 @@ def test_upload_simple_at_threshold(client, cache):
     md5 = hashlib.md5(b"a" * size).hexdigest()
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "Fa", "name": "big.bin",
+        "id": "Fa",
+        "name": "big.bin",
         "mimeType": "application/octet-stream",
         "md5Checksum": md5,
         "modifiedTime": "2026-05-30T12:00:00.000Z",
-        "size": str(size), "headRevisionId": "rev1",
+        "size": str(size),
+        "headRevisionId": "rev1",
     }
     client._get_service = Mock(return_value=svc)
     from bora.core import WriteMode
@@ -726,25 +766,30 @@ def test_upload_resumable_above_threshold(client, cache):
     progress_status.total_size = size
 
     final_resp = {
-        "id": "Fa", "name": "big.bin",
+        "id": "Fa",
+        "name": "big.bin",
         "mimeType": "application/octet-stream",
         "md5Checksum": md5,
         "modifiedTime": "2026-05-30T12:00:00.000Z",
-        "size": str(size), "headRevisionId": "rev1",
+        "size": str(size),
+        "headRevisionId": "rev1",
     }
 
     request = Mock()
-    request.next_chunk = Mock(side_effect=[
-        (progress_status, None),
-        (progress_status, None),
-        (progress_status, final_resp),
-    ])
+    request.next_chunk = Mock(
+        side_effect=[
+            (progress_status, None),
+            (progress_status, None),
+            (progress_status, final_resp),
+        ]
+    )
 
     svc = fake_service()
     svc.files.return_value.create.return_value = request
     client._get_service = Mock(return_value=svc)
 
     from bora.core import WriteMode
+
     with patch("bora.writes.MediaFileUpload") as mfu:
         mfu.return_value = Mock()
         client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
@@ -761,9 +806,12 @@ def test_upload_resumable_storage_quota_exceeded(client, cache, make_http_error)
     local = _big_tempfile(size)
 
     request = Mock()
-    request.next_chunk = Mock(side_effect=make_http_error(
-        403, reason="storageQuotaExceeded",
-    ))
+    request.next_chunk = Mock(
+        side_effect=make_http_error(
+            403,
+            reason="storageQuotaExceeded",
+        )
+    )
     svc = fake_service()
     svc.files.return_value.create.return_value = request
     client._get_service = Mock(return_value=svc)
@@ -788,29 +836,39 @@ def test_upload_resumable_progress_reported(client, cache):
     local = _big_tempfile(size)
     md5 = hashlib.md5(b"a" * size).hexdigest()
     final_resp = {
-        "id": "Fa", "name": "big.bin",
+        "id": "Fa",
+        "name": "big.bin",
         "mimeType": "application/octet-stream",
         "md5Checksum": md5,
         "modifiedTime": "2026-05-30T12:00:00.000Z",
-        "size": str(size), "headRevisionId": "rev1",
+        "size": str(size),
+        "headRevisionId": "rev1",
     }
-    s1 = Mock(); s1.resumable_progress = 4 * 1024 * 1024
-    s2 = Mock(); s2.resumable_progress = size
+    s1 = Mock()
+    s1.resumable_progress = 4 * 1024 * 1024
+    s2 = Mock()
+    s2.resumable_progress = size
     request = Mock()
-    request.next_chunk = Mock(side_effect=[
-        (s1, None), (s2, final_resp),
-    ])
+    request.next_chunk = Mock(
+        side_effect=[
+            (s1, None),
+            (s2, final_resp),
+        ]
+    )
     svc = fake_service()
     svc.files.return_value.create.return_value = request
     client._get_service = Mock(return_value=svc)
 
     sync_event = Mock()
     from bora.core import WriteMode
+
     with patch("bora.writes.MediaFileUpload") as mfu:
         mfu.return_value = Mock()
         client._writes.upload(
-            local, "/big.bin",
-            write_mode=WriteMode.Add, sync_event=sync_event,
+            local,
+            "/big.bin",
+            write_mode=WriteMode.Add,
+            sync_event=sync_event,
         )
 
     # Progress is reported via sync_event.completed = status.resumable_progress,
@@ -822,7 +880,8 @@ def test_upload_resumable_progress_reported(client, cache):
 def test_upload_resumable_shutdown_aborts(client, cache):
     size = 5 * 1024 * 1024 + 1
     local = _big_tempfile(size)
-    s = Mock(); s.resumable_progress = 1 * 1024 * 1024
+    s = Mock()
+    s.resumable_progress = 1 * 1024 * 1024
     request = Mock()
     request.next_chunk = Mock(return_value=(s, None))
     svc = fake_service()
@@ -844,10 +903,14 @@ def test_upload_resumable_shutdown_aborts(client, cache):
 
 # ==== create_shortcut / retarget_shortcut (Task 17, M3) ===================
 
+
 def test_create_shortcut_sends_shortcut_body_and_updates_cache(client, cache):
     cache.set("/Docs", "F-docs", parent_id="ROOT", name="Docs", is_folder=True)
     cache.set(
-        "/Docs/report.pdf", "F-target", parent_id="F-docs", name="report.pdf",
+        "/Docs/report.pdf",
+        "F-target",
+        parent_id="F-docs",
+        name="report.pdf",
         is_folder=False,
     )
     svc = fake_service()
@@ -884,10 +947,17 @@ def test_create_shortcut_missing_target_raises_not_found(client, cache):
 
 def test_retarget_shortcut_sends_update_body(client, cache):
     cache.set(
-        "/Docs/link", "F-shortcut", parent_id="F-docs", name="link", is_folder=False,
+        "/Docs/link",
+        "F-shortcut",
+        parent_id="F-docs",
+        name="link",
+        is_folder=False,
     )
     cache.set(
-        "/Docs/other.pdf", "F-other", parent_id="F-docs", name="other.pdf",
+        "/Docs/other.pdf",
+        "F-other",
+        parent_id="F-docs",
+        name="other.pdf",
         is_folder=False,
     )
     svc = fake_service()
@@ -911,7 +981,10 @@ def test_retarget_shortcut_sends_update_body(client, cache):
 
 def test_retarget_shortcut_missing_shortcut_raises_not_found(client, cache):
     cache.set(
-        "/Docs/other.pdf", "F-other", parent_id="ROOT", name="other.pdf",
+        "/Docs/other.pdf",
+        "F-other",
+        parent_id="ROOT",
+        name="other.pdf",
         is_folder=False,
     )
     client._get_service = Mock(return_value=fake_service())
@@ -921,9 +994,11 @@ def test_retarget_shortcut_missing_shortcut_raises_not_found(client, cache):
 
 # ==== make_dir_batch ======================================================
 
+
 def _batch_request_double(responses_per_id: dict):
     """Build a fake BatchHttpRequest that, on execute(), invokes each
     registered callback with (request_id, response, exception)."""
+
     class _Batch:
         def __init__(self):
             self._calls = []
@@ -944,15 +1019,14 @@ def _batch_request_double(responses_per_id: dict):
 
 def test_make_dir_batch_creates_each_folder(client, cache):
     from bora.writes import _FOLDER_MIME
+
     svc = fake_service()
     responses = {
         "0": {"id": "DA", "name": "a", "mimeType": _FOLDER_MIME},
         "1": {"id": "DB", "name": "b", "mimeType": _FOLDER_MIME},
         "2": {"id": "DC", "name": "c", "mimeType": _FOLDER_MIME},
     }
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double(responses)
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double(responses))
     client._get_service = Mock(return_value=svc)
 
     result = client._writes.make_dir_batch(["/a", "/b", "/c"])
@@ -965,15 +1039,17 @@ def test_make_dir_batch_creates_each_folder(client, cache):
 
 def test_make_dir_batch_chunks_at_100(client, cache):
     from bora.writes import _FOLDER_MIME
+
     svc = fake_service()
     batches = []
 
     def new_batch(*a, **kw):
         # All 101 indices populated; only those in the chunk are invoked
         # via _Batch._calls anyway.
-        responses = {str(i): {"id": f"D{i}", "name": str(i),
-                              "mimeType": _FOLDER_MIME}
-                     for i in range(101)}
+        responses = {
+            str(i): {"id": f"D{i}", "name": str(i), "mimeType": _FOLDER_MIME}
+            for i in range(101)
+        }
         b = _batch_request_double(responses)
         batches.append(b)
         return b
@@ -993,13 +1069,15 @@ def test_make_dir_batch_chunks_at_100(client, cache):
 
 def test_make_dir_batch_exactly_100_is_single_batch(client, cache):
     from bora.writes import _FOLDER_MIME
+
     svc = fake_service()
     batches = []
 
     def new_batch(*a, **kw):
-        responses = {str(i): {"id": f"D{i}", "name": str(i),
-                              "mimeType": _FOLDER_MIME}
-                     for i in range(100)}
+        responses = {
+            str(i): {"id": f"D{i}", "name": str(i), "mimeType": _FOLDER_MIME}
+            for i in range(100)
+        }
         b = _batch_request_double(responses)
         batches.append(b)
         return b
@@ -1017,9 +1095,12 @@ def test_make_dir_batch_exactly_100_is_single_batch(client, cache):
 
 
 def test_make_dir_batch_handles_mixed_success_and_error(
-    client, cache, make_http_error,
+    client,
+    cache,
+    make_http_error,
 ):
     from bora.writes import _FOLDER_MIME
+
     svc = fake_service()
     err = make_http_error(404, reason="notFound")
     responses = {
@@ -1027,9 +1108,7 @@ def test_make_dir_batch_handles_mixed_success_and_error(
         "1": err,
         "2": {"id": "DC", "name": "c", "mimeType": _FOLDER_MIME},
     }
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double(responses)
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double(responses))
     client._get_service = Mock(return_value=svc)
 
     result = client._writes.make_dir_batch(["/a", "/b", "/c"])
@@ -1045,14 +1124,13 @@ def test_make_dir_batch_handles_mixed_success_and_error(
 
 def test_make_dir_batch_counts_subrequests(client, cache):
     from bora.writes import _FOLDER_MIME
+
     svc = fake_service()
     responses = {
         "0": {"id": "DA", "name": "a", "mimeType": _FOLDER_MIME},
         "1": {"id": "DB", "name": "b", "mimeType": _FOLDER_MIME},
     }
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double(responses)
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double(responses))
     client._get_service = Mock(return_value=svc)
     client._count_request = Mock()
     # Pre-seed the id pool so reserve_file_id() doesn't add a generateIds
@@ -1067,26 +1145,25 @@ def test_make_dir_batch_counts_subrequests(client, cache):
 
 # ==== remove_batch ========================================================
 
+
 def test_remove_batch_trashes_each_entry(client, cache):
     cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
     cache.set("/b.txt", "FB", parent_id="ROOT", name="b.txt", is_folder=False)
     svc = fake_service()
     responses = {
-        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
-              "trashed": True},
-        "1": {"id": "FB", "name": "b.txt", "mimeType": "text/plain",
-              "trashed": True},
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain", "trashed": True},
+        "1": {"id": "FB", "name": "b.txt", "mimeType": "text/plain", "trashed": True},
     }
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double(responses)
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double(responses))
     client._get_service = Mock(return_value=svc)
 
     # Capture each update call's kwargs so we can assert body shape.
     update_kwargs_seen = []
+
     def capture(**kw):
         update_kwargs_seen.append(kw)
         return Mock()
+
     svc.files.return_value.update.side_effect = capture
 
     result = client._writes.remove_batch([("/a.txt", None), ("/b.txt", None)])
@@ -1102,12 +1179,9 @@ def test_remove_batch_missing_entry_returns_error(client, cache):
     cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
     svc = fake_service()
     responses = {
-        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
-              "trashed": True},
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain", "trashed": True},
     }
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double(responses)
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double(responses))
     client._get_service = Mock(return_value=svc)
 
     result = client._writes.remove_batch([("/a.txt", None), ("/nope.txt", None)])
@@ -1124,12 +1198,9 @@ def test_remove_batch_with_rev_runs_precondition(client, cache):
         "mimeType": "text/plain",
     }
     responses = {
-        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
-              "trashed": True},
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain", "trashed": True},
     }
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double(responses)
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double(responses))
     client._get_service = Mock(return_value=svc)
 
     client._writes.remove_batch([("/a.txt", "rev-good")])
@@ -1141,12 +1212,11 @@ def test_remove_batch_rev_mismatch_returns_data_changed(client, cache):
     cache.set("/a.txt", "FA", parent_id="ROOT", name="a.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
-        "headRevisionId": "rev-new", "mimeType": "text/plain",
+        "headRevisionId": "rev-new",
+        "mimeType": "text/plain",
     }
     # No batch response needed — precheck fails before batch executes.
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double({})
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double({}))
     client._get_service = Mock(return_value=svc)
 
     result = client._writes.remove_batch([("/a.txt", "rev-old")])
@@ -1161,14 +1231,10 @@ def test_remove_batch_counts_subrequests(client, cache):
     cache.set("/b.txt", "FB", parent_id="ROOT", name="b.txt", is_folder=False)
     svc = fake_service()
     responses = {
-        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain",
-              "trashed": True},
-        "1": {"id": "FB", "name": "b.txt", "mimeType": "text/plain",
-              "trashed": True},
+        "0": {"id": "FA", "name": "a.txt", "mimeType": "text/plain", "trashed": True},
+        "1": {"id": "FB", "name": "b.txt", "mimeType": "text/plain", "trashed": True},
     }
-    svc.new_batch_http_request = Mock(
-        return_value=_batch_request_double(responses)
-    )
+    svc.new_batch_http_request = Mock(return_value=_batch_request_double(responses))
     client._get_service = Mock(return_value=svc)
     client._count_request = Mock()
 
@@ -1182,6 +1248,7 @@ def test_remove_batch_counts_subrequests(client, cache):
 
 # ==== restore =============================================================
 
+
 def test_restore_missing_path_raises_not_found(client):
     client._get_service = Mock(return_value=fake_service())
     with pytest.raises(NotFoundError):
@@ -1189,8 +1256,7 @@ def test_restore_missing_path_raises_not_found(client):
 
 
 def test_restore_native_doc_raises_unsupported(client, cache):
-    cache.set("/notes.gdoc", "FN",
-              parent_id="ROOT", name="notes.gdoc", is_folder=False)
+    cache.set("/notes.gdoc", "FN", parent_id="ROOT", name="notes.gdoc", is_folder=False)
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
         "mimeType": "application/vnd.google-apps.document",
@@ -1205,8 +1271,7 @@ def test_restore_native_doc_raises_unsupported(client, cache):
 
 
 def test_restore_downloads_revision_and_reuploads(client, cache, monkeypatch):
-    cache.set("/foo.txt", "F1",
-              parent_id="ROOT", name="foo.txt", is_folder=False)
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
         "mimeType": "text/plain",
@@ -1225,8 +1290,11 @@ def test_restore_downloads_revision_and_reuploads(client, cache, monkeypatch):
             id="F1",
             modified=parse_drive_time(None),
             rev="rev-new",
-            size=3, symlink_target=None, shared=False,
-            modified_by=None, is_downloadable=True,
+            size=3,
+            symlink_target=None,
+            shared=False,
+            modified_by=None,
+            is_downloadable=True,
             content_hash="abc",
         )
 
@@ -1235,13 +1303,16 @@ def test_restore_downloads_revision_and_reuploads(client, cache, monkeypatch):
     # Patch the helper's revision-to-tempfile downloader to write a known payload.
     def fake_download(file_id, rev):
         import tempfile
+
         fd, p = tempfile.mkstemp()
         with _os.fdopen(fd, "wb") as f:
             f.write(b"OLD")
         return p
 
     monkeypatch.setattr(
-        client._writes, "_download_revision_to_tempfile", fake_download,
+        client._writes,
+        "_download_revision_to_tempfile",
+        fake_download,
     )
 
     result = client._writes.restore("/foo.txt", "rev-old")
@@ -1254,8 +1325,7 @@ def test_restore_downloads_revision_and_reuploads(client, cache, monkeypatch):
 
 
 def test_restore_cleans_up_tempfile_on_success(client, cache, monkeypatch):
-    cache.set("/foo.txt", "F1",
-              parent_id="ROOT", name="foo.txt", is_folder=False)
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
         "mimeType": "text/plain",
@@ -1266,23 +1336,29 @@ def test_restore_cleans_up_tempfile_on_success(client, cache, monkeypatch):
 
     def fake_download(file_id, rev):
         import tempfile
+
         fd, p = tempfile.mkstemp()
         _os.close(fd)
         tmp_paths.append(p)
         return p
 
+    monkeypatch.setattr(client._writes, "_download_revision_to_tempfile", fake_download)
     monkeypatch.setattr(
-        client._writes, "_download_revision_to_tempfile", fake_download
-    )
-    monkeypatch.setattr(
-        client._writes, "upload",
+        client._writes,
+        "upload",
         lambda *a, **kw: FileMetadata(
-            name="foo.txt", path_lower="/foo.txt", path_display="/foo.txt",
+            name="foo.txt",
+            path_lower="/foo.txt",
+            path_display="/foo.txt",
             id="F1",
             modified=parse_drive_time(None),
             rev="x",
-            size=0, symlink_target=None, shared=False, modified_by=None,
-            is_downloadable=True, content_hash="",
+            size=0,
+            symlink_target=None,
+            shared=False,
+            modified_by=None,
+            is_downloadable=True,
+            content_hash="",
         ),
     )
 
@@ -1294,8 +1370,7 @@ def test_restore_cleans_up_tempfile_on_success(client, cache, monkeypatch):
 
 
 def test_restore_cleans_up_tempfile_on_upload_exception(client, cache, monkeypatch):
-    cache.set("/foo.txt", "F1",
-              parent_id="ROOT", name="foo.txt", is_folder=False)
+    cache.set("/foo.txt", "F1", parent_id="ROOT", name="foo.txt", is_folder=False)
     svc = fake_service()
     svc.files.return_value.get.return_value.execute.return_value = {
         "mimeType": "text/plain",
@@ -1306,6 +1381,7 @@ def test_restore_cleans_up_tempfile_on_upload_exception(client, cache, monkeypat
 
     def fake_download(file_id, rev):
         import tempfile
+
         fd, p = tempfile.mkstemp()
         _os.close(fd)
         tmp_paths.append(p)
@@ -1314,9 +1390,7 @@ def test_restore_cleans_up_tempfile_on_upload_exception(client, cache, monkeypat
     def boom(*a, **kw):
         raise RuntimeError("upload failed")
 
-    monkeypatch.setattr(
-        client._writes, "_download_revision_to_tempfile", fake_download
-    )
+    monkeypatch.setattr(client._writes, "_download_revision_to_tempfile", fake_download)
     monkeypatch.setattr(client._writes, "upload", boom)
 
     with pytest.raises(RuntimeError):
@@ -1357,6 +1431,7 @@ def test_download_revision_to_tempfile_cleans_up_on_download_failure(
 
 # ==== modifiedTime on upload (Stage 5, echo suppression) ==================
 
+
 def test_upload_create_sets_modified_time_from_local_mtime(client, cache):
     """Simple CREATE must send modifiedTime derived from the local file mtime."""
     import datetime as _dt
@@ -1374,7 +1449,8 @@ def test_upload_create_sets_modified_time_from_local_mtime(client, cache):
 
     svc = fake_service()
     svc.files.return_value.create.return_value.execute.return_value = {
-        "id": "F-new", "name": "hello.txt",
+        "id": "F-new",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         "md5Checksum": _md5_hex(data),
         "modifiedTime": expected,
@@ -1394,8 +1470,7 @@ def test_upload_update_sets_modified_time_from_local_mtime(client, cache):
     """Simple UPDATE must pass a body with modifiedTime alongside media_body."""
     import datetime as _dt
 
-    cache.set("/hello.txt", "F1",
-              parent_id="ROOT", name="hello.txt", is_folder=False)
+    cache.set("/hello.txt", "F1", parent_id="ROOT", name="hello.txt", is_folder=False)
     data = b"new"
     local = _write_tempfile(data)
     mtime = 1_700_000_500.0
@@ -1408,7 +1483,8 @@ def test_upload_update_sets_modified_time_from_local_mtime(client, cache):
 
     svc = fake_service()
     svc.files.return_value.update.return_value.execute.return_value = {
-        "id": "F1", "name": "hello.txt",
+        "id": "F1",
+        "name": "hello.txt",
         "mimeType": "text/plain",
         "md5Checksum": _md5_hex(data),
         "modifiedTime": expected,
@@ -1434,10 +1510,11 @@ def test_upload_update_sets_modified_time_from_local_mtime(client, cache):
 # and assert state via fake.files[...] and via client.get_metadata.
 # ===========================================================================
 
-from tests.fake_drive import FOLDER_MIME, ROOT_ID, make_http_error as _make_http_error
-
+from tests.fake_drive import FOLDER_MIME, ROOT_ID
+from tests.fake_drive import make_http_error as _make_http_error
 
 # ---- upload via fake -------------------------------------------------------
+
 
 def test_fake_upload_simple_creates_file_in_fake(client_on_fake, tmp_path):
     """Simple upload (<=5MB) round-trips through FakeDrive; fake.files shows
@@ -1498,6 +1575,7 @@ def test_fake_upload_resumable_creates_file_in_fake(client_on_fake, tmp_path):
 
 # ---- move via fake --------------------------------------------------------
 
+
 def test_fake_move_renames_file(client_on_fake):
     """move() renames a file: fake record gets new name, old path resolves to None."""
     client = client_on_fake.client
@@ -1527,8 +1605,12 @@ def test_fake_move_reparents_file(client_on_fake):
     dst_id = fake.add_folder("/dst")
     fid = fake.add_file("/src/foo.txt", b"data")
 
-    client._path_cache.set("/src", src_id, parent_id=ROOT_ID, name="src", is_folder=True)
-    client._path_cache.set("/dst", dst_id, parent_id=ROOT_ID, name="dst", is_folder=True)
+    client._path_cache.set(
+        "/src", src_id, parent_id=ROOT_ID, name="src", is_folder=True
+    )
+    client._path_cache.set(
+        "/dst", dst_id, parent_id=ROOT_ID, name="dst", is_folder=True
+    )
     client._path_cache.set(
         "/src/foo.txt", fid, parent_id=src_id, name="foo.txt", is_folder=False
     )
@@ -1628,8 +1710,7 @@ def test_fake_make_dir_existing_remote_folder_raises_conflict(client_on_fake):
 
     # No duplicate folder must have been created.
     folders = [
-        r for r in fake.files.values()
-        if r["name"] == "Docs" and not r["trashed"]
+        r for r in fake.files.values() if r["name"] == "Docs" and not r["trashed"]
     ]
     assert len(folders) == 1, f"duplicate folder created; found {len(folders)}"
     assert folders[0]["id"] == existing_id
@@ -1672,6 +1753,7 @@ def test_fake_make_dir_conflict_stale_cache_entry_evicted(client_on_fake):
     # already maps the fold) by inserting directly via the ORM.
     from bora.path_cache import PathCacheEntry
     from bora.path_codec import fold_path
+
     client._path_cache._table.update(
         PathCacheEntry(
             file_id=stale_id,
@@ -1688,9 +1770,9 @@ def test_fake_make_dir_conflict_stale_cache_entry_evicted(client_on_fake):
         client._writes.make_dir("/Docs")
 
     # After conflict the cache must map /Docs to the PROBED (real) id.
-    assert client._path_cache.path_to_id("/Docs") == real_id, (
-        "stale cache entry was not evicted; path still maps to stale_id"
-    )
+    assert (
+        client._path_cache.path_to_id("/Docs") == real_id
+    ), "stale cache entry was not evicted; path still maps to stale_id"
 
 
 def test_fake_make_dir_trashed_folder_does_not_trigger_conflict(client_on_fake):
@@ -1713,12 +1795,11 @@ def test_fake_make_dir_trashed_folder_does_not_trigger_conflict(client_on_fake):
     assert result is not None
     # Exactly one non-trashed Docs folder must exist (the newly created one).
     live_docs = [
-        r for r in fake.files.values()
-        if r["name"] == "Docs" and not r["trashed"]
+        r for r in fake.files.values() if r["name"] == "Docs" and not r["trashed"]
     ]
-    assert len(live_docs) == 1, (
-        f"expected exactly 1 live Docs folder, found {len(live_docs)}"
-    )
+    assert (
+        len(live_docs) == 1
+    ), f"expected exactly 1 live Docs folder, found {len(live_docs)}"
     assert live_docs[0]["id"] != trashed_id
 
 
@@ -1740,16 +1821,18 @@ def test_fake_make_dir_autorename_true_skips_probe_and_creates(client_on_fake):
     assert result is not None
     # A second folder should now exist alongside the original.
     folder_names = [
-        r["name"] for r in fake.files.values()
+        r["name"]
+        for r in fake.files.values()
         if r["mimeType"] == FOLDER_MIME and not r["trashed"] and r["id"] != ROOT_ID
     ]
     assert "Docs" in folder_names
-    assert any("Docs" in n and n != "Docs" for n in folder_names), (
-        f"expected an autorename sibling but got: {folder_names}"
-    )
+    assert any(
+        "Docs" in n and n != "Docs" for n in folder_names
+    ), f"expected an autorename sibling but got: {folder_names}"
 
 
 # ---- remove via fake ------------------------------------------------------
+
 
 def test_fake_remove_trashes_file(client_on_fake):
     """remove() sets trashed=True in the fake record and evicts the path from cache."""
@@ -1770,6 +1853,7 @@ def test_fake_remove_trashes_file(client_on_fake):
 
 # ---- make_dir via fake ----------------------------------------------------
 
+
 def test_fake_make_dir_creates_folder(client_on_fake):
     """make_dir() inserts a folder record in fake.files and updates the cache."""
     client = client_on_fake.client
@@ -1783,6 +1867,7 @@ def test_fake_make_dir_creates_folder(client_on_fake):
     rec = fake.files[fid]
     assert rec["name"] == "newdir"
     from tests.fake_drive import FOLDER_MIME
+
     assert rec["mimeType"] == FOLDER_MIME
     assert rec["trashed"] is False
     # Cache write-through.
@@ -1790,6 +1875,7 @@ def test_fake_make_dir_creates_folder(client_on_fake):
 
 
 # ---- make_dir_batch via fake ----------------------------------------------
+
 
 def test_fake_make_dir_batch_creates_folders(client_on_fake):
     """make_dir_batch() via FakeDrive._Batch: each folder ends up in fake.files."""
@@ -1810,6 +1896,7 @@ def test_fake_make_dir_batch_creates_folders(client_on_fake):
 
 # ---- remove_batch via fake ------------------------------------------------
 
+
 def test_fake_remove_batch_trashes_files(client_on_fake):
     """remove_batch() via FakeDrive._Batch: each file ends up with trashed=True."""
     client = client_on_fake.client
@@ -1818,8 +1905,12 @@ def test_fake_remove_batch_trashes_files(client_on_fake):
 
     fid_a = fake.add_file("/a.txt", b"aaa")
     fid_b = fake.add_file("/b.txt", b"bbb")
-    client._path_cache.set("/a.txt", fid_a, parent_id=ROOT_ID, name="a.txt", is_folder=False)
-    client._path_cache.set("/b.txt", fid_b, parent_id=ROOT_ID, name="b.txt", is_folder=False)
+    client._path_cache.set(
+        "/a.txt", fid_a, parent_id=ROOT_ID, name="a.txt", is_folder=False
+    )
+    client._path_cache.set(
+        "/b.txt", fid_b, parent_id=ROOT_ID, name="b.txt", is_folder=False
+    )
 
     results = client._writes.remove_batch([("/a.txt", None), ("/b.txt", None)])
 
@@ -1833,6 +1924,7 @@ def test_fake_remove_batch_trashes_files(client_on_fake):
 
 
 # ---- restore via fake -----------------------------------------------------
+
 
 def test_fake_restore_round_trips_content(client_on_fake, tmp_path):
     """restore() downloads the revision content then re-uploads it.
@@ -1864,6 +1956,7 @@ def test_fake_restore_round_trips_content(client_on_fake, tmp_path):
 
 
 # ---- rev-check TOCTOU audit via fake (cluster-E Task 5, review F4) ---------
+
 
 def test_fake_upload_update_rescues_interleaved_remote_revision(
     client_on_fake, tmp_path
@@ -1908,7 +2001,8 @@ def test_fake_upload_update_rescues_interleaved_remote_revision(
     # ... and the collaborator's clobbered revision was rescued as a
     # same-folder conflicted-copy sibling carrying the collaborator's bytes.
     cc = [
-        r for r in fake.files.values()
+        r
+        for r in fake.files.values()
         if "conflicted copy" in r["name"] and not r["trashed"]
     ]
     assert len(cc) == 1, sorted(r["name"] for r in fake.files.values())
@@ -1939,9 +2033,7 @@ def test_fake_upload_update_rev_no_race_creates_no_conflicted_copy(
 
     assert result.id == fid
     assert fake.files[fid]["content"] == b"v2-ours"
-    assert not any(
-        "conflicted copy" in r["name"] for r in fake.files.values()
-    )
+    assert not any("conflicted copy" in r["name"] for r in fake.files.values())
 
 
 def test_fake_upload_update_rev_audit_failure_is_swallowed(
@@ -2058,6 +2150,7 @@ def test_fake_upload_update_coalesced_head_creates_no_conflicted_copy(
 
 # ---- error paths: quota and 412 via fake ----------------------------------
 
+
 def test_fake_upload_quota_exceeded_raises_insufficient_space(client_on_fake, tmp_path):
     """Injecting a 403/storageQuotaExceeded via fail_next on 'files.create'
     causes upload() to raise InsufficientSpaceError (not the raw HttpError).
@@ -2162,6 +2255,7 @@ def test_fake_move_412_condition_not_met_raises_data_changed(client_on_fake):
 # Task 6 — Idempotent creates via pre-generated file IDs (review F7)
 # ===========================================================================
 
+
 def test_create_retry_after_lost_response_does_not_duplicate_simple(
     client_on_fake, tmp_path
 ):
@@ -2187,10 +2281,11 @@ def test_create_retry_after_lost_response_does_not_duplicate_simple(
     md = client._writes.upload(str(local), "/new.txt", write_mode=WriteMode.Add)
 
     siblings = [
-        r for r in fake.files.values()
-        if r["name"] == "new.txt" and not r["trashed"]
+        r for r in fake.files.values() if r["name"] == "new.txt" and not r["trashed"]
     ]
-    assert len(siblings) == 1, f"duplicate created on retry: {[r['id'] for r in siblings]}"
+    assert (
+        len(siblings) == 1
+    ), f"duplicate created on retry: {[r['id'] for r in siblings]}"
     assert md.id == siblings[0]["id"]
 
 
@@ -2223,10 +2318,11 @@ def test_create_retry_after_lost_response_does_not_duplicate_resumable(
     md = client._writes.upload(str(local), "/big.bin", write_mode=WriteMode.Add)
 
     siblings = [
-        r for r in fake.files.values()
-        if r["name"] == "big.bin" and not r["trashed"]
+        r for r in fake.files.values() if r["name"] == "big.bin" and not r["trashed"]
     ]
-    assert len(siblings) == 1, f"duplicate created on retry: {[r['id'] for r in siblings]}"
+    assert (
+        len(siblings) == 1
+    ), f"duplicate created on retry: {[r['id'] for r in siblings]}"
     assert md.id == siblings[0]["id"]
 
 
@@ -2244,10 +2340,11 @@ def test_create_retry_after_lost_response_does_not_duplicate_make_dir(
     result = client._writes.make_dir("/mydir")
 
     siblings = [
-        r for r in fake.files.values()
-        if r["name"] == "mydir" and not r["trashed"]
+        r for r in fake.files.values() if r["name"] == "mydir" and not r["trashed"]
     ]
-    assert len(siblings) == 1, f"duplicate created on retry: {[r['id'] for r in siblings]}"
+    assert (
+        len(siblings) == 1
+    ), f"duplicate created on retry: {[r['id'] for r in siblings]}"
     assert result.id == siblings[0]["id"]
 
 
@@ -2267,14 +2364,21 @@ def test_create_retry_409_resolves_batch_callback(client_on_fake):
     next_id = fake._new_id()  # consume one: this becomes the "pre-generated" id
     # Insert a record with this id directly to simulate prior commit
     from tests.fake_drive import FOLDER_MIME
+
     fake.files[next_id] = {
-        "id": next_id, "name": "batchdir", "parents": [ROOT_ID],
+        "id": next_id,
+        "name": "batchdir",
+        "parents": [ROOT_ID],
         "mimeType": FOLDER_MIME,
         "modifiedTime": "2026-01-01T00:00:00Z",
         "createdTime": "2026-01-01T00:00:00Z",
-        "trashed": False, "shared": False,
-        "md5Checksum": None, "size": None, "headRevisionId": None,
-        "content": b"", "revisions": [],
+        "trashed": False,
+        "shared": False,
+        "md5Checksum": None,
+        "size": None,
+        "headRevisionId": None,
+        "content": b"",
+        "revisions": [],
         "lastModifyingUser": {"permissionId": "perm-1"},
     }
     # Seed the client's id pool with this pre-consumed id so the batch
@@ -2284,6 +2388,7 @@ def test_create_retry_409_resolves_batch_callback(client_on_fake):
     results = client._writes.make_dir_batch(["/batchdir"])
 
     from bora.exceptions import BoraApiError
+
     assert not isinstance(results[0], BoraApiError), f"unexpected error: {results[0]}"
     assert results[0].id == next_id
 
@@ -2303,14 +2408,16 @@ def test_reserve_file_id_fetches_pool_and_returns_ids(client_on_fake):
     client._id_pool = ["last-one"]
     counter_before = fake._id_counter
 
-    id1 = client.reserve_file_id()   # draws "last-one", no network call
-    id2 = client.reserve_file_id()   # pool exhausted → generateIds round-trip
+    id1 = client.reserve_file_id()  # draws "last-one", no network call
+    id2 = client.reserve_file_id()  # pool exhausted → generateIds round-trip
 
     assert id1 == "last-one"
     assert id2 != id1
     assert id2.startswith("file-")
     # A second generateIds call fetched 100 ids; counter must have advanced.
-    assert fake._id_counter > counter_before, "generateIds was not called on pool exhaustion"
+    assert (
+        fake._id_counter > counter_before
+    ), "generateIds was not called on pool exhaustion"
 
 
 def test_reserve_file_id_thread_safe(client_on_fake):
@@ -2339,4 +2446,6 @@ def test_reserve_file_id_thread_safe(client_on_fake):
 
     assert not errors, f"Errors from threads: {errors}"
     # All 50 ids must be unique.
-    assert len(ids) == len(set(ids)), "Duplicate ids returned from concurrent reserve_file_id()"
+    assert len(ids) == len(
+        set(ids)
+    ), "Duplicate ids returned from concurrent reserve_file_id()"

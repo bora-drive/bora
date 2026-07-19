@@ -82,6 +82,7 @@ class FullAccount(Account):
     For Drive there is no team or root-namespace concept; FullAccount is
     currently just Account plus a placeholder for future Drive-specific
     fields (e.g. domain when shared-drive support lands)."""
+
     pass
 
 

@@ -85,8 +85,4 @@ def filter_native_docs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     filter applied to ``files.list`` and ``changes.list`` results before
     they reach the sync engine.
     """
-    return [
-        item
-        for item in items
-        if not is_google_native(item.get("mimeType"))
-    ]
+    return [item for item in items if not is_google_native(item.get("mimeType"))]

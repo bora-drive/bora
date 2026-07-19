@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from unittest import mock
 
@@ -14,15 +13,19 @@ from bora.exceptions import AuthError
 
 
 def _write_client_secret(path: Path) -> None:
-    path.write_text(json.dumps({
-        "installed": {
-            "client_id": "test-client.apps.googleusercontent.com",
-            "client_secret": "test-secret",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["http://localhost:8080"],
-        }
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "installed": {
+                    "client_id": "test-client.apps.googleusercontent.com",
+                    "client_secret": "test-secret",
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": ["http://localhost:8080"],
+                }
+            }
+        )
+    )
 
 
 def test_load_client_config_uses_bundled_resource_by_default(monkeypatch):
@@ -124,6 +127,7 @@ def _mark_refreshed(self, request):
     # Simulate google-auth's parent refresh() success path:
     # mutate self.token and self.expiry as a real refresh would.
     from datetime import datetime, timedelta
+
     self.token = "refreshed-access-token"
     self.expiry = datetime.utcnow() + timedelta(hours=1)
 
@@ -178,9 +182,7 @@ def test_make_paste_flow_authorization_url_shape(monkeypatch):
     monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     flow = oauth.make_paste_flow()
 
-    auth_url, _state = flow.authorization_url(
-        access_type="offline", prompt="consent"
-    )
+    auth_url, _state = flow.authorization_url(access_type="offline", prompt="consent")
 
     assert auth_url.startswith("https://accounts.google.com/o/oauth2/")
     assert "redirect_uri=http%3A%2F%2Flocalhost%3A8080" in auth_url

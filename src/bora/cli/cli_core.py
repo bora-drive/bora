@@ -115,6 +115,7 @@ def _local_server_dialog(m: "BoraProxy | Bora") -> int:
     Returns the same 0/1/2 contract as Bora.link.
     """
     import os as _os
+
     port = int(_os.environ.get("BORA_AUTH_PORT", "8080"))
 
     info("Bora will print an authorization URL below.")
@@ -210,8 +211,8 @@ def _report_link_result(m: "BoraProxy | Bora", res: int) -> None:
 @convert_api_errors
 def start(foreground: bool, verbose: bool, config_name: str) -> None:
     from ..daemon import (
-        CommunicationError,
         BoraProxy,
+        CommunicationError,
         Start,
         is_running,
         start_bora_daemon,
@@ -309,8 +310,8 @@ def stop(config_name: str) -> None:
 @config_option
 def gui(config_name: str) -> None:
     import termios
-
     from importlib.metadata import entry_points, requires, version
+
     from packaging.requirements import Requirement
     from packaging.version import Version
 
@@ -381,19 +382,30 @@ def auth() -> None:
 
 @auth.command(name="link", help="Link a new remote account.")
 @click.option(
-    "--relink", "-r", is_flag=True, default=False,
+    "--relink",
+    "-r",
+    is_flag=True,
+    default=False,
     help="Relink to the existing account. Keeps the sync state.",
 )
 @click.option(
-    "--no-local-server", is_flag=True, default=False,
+    "--no-local-server",
+    is_flag=True,
+    default=False,
     help="Use the paste-the-redirect-URL flow instead of the loopback "
-         "server. Useful for headless setups without SSH port-forwarding.",
+    "server. Useful for headless setups without SSH port-forwarding.",
 )
 @click.option(
-    "--refresh-token", "refresh_token", default=None, hidden=True,
+    "--refresh-token",
+    "refresh_token",
+    default=None,
+    hidden=True,
 )
 @click.option(
-    "--access-token", "access_token", default=None, hidden=True,
+    "--access-token",
+    "access_token",
+    default=None,
+    hidden=True,
 )
 @inject_proxy(fallback=True, existing_config=False)
 @convert_api_errors

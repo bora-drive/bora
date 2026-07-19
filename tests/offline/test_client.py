@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
+from bora.client import _MAX_RETRY_ATTEMPTS, GoogleDriveClient
 from bora.config import remove_configuration
 from bora.core import FileMetadata, FolderMetadata, WriteMode
 from bora.database.core import Database
@@ -53,6 +53,7 @@ def fake_service() -> MagicMock:
 
 # ==== constructor =========================================================
 
+
 def test_constructor_stores_path_cache(client, cache):
     assert client._path_cache is cache
 
@@ -64,6 +65,7 @@ def test_close_sets_poll_event(client):
 
 
 # ==== _retry_transient ====================================================
+
 
 def test_retry_returns_on_first_success(client):
     call = Mock(return_value="ok")
@@ -149,6 +151,7 @@ def test_retry_honors_retry_after_header(client, make_http_error):
 
 # ==== _ensure_root_id =====================================================
 
+
 def test_ensure_root_id_resolves_and_caches(client):
     client._path_cache.root_id = None  # force resolution
     service = fake_service()
@@ -172,6 +175,7 @@ def test_ensure_root_id_short_circuits_when_set(client):
 
 # ==== get_metadata ========================================================
 
+
 def _seed(cache, path, file_id, name, parent="ROOT", is_folder=False):
     cache.set(path, file_id, parent, name, is_folder)
 
@@ -182,9 +186,15 @@ def test_get_metadata_returns_file_metadata(client, cache):
     _seed(cache, "/report.pdf", "F1", "report.pdf")
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
-        "id": "F1", "name": "report.pdf", "mimeType": "application/pdf",
-        "parents": ["ROOT"], "modifiedTime": "2026-04-30T00:00:00Z",
-        "size": "10", "md5Checksum": "h", "version": 2, "trashed": False,
+        "id": "F1",
+        "name": "report.pdf",
+        "mimeType": "application/pdf",
+        "parents": ["ROOT"],
+        "modifiedTime": "2026-04-30T00:00:00Z",
+        "size": "10",
+        "md5Checksum": "h",
+        "version": 2,
+        "trashed": False,
     }
     client._get_service = Mock(return_value=service)
 
@@ -199,9 +209,11 @@ def test_get_metadata_returns_folder_metadata(client, cache):
     _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
-        "id": "D1", "name": "Documents",
+        "id": "D1",
+        "name": "Documents",
         "mimeType": "application/vnd.google-apps.folder",
-        "parents": ["ROOT"], "trashed": False,
+        "parents": ["ROOT"],
+        "trashed": False,
     }
     client._get_service = Mock(return_value=service)
 
@@ -213,9 +225,11 @@ def test_get_metadata_returns_none_for_native_doc(client, cache):
     _seed(cache, "/Notes", "G1", "Notes")
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
-        "id": "G1", "name": "Notes",
+        "id": "G1",
+        "name": "Notes",
         "mimeType": "application/vnd.google-apps.document",
-        "parents": ["ROOT"], "trashed": False,
+        "parents": ["ROOT"],
+        "trashed": False,
     }
     client._get_service = Mock(return_value=service)
 
@@ -234,8 +248,11 @@ def test_get_metadata_trashed_returns_none(client, cache):
     _seed(cache, "/old.pdf", "F9", "old.pdf")
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
-        "id": "F9", "name": "old.pdf", "mimeType": "application/pdf",
-        "parents": ["ROOT"], "trashed": True,
+        "id": "F9",
+        "name": "old.pdf",
+        "mimeType": "application/pdf",
+        "parents": ["ROOT"],
+        "trashed": True,
     }
     client._get_service = Mock(return_value=service)
 
@@ -248,8 +265,13 @@ def test_get_metadata_trashed_with_include_deleted_returns_metadata(client, cach
     _seed(cache, "/old.pdf", "F9", "old.pdf")
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
-        "id": "F9", "name": "old.pdf", "mimeType": "application/pdf",
-        "parents": ["ROOT"], "trashed": True, "version": 1, "size": "5",
+        "id": "F9",
+        "name": "old.pdf",
+        "mimeType": "application/pdf",
+        "parents": ["ROOT"],
+        "trashed": True,
+        "version": 1,
+        "size": "5",
     }
     client._get_service = Mock(return_value=service)
 
@@ -270,9 +292,14 @@ def test_get_metadata_file_uses_cached_cased_path_not_fold(client, cache):
     _seed(cache, "/Straße.txt", "F7", "Straße.txt")
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
-        "id": "F7", "name": "Straße.txt", "mimeType": "text/plain",
-        "parents": ["ROOT"], "modifiedTime": "2026-04-30T00:00:00Z",
-        "size": "5", "md5Checksum": "h", "trashed": False,
+        "id": "F7",
+        "name": "Straße.txt",
+        "mimeType": "text/plain",
+        "parents": ["ROOT"],
+        "modifiedTime": "2026-04-30T00:00:00Z",
+        "size": "5",
+        "md5Checksum": "h",
+        "trashed": False,
     }
     client._get_service = Mock(return_value=service)
 
@@ -289,9 +316,11 @@ def test_get_metadata_folder_uses_cached_cased_path_not_fold(client, cache):
     _seed(cache, "/Straße", "D7", "Straße", is_folder=True)
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = {
-        "id": "D7", "name": "Straße",
+        "id": "D7",
+        "name": "Straße",
         "mimeType": "application/vnd.google-apps.folder",
-        "parents": ["ROOT"], "trashed": False,
+        "parents": ["ROOT"],
+        "trashed": False,
     }
     client._get_service = Mock(return_value=service)
 
@@ -301,6 +330,7 @@ def test_get_metadata_folder_uses_cached_cased_path_not_fold(client, cache):
 
 
 # ==== list_revisions / restore ============================================
+
 
 def test_list_revisions_returns_newest_first(client, cache):
     _seed(cache, "/report.pdf", "F1", "report.pdf")
@@ -336,10 +366,17 @@ def test_list_revisions_paginates(client, cache):
     _seed(cache, "/report.pdf", "F1", "report.pdf")
     service = fake_service()
     service.revisions.return_value.list.return_value.execute.side_effect = [
-        {"revisions": [{"id": "r1", "modifiedTime": "2026-01-01T00:00:00Z",
-                        "size": "1"}], "nextPageToken": "p2"},
-        {"revisions": [{"id": "r2", "modifiedTime": "2026-02-01T00:00:00Z",
-                        "size": "1"}]},
+        {
+            "revisions": [
+                {"id": "r1", "modifiedTime": "2026-01-01T00:00:00Z", "size": "1"}
+            ],
+            "nextPageToken": "p2",
+        },
+        {
+            "revisions": [
+                {"id": "r2", "modifiedTime": "2026-02-01T00:00:00Z", "size": "1"}
+            ]
+        },
     ]
     client._get_service = Mock(return_value=service)
 
@@ -360,6 +397,7 @@ def test_list_revisions_cache_miss_raises(client):
 
 # ==== list_folder_iterator (non-recursive) ================================
 
+
 def test_list_folder_non_recursive_yields_entries(client, cache):
     from bora.core import FileMetadata, FolderMetadata
 
@@ -367,11 +405,21 @@ def test_list_folder_non_recursive_yields_entries(client, cache):
     service = fake_service()
     service.files.return_value.list.return_value.execute.return_value = {
         "files": [
-            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
-             "parents": ["D1"], "trashed": False, "size": "1"},
-            {"id": "D2", "name": "Sub",
-             "mimeType": "application/vnd.google-apps.folder",
-             "parents": ["D1"], "trashed": False},
+            {
+                "id": "F1",
+                "name": "a.pdf",
+                "mimeType": "application/pdf",
+                "parents": ["D1"],
+                "trashed": False,
+                "size": "1",
+            },
+            {
+                "id": "D2",
+                "name": "Sub",
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": ["D1"],
+                "trashed": False,
+            },
         ]
     }
     client._get_service = Mock(return_value=service)
@@ -388,11 +436,21 @@ def test_list_folder_non_recursive_filters_native_docs(client, cache):
     service = fake_service()
     service.files.return_value.list.return_value.execute.return_value = {
         "files": [
-            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
-             "parents": ["D1"], "trashed": False, "size": "1"},
-            {"id": "G1", "name": "Doc",
-             "mimeType": "application/vnd.google-apps.document",
-             "parents": ["D1"], "trashed": False},
+            {
+                "id": "F1",
+                "name": "a.pdf",
+                "mimeType": "application/pdf",
+                "parents": ["D1"],
+                "trashed": False,
+                "size": "1",
+            },
+            {
+                "id": "G1",
+                "name": "Doc",
+                "mimeType": "application/vnd.google-apps.document",
+                "parents": ["D1"],
+                "trashed": False,
+            },
         ]
     }
     client._get_service = Mock(return_value=service)
@@ -405,11 +463,31 @@ def test_list_folder_non_recursive_paginates(client, cache):
     _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
     service = fake_service()
     service.files.return_value.list.return_value.execute.side_effect = [
-        {"files": [{"id": "F1", "name": "a", "mimeType": "application/pdf",
-                    "parents": ["D1"], "trashed": False, "size": "1"}],
-         "nextPageToken": "p2"},
-        {"files": [{"id": "F2", "name": "b", "mimeType": "application/pdf",
-                    "parents": ["D1"], "trashed": False, "size": "1"}]},
+        {
+            "files": [
+                {
+                    "id": "F1",
+                    "name": "a",
+                    "mimeType": "application/pdf",
+                    "parents": ["D1"],
+                    "trashed": False,
+                    "size": "1",
+                }
+            ],
+            "nextPageToken": "p2",
+        },
+        {
+            "files": [
+                {
+                    "id": "F2",
+                    "name": "b",
+                    "mimeType": "application/pdf",
+                    "parents": ["D1"],
+                    "trashed": False,
+                    "size": "1",
+                }
+            ]
+        },
     ]
     client._get_service = Mock(return_value=service)
 
@@ -434,11 +512,31 @@ def test_list_folder_flattens(client, cache):
     _seed(cache, "/Documents", "D1", "Documents", is_folder=True)
     service = fake_service()
     service.files.return_value.list.return_value.execute.side_effect = [
-        {"files": [{"id": "F1", "name": "a", "mimeType": "application/pdf",
-                    "parents": ["D1"], "trashed": False, "size": "1"}],
-         "nextPageToken": "p2"},
-        {"files": [{"id": "F2", "name": "b", "mimeType": "application/pdf",
-                    "parents": ["D1"], "trashed": False, "size": "1"}]},
+        {
+            "files": [
+                {
+                    "id": "F1",
+                    "name": "a",
+                    "mimeType": "application/pdf",
+                    "parents": ["D1"],
+                    "trashed": False,
+                    "size": "1",
+                }
+            ],
+            "nextPageToken": "p2",
+        },
+        {
+            "files": [
+                {
+                    "id": "F2",
+                    "name": "b",
+                    "mimeType": "application/pdf",
+                    "parents": ["D1"],
+                    "trashed": False,
+                    "size": "1",
+                }
+            ]
+        },
     ]
     client._get_service = Mock(return_value=service)
 
@@ -447,6 +545,7 @@ def test_list_folder_flattens(client, cache):
 
 
 # ==== list_folder_iterator (recursive bootstrap) ==========================
+
 
 def _bootstrap_service(files_pages, start_token="TOK1"):
     """Build a fake service for the recursive bootstrap: a
@@ -461,23 +560,35 @@ def _bootstrap_service(files_pages, start_token="TOK1"):
     service.changes.return_value.getStartPageToken.return_value.execute.return_value = {
         "startPageToken": start_token
     }
-    service.files.return_value.list.return_value.execute.side_effect = (
-        list(files_pages) + [{"files": []}]
-    )
+    service.files.return_value.list.return_value.execute.side_effect = list(
+        files_pages
+    ) + [{"files": []}]
     return service
 
 
 def test_bootstrap_populates_cache_and_yields(client, cache):
     cache.root_id = "ROOT"
-    pages = [{
-        "files": [
-            {"id": "D1", "name": "Docs",
-             "mimeType": "application/vnd.google-apps.folder",
-             "parents": ["ROOT"], "trashed": False},
-            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
-             "parents": ["D1"], "trashed": False, "size": "1"},
-        ]
-    }]
+    pages = [
+        {
+            "files": [
+                {
+                    "id": "D1",
+                    "name": "Docs",
+                    "mimeType": "application/vnd.google-apps.folder",
+                    "parents": ["ROOT"],
+                    "trashed": False,
+                },
+                {
+                    "id": "F1",
+                    "name": "a.pdf",
+                    "mimeType": "application/pdf",
+                    "parents": ["D1"],
+                    "trashed": False,
+                    "size": "1",
+                },
+            ]
+        }
+    ]
     client._get_service = Mock(return_value=_bootstrap_service(pages))
 
     result_pages = list(client.list_folder_iterator("/", recursive=True))
@@ -493,15 +604,27 @@ def test_bootstrap_populates_cache_and_yields(client, cache):
 
 def test_bootstrap_excludes_native_docs(client, cache):
     cache.root_id = "ROOT"
-    pages = [{
-        "files": [
-            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
-             "parents": ["ROOT"], "trashed": False, "size": "1"},
-            {"id": "G1", "name": "Doc",
-             "mimeType": "application/vnd.google-apps.document",
-             "parents": ["ROOT"], "trashed": False},
-        ]
-    }]
+    pages = [
+        {
+            "files": [
+                {
+                    "id": "F1",
+                    "name": "a.pdf",
+                    "mimeType": "application/pdf",
+                    "parents": ["ROOT"],
+                    "trashed": False,
+                    "size": "1",
+                },
+                {
+                    "id": "G1",
+                    "name": "Doc",
+                    "mimeType": "application/vnd.google-apps.document",
+                    "parents": ["ROOT"],
+                    "trashed": False,
+                },
+            ]
+        }
+    ]
     client._get_service = Mock(return_value=_bootstrap_service(pages))
 
     result_pages = list(client.list_folder_iterator("/", recursive=True))
@@ -512,15 +635,29 @@ def test_bootstrap_excludes_native_docs(client, cache):
 
 def test_bootstrap_drops_items_outside_root(client, cache, caplog):
     cache.root_id = "ROOT"
-    pages = [{
-        "files": [
-            {"id": "F1", "name": "a.pdf", "mimeType": "application/pdf",
-             "parents": ["ROOT"], "trashed": False, "size": "1"},
-            # Parent OUTSIDE_ROOT is not reachable from ROOT.
-            {"id": "F2", "name": "shared.pdf", "mimeType": "application/pdf",
-             "parents": ["OUTSIDE_ROOT"], "trashed": False, "size": "1"},
-        ]
-    }]
+    pages = [
+        {
+            "files": [
+                {
+                    "id": "F1",
+                    "name": "a.pdf",
+                    "mimeType": "application/pdf",
+                    "parents": ["ROOT"],
+                    "trashed": False,
+                    "size": "1",
+                },
+                # Parent OUTSIDE_ROOT is not reachable from ROOT.
+                {
+                    "id": "F2",
+                    "name": "shared.pdf",
+                    "mimeType": "application/pdf",
+                    "parents": ["OUTSIDE_ROOT"],
+                    "trashed": False,
+                    "size": "1",
+                },
+            ]
+        }
+    ]
     client._get_service = Mock(return_value=_bootstrap_service(pages))
 
     with caplog.at_level(logging.INFO, logger="bora.client"):
@@ -534,11 +671,31 @@ def test_bootstrap_drops_items_outside_root(client, cache, caplog):
 def test_bootstrap_fetches_all_pages(client, cache):
     cache.root_id = "ROOT"
     pages = [
-        {"files": [{"id": "F1", "name": "a", "mimeType": "application/pdf",
-                    "parents": ["ROOT"], "trashed": False, "size": "1"}],
-         "nextPageToken": "p2"},
-        {"files": [{"id": "F2", "name": "b", "mimeType": "application/pdf",
-                    "parents": ["ROOT"], "trashed": False, "size": "1"}]},
+        {
+            "files": [
+                {
+                    "id": "F1",
+                    "name": "a",
+                    "mimeType": "application/pdf",
+                    "parents": ["ROOT"],
+                    "trashed": False,
+                    "size": "1",
+                }
+            ],
+            "nextPageToken": "p2",
+        },
+        {
+            "files": [
+                {
+                    "id": "F2",
+                    "name": "b",
+                    "mimeType": "application/pdf",
+                    "parents": ["ROOT"],
+                    "trashed": False,
+                    "size": "1",
+                }
+            ]
+        },
     ]
     client._get_service = Mock(return_value=_bootstrap_service(pages))
 
@@ -584,9 +741,14 @@ def test_download_writes_file_and_verifies_md5(client, cache, tmp_path, monkeypa
     _seed(cache, "/a.bin", "F1", "a.bin")
     data = b"hello world"
     meta = {
-        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
-        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
-        "md5Checksum": _hashlib.md5(data).hexdigest(), "version": 1,
+        "id": "F1",
+        "name": "a.bin",
+        "mimeType": "application/octet-stream",
+        "parents": ["ROOT"],
+        "trashed": False,
+        "size": str(len(data)),
+        "md5Checksum": _hashlib.md5(data).hexdigest(),
+        "version": 1,
     }
     client._get_service = Mock(return_value=_download_service(meta, data))
 
@@ -601,9 +763,11 @@ def test_download_native_doc_raises(client, cache, tmp_path):
 
     _seed(cache, "/Doc", "G1", "Doc")
     meta = {
-        "id": "G1", "name": "Doc",
+        "id": "G1",
+        "name": "Doc",
         "mimeType": "application/vnd.google-apps.document",
-        "parents": ["ROOT"], "trashed": False,
+        "parents": ["ROOT"],
+        "trashed": False,
     }
     service = fake_service()
     service.files.return_value.get.return_value.execute.return_value = meta
@@ -613,16 +777,23 @@ def test_download_native_doc_raises(client, cache, tmp_path):
         client.download("/Doc", str(tmp_path / "Doc"))
 
 
-def test_download_md5_mismatch_raises_and_cleans_up(client, cache, tmp_path, monkeypatch):
+def test_download_md5_mismatch_raises_and_cleans_up(
+    client, cache, tmp_path, monkeypatch
+):
     from bora.exceptions import DataCorruptionError
 
     monkeypatch.setattr("bora.client.MediaIoBaseDownload", FakeDownloader)
     _seed(cache, "/a.bin", "F1", "a.bin")
     data = b"hello world"
     meta = {
-        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
-        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
-        "md5Checksum": "deadbeef" * 4, "version": 1,  # wrong hash
+        "id": "F1",
+        "name": "a.bin",
+        "mimeType": "application/octet-stream",
+        "parents": ["ROOT"],
+        "trashed": False,
+        "size": str(len(data)),
+        "md5Checksum": "deadbeef" * 4,
+        "version": 1,  # wrong hash
     }
     client._get_service = Mock(return_value=_download_service(meta, data))
 
@@ -642,8 +813,6 @@ def test_download_cache_miss_raises(client, tmp_path):
 
 
 def test_download_cleans_up_sidecar_on_error(client, cache, tmp_path, monkeypatch):
-    from googleapiclient.errors import HttpError
-
     class FailingDownloader:
         def __init__(self, fh, request, chunksize=None):
             pass
@@ -654,9 +823,14 @@ def test_download_cleans_up_sidecar_on_error(client, cache, tmp_path, monkeypatc
     monkeypatch.setattr("bora.client.MediaIoBaseDownload", FailingDownloader)
     _seed(cache, "/a.bin", "F1", "a.bin")
     meta = {
-        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
-        "parents": ["ROOT"], "trashed": False, "size": "5",
-        "md5Checksum": "x", "version": 1,
+        "id": "F1",
+        "name": "a.bin",
+        "mimeType": "application/octet-stream",
+        "parents": ["ROOT"],
+        "trashed": False,
+        "size": "5",
+        "md5Checksum": "x",
+        "version": 1,
     }
     client._get_service = Mock(return_value=_download_service(meta, b"data"))
 
@@ -672,9 +846,14 @@ def test_download_updates_sync_event(client, cache, tmp_path, monkeypatch):
     _seed(cache, "/a.bin", "F1", "a.bin")
     data = b"abcdef"
     meta = {
-        "id": "F1", "name": "a.bin", "mimeType": "application/octet-stream",
-        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
-        "md5Checksum": _hashlib.md5(data).hexdigest(), "version": 1,
+        "id": "F1",
+        "name": "a.bin",
+        "mimeType": "application/octet-stream",
+        "parents": ["ROOT"],
+        "trashed": False,
+        "size": str(len(data)),
+        "md5Checksum": _hashlib.md5(data).hexdigest(),
+        "version": 1,
     }
     client._get_service = Mock(return_value=_download_service(meta, data))
 
@@ -695,10 +874,14 @@ def test_download_by_file_id_skips_path_lookup(client, cache, tmp_path, monkeypa
 
     data = b"file content by id"
     meta = {
-        "id": "GIVEN_ID", "name": "whatever.txt",
+        "id": "GIVEN_ID",
+        "name": "whatever.txt",
         "mimeType": "application/octet-stream",
-        "parents": ["ROOT"], "trashed": False, "size": str(len(data)),
-        "md5Checksum": _hashlib2.md5(data).hexdigest(), "version": 7,
+        "parents": ["ROOT"],
+        "trashed": False,
+        "size": str(len(data)),
+        "md5Checksum": _hashlib2.md5(data).hexdigest(),
+        "version": 7,
     }
     service = _download_service(meta, data)
     client._get_service = Mock(return_value=service)
@@ -721,14 +904,14 @@ def test_download_by_file_id_skips_path_lookup(client, cache, tmp_path, monkeypa
 
     # The Drive fileId used for both get and get_media must be "GIVEN_ID".
     get_call_kwargs = service.files.return_value.get.call_args[1]
-    assert get_call_kwargs["fileId"] == "GIVEN_ID", (
-        f"get() was called with fileId={get_call_kwargs['fileId']!r}, expected 'GIVEN_ID'"
-    )
+    assert (
+        get_call_kwargs["fileId"] == "GIVEN_ID"
+    ), f"get() was called with fileId={get_call_kwargs['fileId']!r}, expected 'GIVEN_ID'"
 
     get_media_call_kwargs = service.files.return_value.get_media.call_args[1]
-    assert get_media_call_kwargs["fileId"] == "GIVEN_ID", (
-        f"get_media() was called with fileId={get_media_call_kwargs['fileId']!r}, expected 'GIVEN_ID'"
-    )
+    assert (
+        get_media_call_kwargs["fileId"] == "GIVEN_ID"
+    ), f"get_media() was called with fileId={get_media_call_kwargs['fileId']!r}, expected 'GIVEN_ID'"
 
     # The file was written correctly.
     assert dest.read_bytes() == data
@@ -753,6 +936,7 @@ def test_throttle_down_noop_when_no_limit(client, monkeypatch):
 
 # ==== get_latest_cursor ===================================================
 
+
 def test_get_latest_cursor_returns_start_page_token(client):
     service = fake_service()
     service.changes.return_value.getStartPageToken.return_value.execute.return_value = {
@@ -775,6 +959,7 @@ def test_get_latest_cursor_ignores_remote_path(client):
 
 
 # ==== wait_for_remote_changes =============================================
+
 
 def test_wait_returns_true_when_changes_present(client):
     client._poll_event = Mock()
@@ -895,6 +1080,7 @@ def test_wait_false_on_fully_empty_final_page(client):
 
 # ==== list_remote_changes(_iterator) ======================================
 
+
 def test_list_remote_changes_iterator_delegates(client, cache):
     from bora.core import FileMetadata
 
@@ -902,10 +1088,19 @@ def test_list_remote_changes_iterator_delegates(client, cache):
     service.changes.return_value.list.return_value.execute.return_value = {
         "newStartPageToken": "NEXT",
         "changes": [
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "a.pdf", "parents": ["ROOT"],
-                      "mimeType": "application/pdf", "trashed": False,
-                      "size": "1", "version": 1}},
+            {
+                "removed": False,
+                "fileId": "F1",
+                "file": {
+                    "id": "F1",
+                    "name": "a.pdf",
+                    "parents": ["ROOT"],
+                    "mimeType": "application/pdf",
+                    "trashed": False,
+                    "size": "1",
+                    "version": 1,
+                },
+            },
         ],
     }
     client._get_service = Mock(return_value=service)
@@ -931,7 +1126,8 @@ def test_list_remote_changes_iterator_converts_http_error(client, make_http_erro
 def test_list_remote_changes_flattens(client, cache):
     service = fake_service()
     service.changes.return_value.list.return_value.execute.return_value = {
-        "newStartPageToken": "NEXT", "changes": [],
+        "newStartPageToken": "NEXT",
+        "changes": [],
     }
     client._get_service = Mock(return_value=service)
 
@@ -941,6 +1137,7 @@ def test_list_remote_changes_flattens(client, cache):
 
 
 # ==== writes.py wiring + delegators =======================================
+
 
 def test_client_constructs_write_helper(client):
     from bora.writes import _WriteHelper
@@ -952,12 +1149,16 @@ def test_client_constructs_write_helper(client):
 def test_upload_delegates_to_helper(client, monkeypatch):
     captured = {}
 
-    def fake_upload(local_path, remote_path, *, write_mode, update_rev,
-                    autorename, sync_event):
+    def fake_upload(
+        local_path, remote_path, *, write_mode, update_rev, autorename, sync_event
+    ):
         captured.update(
-            local_path=local_path, remote_path=remote_path,
-            write_mode=write_mode, update_rev=update_rev,
-            autorename=autorename, sync_event=sync_event,
+            local_path=local_path,
+            remote_path=remote_path,
+            write_mode=write_mode,
+            update_rev=update_rev,
+            autorename=autorename,
+            sync_event=sync_event,
         )
         return "sentinel-result"
 
@@ -965,25 +1166,34 @@ def test_upload_delegates_to_helper(client, monkeypatch):
     from bora.core import WriteMode
 
     out = client.upload(
-        "/local/a.txt", "/a.txt",
-        write_mode=WriteMode.Overwrite, update_rev="rev1",
-        autorename=True, sync_event=None,
+        "/local/a.txt",
+        "/a.txt",
+        write_mode=WriteMode.Overwrite,
+        update_rev="rev1",
+        autorename=True,
+        sync_event=None,
     )
     assert out == "sentinel-result"
     assert captured == {
-        "local_path": "/local/a.txt", "remote_path": "/a.txt",
-        "write_mode": WriteMode.Overwrite, "update_rev": "rev1",
-        "autorename": True, "sync_event": None,
+        "local_path": "/local/a.txt",
+        "remote_path": "/a.txt",
+        "write_mode": WriteMode.Overwrite,
+        "update_rev": "rev1",
+        "autorename": True,
+        "sync_event": None,
     }
 
 
 def test_remove_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "remove",
+        client._writes,
+        "remove",
         lambda remote_path, parent_rev=None: captured.update(
-            remote_path=remote_path, parent_rev=parent_rev,
-        ) or "sentinel",
+            remote_path=remote_path,
+            parent_rev=parent_rev,
+        )
+        or "sentinel",
     )
     assert client.remove("/a.txt", parent_rev="r1") == "sentinel"
     assert captured == {"remote_path": "/a.txt", "parent_rev": "r1"}
@@ -992,22 +1202,33 @@ def test_remove_delegates_to_helper(client, monkeypatch):
 def test_move_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "move",
+        client._writes,
+        "move",
         lambda remote_path, new_path, *, autorename=False: captured.update(
-            remote_path=remote_path, new_path=new_path, autorename=autorename,
-        ) or "sentinel",
+            remote_path=remote_path,
+            new_path=new_path,
+            autorename=autorename,
+        )
+        or "sentinel",
     )
     assert client.move("/a.txt", "/b/a.txt", autorename=True) == "sentinel"
-    assert captured == {"remote_path": "/a.txt", "new_path": "/b/a.txt", "autorename": True}
+    assert captured == {
+        "remote_path": "/a.txt",
+        "new_path": "/b/a.txt",
+        "autorename": True,
+    }
 
 
 def test_make_dir_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "make_dir",
+        client._writes,
+        "make_dir",
         lambda remote_path, *, autorename=False: captured.update(
-            remote_path=remote_path, autorename=autorename,
-        ) or "sentinel",
+            remote_path=remote_path,
+            autorename=autorename,
+        )
+        or "sentinel",
     )
     assert client.make_dir("/foo", autorename=True) == "sentinel"
     assert captured == {"remote_path": "/foo", "autorename": True}
@@ -1016,7 +1237,8 @@ def test_make_dir_delegates_to_helper(client, monkeypatch):
 def test_make_dir_batch_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "make_dir_batch",
+        client._writes,
+        "make_dir_batch",
         lambda remote_paths: captured.update(paths=list(remote_paths)) or ["s"],
     )
     assert client.make_dir_batch(["/a", "/b"]) == ["s"]
@@ -1026,10 +1248,13 @@ def test_make_dir_batch_delegates_to_helper(client, monkeypatch):
 def test_remove_batch_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "remove_batch",
+        client._writes,
+        "remove_batch",
         lambda entries, batch_size=100: captured.update(
-            entries=list(entries), batch_size=batch_size,
-        ) or ["s"],
+            entries=list(entries),
+            batch_size=batch_size,
+        )
+        or ["s"],
     )
     assert client.remove_batch([("/a", None), ("/b", "r")]) == ["s"]
     assert captured == {"entries": [("/a", None), ("/b", "r")], "batch_size": 100}
@@ -1038,10 +1263,13 @@ def test_remove_batch_delegates_to_helper(client, monkeypatch):
 def test_restore_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "restore",
+        client._writes,
+        "restore",
         lambda remote_path, rev: captured.update(
-            remote_path=remote_path, rev=rev,
-        ) or "sentinel",
+            remote_path=remote_path,
+            rev=rev,
+        )
+        or "sentinel",
     )
     assert client.restore("/a.txt", "rev5") == "sentinel"
     assert captured == {"remote_path": "/a.txt", "rev": "rev5"}
@@ -1050,15 +1278,22 @@ def test_restore_delegates_to_helper(client, monkeypatch):
 def test_create_shortcut_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "create_shortcut",
+        client._writes,
+        "create_shortcut",
         lambda remote_path, target_remote_path, *, autorename=False: captured.update(
-            remote_path=remote_path, target_remote_path=target_remote_path,
+            remote_path=remote_path,
+            target_remote_path=target_remote_path,
             autorename=autorename,
-        ) or "sentinel",
+        )
+        or "sentinel",
     )
-    assert client.create_shortcut("/link", "/Docs/report.pdf", autorename=True) == "sentinel"
+    assert (
+        client.create_shortcut("/link", "/Docs/report.pdf", autorename=True)
+        == "sentinel"
+    )
     assert captured == {
-        "remote_path": "/link", "target_remote_path": "/Docs/report.pdf",
+        "remote_path": "/link",
+        "target_remote_path": "/Docs/report.pdf",
         "autorename": True,
     }
 
@@ -1066,10 +1301,13 @@ def test_create_shortcut_delegates_to_helper(client, monkeypatch):
 def test_retarget_shortcut_delegates_to_helper(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        client._writes, "retarget_shortcut",
+        client._writes,
+        "retarget_shortcut",
         lambda remote_path, target_remote_path: captured.update(
-            remote_path=remote_path, target_remote_path=target_remote_path,
-        ) or "sentinel",
+            remote_path=remote_path,
+            target_remote_path=target_remote_path,
+        )
+        or "sentinel",
     )
     assert client.retarget_shortcut("/link", "/Docs/new.pdf") == "sentinel"
     assert captured == {"remote_path": "/link", "target_remote_path": "/Docs/new.pdf"}
@@ -1082,6 +1320,7 @@ def test_retarget_shortcut_delegates_to_helper(client, monkeypatch):
 
 
 # ---- Step 1: new-file NotFoundError regression ---------------------------
+
 
 def test_get_metadata_unknown_path_raises_notfound(client_on_fake):
     """Regression (Stage 5, 2ed6e33): get_metadata for a path the cache does
@@ -1108,13 +1347,10 @@ def test_check_requires_upload_for_new_file_returns_true(client_on_fake, tmp_pat
     NotFoundError is produced by the real get_metadata path-cache miss
     logic in client.py.
     """
-    import os
     from datetime import datetime
+
+    from bora.models import ChangeType, ItemType, SyncDirection, SyncEvent, SyncStatus
     from bora.sync import SyncEngine
-    from bora.models import (
-        SyncEvent, SyncDirection, SyncStatus, ItemType, ChangeType
-    )
-    from bora.utils.appdirs import get_home_dir
 
     cof = client_on_fake
 
@@ -1157,6 +1393,7 @@ def test_check_requires_upload_for_new_file_returns_true(client_on_fake, tmp_pat
 
 
 # ---- Step 2: round-trip tests via the fake -------------------------------
+
 
 def test_upload_then_get_metadata_shows_correct_fields(client_on_fake, tmp_path):
     """Upload a real local file, then get_metadata returns correct md5 / rev / size."""
@@ -1237,6 +1474,7 @@ def test_move_then_get_metadata_at_new_path(client_on_fake, tmp_path):
 
     # Old path must no longer resolve.
     from bora.exceptions import NotFoundError
+
     with pytest.raises(NotFoundError):
         cof.client.get_metadata("/orig.txt")
 
@@ -1282,6 +1520,7 @@ def test_remove_then_metadata_reflects_deletion(client_on_fake, tmp_path):
     # 3. A fresh client (same fake, re-seeded cache) processes the change feed
     #    and produces a DeletedMetadata for the trashed item.
     import sqlite3 as _sqlite3
+
     fresh_cache = PathIDCache(
         __import__("bora.database.core", fromlist=["Database"]).Database(
             _sqlite3.connect(":memory:")
@@ -1297,15 +1536,15 @@ def test_remove_then_metadata_reflects_deletion(client_on_fake, tmp_path):
 
     changes_result = fresh_client.list_remote_changes(cursor_before_remove)
     deleted_paths = {
-        e.path_display for e in changes_result.entries
-        if isinstance(e, DeletedMetadata)
+        e.path_display for e in changes_result.entries if isinstance(e, DeletedMetadata)
     }
-    assert "/del.txt" in deleted_paths, (
-        f"Expected DeletedMetadata for /del.txt; got entries: {changes_result.entries}"
-    )
+    assert (
+        "/del.txt" in deleted_paths
+    ), f"Expected DeletedMetadata for /del.txt; got entries: {changes_result.entries}"
 
     # Cleanup the fresh client config.
     from bora.config import remove_configuration as _rm
+
     _rm("test-config-fresh")
 
 
@@ -1329,6 +1568,7 @@ def test_download_via_fake_writes_correct_bytes(client_on_fake, tmp_path):
 
 
 # ==== Task 17: create/retarget Drive shortcuts (M3) =======================
+
 
 def test_create_shortcut_sets_target(client_on_fake):
     client, fake = client_on_fake.client, client_on_fake.fake
@@ -1364,6 +1604,7 @@ def test_retarget_shortcut_updates_target_id(client_on_fake):
 
 
 # ==== list_folder_iterator (recursive scoped — review F1) =================
+
 
 def test_recursive_list_of_subfolder_is_scoped(client_on_fake, fake_drive):
     """list_folder(path, recursive=True) for a non-root path must return only
@@ -1412,7 +1653,9 @@ def test_scoped_recursive_writes_new_items_through_to_cache(client_on_fake, fake
     assert cache.path_to_id("/sub/nested") == nested
     assert cache.path_to_id("/sub/nested/deep.txt") == deep
     assert {md.path_display for md in result.entries} == {
-        "/sub/late.txt", "/sub/nested", "/sub/nested/deep.txt",
+        "/sub/late.txt",
+        "/sub/nested",
+        "/sub/nested/deep.txt",
     }
 
 
@@ -1426,8 +1669,9 @@ def test_scoped_recursive_skips_fold_conflicted_entry(client_on_fake, fake_drive
     client_on_fake.client.list_folder("/", recursive=True)
 
     # Add a second file whose name folds to the same key as Report.pdf.
-    fake_drive.add_file("/sub/report.pdf", content=b"conflict",
-                        literal_name="report.pdf")
+    fake_drive.add_file(
+        "/sub/report.pdf", content=b"conflict", literal_name="report.pdf"
+    )
 
     result = client_on_fake.client.list_folder("/sub", recursive=True)
 

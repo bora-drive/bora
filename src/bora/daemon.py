@@ -32,25 +32,25 @@ from typing import TYPE_CHECKING, Any, ContextManager, Iterable
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 # external imports
-import Pyro5
-from fasteners import InterProcessLock
-from Pyro5.api import (
+import Pyro5  # noqa: E402
+from fasteners import InterProcessLock  # noqa: E402
+from Pyro5.api import (  # noqa: E402
     Daemon,
     Proxy,
     expose,
     register_class_to_dict,
     register_dict_to_class,
 )
-from Pyro5.errors import CommunicationError
-from Pyro5.serializers import serpent
+from Pyro5.errors import CommunicationError  # noqa: E402
+from Pyro5.serializers import serpent  # noqa: E402
 
-from . import core, exceptions, models
-from .constants import ENV, IS_MACOS
+from . import core, exceptions, models  # noqa: E402
+from .constants import ENV, IS_MACOS  # noqa: E402
 
 # local imports
-from .utils import exc_info_tuple
-from .utils.appdirs import get_runtime_path
-from .utils.integration import SystemdNotifier
+from .utils import exc_info_tuple  # noqa: E402
+from .utils.appdirs import get_runtime_path  # noqa: E402
+from .utils.integration import SystemdNotifier  # noqa: E402
 
 if TYPE_CHECKING:
     from .main import Bora
@@ -363,9 +363,7 @@ def wait_for_startup(config_name: str, timeout: float = 30) -> None:
 # ==== main functions to manage daemon =================================================
 
 
-def start_bora_daemon(
-    config_name: str = "bora", log_to_stderr: bool = False
-) -> None:
+def start_bora_daemon(config_name: str = "bora", log_to_stderr: bool = False) -> None:
     """
     Starts the Bora daemon with event loop in the current thread.
 
@@ -447,6 +445,7 @@ def start_bora_daemon(
 
         # Notify systemd periodically if alive.
         if IS_WATCHDOG and WATCHDOG_USEC:
+
             async def periodic_watchdog() -> None:
                 if WATCHDOG_USEC:
                     sleep = int(WATCHDOG_USEC)
@@ -516,9 +515,7 @@ def start_bora_daemon(
         lock.release()
 
 
-def start_bora_daemon_process(
-    config_name: str = "bora", timeout: float = 30
-) -> Start:
+def start_bora_daemon_process(config_name: str = "bora", timeout: float = 30) -> Start:
     """
     Starts the Bora daemon in a new process by calling :func:`start_bora_daemon`.
 
@@ -573,9 +570,7 @@ def start_bora_daemon_process(
         return Start.Ok
 
 
-def stop_bora_daemon_process(
-    config_name: str = "bora", timeout: float = 10
-) -> Stop:
+def stop_bora_daemon_process(config_name: str = "bora", timeout: float = 10) -> Stop:
     """Stops a bora daemon process by finding its PID and shutting it down.
 
     This function first tries to shut down Bora gracefully. If this fails and we

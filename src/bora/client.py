@@ -18,9 +18,7 @@ import os
 import random
 import threading
 import time
-
-import requests
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import (
@@ -33,36 +31,26 @@ from typing import (
     overload,
 )
 
+import requests
 from google.auth.exceptions import RefreshError
-from oauthlib.oauth2.rfc6749.errors import OAuth2Error
 from google.auth.transport.requests import Request as _AuthRequest
 from google.oauth2.credentials import Credentials as _Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
+from oauthlib.oauth2.rfc6749.errors import OAuth2Error
 
 from . import changes, oauth
 from .changes import FILE_FIELDS, parse_drive_time, to_file_metadata, to_folder_metadata
 from .config import BoraState
-from .native_docs import is_google_folder, is_google_native, is_shortcut
-from .path_cache import PathIDCache
-from .path_codec import compose_path, fold_path
-from .utils import natural_size
 from .core import (
     Account,
-    AccountType,
-    DeletedMetadata,
     FileMetadata,
     FolderMetadata,
     FullAccount,
     ListFolderResult,
     Metadata,
     PersonalSpaceUsage,
-    RootInfo,
-    SpaceUsage,
-    Team,
-    TeamRootInfo,
-    UserRootInfo,
     WriteMode,
 )
 from .errorhandling import (
@@ -73,14 +61,18 @@ from .errorhandling import (
     extract_http_reason,
 )
 from .exceptions import (
-    CancelledError,
     BoraApiError,
+    CancelledError,
     CursorResetError,
     DataCorruptionError,
     NotFoundError,
     NotLinkedError,
     UnsupportedFileError,
 )
+from .native_docs import is_google_folder, is_google_native, is_shortcut
+from .path_cache import PathIDCache
+from .path_codec import compose_path, fold_path
+from .utils import natural_size
 
 if TYPE_CHECKING:
     from .models import SyncEvent
@@ -105,8 +97,8 @@ DEFAULT_POLL_INTERVAL = 180
 
 # Transient-error retry policy (Stage 3 spec §7.2).
 _MAX_RETRY_ATTEMPTS = 5
-_INITIAL_BACKOFF = 1.0   # seconds
-_MAX_BACKOFF = 32.0      # seconds
+_INITIAL_BACKOFF = 1.0  # seconds
+_MAX_BACKOFF = 32.0  # seconds
 
 # Page size for files.list calls.
 _LIST_PAGE_SIZE = 1000
@@ -158,6 +150,7 @@ class _PasteFlowState:
     - Cleared on link() success, on unlink(), and after a 10-minute
       expiry (auth codes from Google expire on roughly that scale).
     """
+
     flow: "Any"  # google_auth_oauthlib.flow.Flow
     created_at: datetime
 
@@ -223,6 +216,7 @@ class GoogleDriveClient:
         # Write-side helper (Stage 4). Local import avoids a module-level
         # cycle between client.py and writes.py.
         from .writes import _WriteHelper
+
         self._writes = _WriteHelper(self)
 
     # ---- Request counter (diagnostics) -----------------------------------------------
@@ -283,9 +277,7 @@ class GoogleDriveClient:
         redirect URL (or just its 'code' parameter) back to link(code=...).
         """
         flow = oauth.make_paste_flow()
-        auth_url, _ = flow.authorization_url(
-            access_type="offline", prompt="consent"
-        )
+        auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
         self._pending_paste_flow = _PasteFlowState(
             flow=flow, created_at=datetime.utcnow()
         )
@@ -378,7 +370,8 @@ class GoogleDriveClient:
                 "Run 'bora auth link' to authorize Bora.",
             )
         return build(
-            "drive", "v3",
+            "drive",
+            "v3",
             credentials=self._credentials,
             cache_discovery=False,
         )
@@ -538,15 +531,17 @@ class GoogleDriveClient:
         because link() may be calling us with credentials not yet stored
         in self._credentials.
         """
-        service = build(
-            "drive", "v3", credentials=creds, cache_discovery=False
-        )
-        response = service.about().get(
-            fields=(
-                "user(emailAddress,displayName,permissionId,photoLink),"
-                "storageQuota(usage,limit)"
+        service = build("drive", "v3", credentials=creds, cache_discovery=False)
+        response = (
+            service.about()
+            .get(
+                fields=(
+                    "user(emailAddress,displayName,permissionId,photoLink),"
+                    "storageQuota(usage,limit)"
+                )
             )
-        ).execute()
+            .execute()
+        )
         user = response.get("user", {})
         quota = response.get("storageQuota", {})
 
@@ -621,9 +616,7 @@ class GoogleDriveClient:
             return to_folder_metadata(file, cased_path)
         return to_file_metadata(file, cased_path)
 
-    def list_revisions(
-        self, remote_path: str, limit: int = 10
-    ) -> list[FileMetadata]:
+    def list_revisions(self, remote_path: str, limit: int = 10) -> list[FileMetadata]:
         """Lists revisions for the file at *remote_path*, most recent
         first, capped at *limit*.
 
@@ -644,21 +637,25 @@ class GoogleDriveClient:
         page_token: str | None = None
         with convert_api_errors(remote_path=remote_path):
             while True:
-                resp = self._retry_transient(
-                    lambda pt=page_token: self._get_service()
-                    .revisions()
-                    .list(
-                        fileId=file_id,
-                        fields=(
-                            "nextPageToken, revisions(id, modifiedTime, "
-                            "size, md5Checksum, "
-                            "lastModifyingUser(permissionId))"
-                        ),
-                        pageSize=100,
-                        pageToken=pt,
+
+                def _list_revisions_page(pt: str | None = page_token) -> Any:
+                    return (
+                        self._get_service()
+                        .revisions()
+                        .list(
+                            fileId=file_id,
+                            fields=(
+                                "nextPageToken, revisions(id, modifiedTime, "
+                                "size, md5Checksum, "
+                                "lastModifyingUser(permissionId))"
+                            ),
+                            pageSize=100,
+                            pageToken=pt,
+                        )
+                        .execute()
                     )
-                    .execute()
-                )
+
+                resp = self._retry_transient(_list_revisions_page)
                 self._count_request()
                 raw.extend(resp.get("revisions", []))
                 page_token = resp.get("nextPageToken")
@@ -819,9 +816,12 @@ class GoogleDriveClient:
         :returns: Metadata of uploaded item.
         """
         return self._writes.upload(
-            local_path, remote_path,
-            write_mode=write_mode, update_rev=update_rev,
-            autorename=autorename, sync_event=sync_event,
+            local_path,
+            remote_path,
+            write_mode=write_mode,
+            update_rev=update_rev,
+            autorename=autorename,
+            sync_event=sync_event,
         )
 
     # ---- File / folder operations ----------------------------------------------------
@@ -932,10 +932,7 @@ class GoogleDriveClient:
         """
         with convert_api_errors():
             resp = self._retry_transient(
-                lambda: self._get_service()
-                .changes()
-                .getStartPageToken()
-                .execute()
+                lambda: self._get_service().changes().getStartPageToken().execute()
             )
         self._count_request()
         return resp["startPageToken"]
@@ -1020,17 +1017,21 @@ class GoogleDriveClient:
         page_token: str | None = None
         while True:
             with convert_api_errors(remote_path=remote_path):
-                resp = self._retry_transient(
-                    lambda pt=page_token: self._get_service()
-                    .files()
-                    .list(
-                        q=query,
-                        fields=f"nextPageToken, files({FILE_FIELDS})",
-                        pageSize=page_size,
-                        pageToken=pt,
+
+                def _list_folder_page(pt: str | None = page_token) -> Any:
+                    return (
+                        self._get_service()
+                        .files()
+                        .list(
+                            q=query,
+                            fields=f"nextPageToken, files({FILE_FIELDS})",
+                            pageSize=page_size,
+                            pageToken=pt,
+                        )
+                        .execute()
                     )
-                    .execute()
-                )
+
+                resp = self._retry_transient(_list_folder_page)
             self._count_request()
             entries: list[Metadata] = []
             for file in resp.get("files", []):
@@ -1061,17 +1062,21 @@ class GoogleDriveClient:
         page_token: str | None = None
         while True:
             with convert_api_errors():
-                resp = self._retry_transient(
-                    lambda pt=page_token: self._get_service()
-                    .files()
-                    .list(
-                        q="sharedWithMe=true and trashed=false",
-                        fields=f"nextPageToken, files({FILE_FIELDS})",
-                        pageSize=_LIST_PAGE_SIZE,
-                        pageToken=pt,
+
+                def _list_shared_page(pt: str | None = page_token) -> Any:
+                    return (
+                        self._get_service()
+                        .files()
+                        .list(
+                            q="sharedWithMe=true and trashed=false",
+                            fields=f"nextPageToken, files({FILE_FIELDS})",
+                            pageSize=_LIST_PAGE_SIZE,
+                            pageToken=pt,
+                        )
+                        .execute()
                     )
-                    .execute()
-                )
+
+                resp = self._retry_transient(_list_shared_page)
             self._count_request()
             items.extend(resp.get("files", []))
             page_token = resp.get("nextPageToken")
@@ -1094,10 +1099,7 @@ class GoogleDriveClient:
         # lands mid-listing is not missed by the first poll cycle.
         with convert_api_errors():
             token_resp = self._retry_transient(
-                lambda: self._get_service()
-                .changes()
-                .getStartPageToken()
-                .execute()
+                lambda: self._get_service().changes().getStartPageToken().execute()
             )
         start_token = token_resp["startPageToken"]
         self._count_request()
@@ -1109,17 +1111,21 @@ class GoogleDriveClient:
         page_token: str | None = None
         while True:
             with convert_api_errors():
-                resp = self._retry_transient(
-                    lambda pt=page_token: self._get_service()
-                    .files()
-                    .list(
-                        q="trashed=false",
-                        fields=f"nextPageToken, files({FILE_FIELDS})",
-                        pageSize=_LIST_PAGE_SIZE,
-                        pageToken=pt,
+
+                def _list_all_page(pt: str | None = page_token) -> Any:
+                    return (
+                        self._get_service()
+                        .files()
+                        .list(
+                            q="trashed=false",
+                            fields=f"nextPageToken, files({FILE_FIELDS})",
+                            pageSize=_LIST_PAGE_SIZE,
+                            pageToken=pt,
+                        )
+                        .execute()
                     )
-                    .execute()
-                )
+
+                resp = self._retry_transient(_list_all_page)
             self._count_request()
             raw_items.extend(resp.get("files", []))
             page_token = resp.get("nextPageToken")
@@ -1154,7 +1160,8 @@ class GoogleDriveClient:
             logger.warning(
                 "Shared roots missing from ambient listing (%d): %s; "
                 "shared content under them may not materialize",
-                len(missing), sorted(missing),
+                len(missing),
+                sorted(missing),
             )
 
         # Atomic populate. The cache BFS-filters to items reachable from
@@ -1177,14 +1184,10 @@ class GoogleDriveClient:
         # cache resolved a path for it. The final page carries the
         # change cursor captured above.
         in_scope = [
-            it
-            for it in filtered
-            if self._path_cache.id_to_path(it["id"]) is not None
+            it for it in filtered if self._path_cache.id_to_path(it["id"]) is not None
         ]
         if not in_scope:
-            yield ListFolderResult(
-                entries=[], has_more=False, cursor=start_token
-            )
+            yield ListFolderResult(entries=[], has_more=False, cursor=start_token)
             return
         for start in range(0, len(in_scope), _LIST_PAGE_SIZE):
             chunk = in_scope[start : start + _LIST_PAGE_SIZE]
@@ -1192,8 +1195,10 @@ class GoogleDriveClient:
             entries: list[Metadata] = []
             for file in chunk:
                 # Safe to re-resolve: the cache is not mutated after
-                # populate_from_listing completed above.
+                # populate_from_listing completed above, and in_scope only
+                # holds items the cache resolved.
                 path = self._path_cache.id_to_path(file["id"])
+                assert path is not None
                 if is_google_folder(file.get("mimeType")):
                     entries.append(to_folder_metadata(file, path))
                 else:
@@ -1255,8 +1260,11 @@ class GoogleDriveClient:
                     child_path = compose_path(folder_path, file["name"])
                     is_folder = is_google_folder(mime)
                     stored = self._path_cache.set(
-                        child_path, file["id"], parent_id=folder_id,
-                        name=file["name"], is_folder=is_folder,
+                        child_path,
+                        file["id"],
+                        parent_id=folder_id,
+                        name=file["name"],
+                        is_folder=is_folder,
                     )
                     if not stored:
                         # Fold-key conflict with a different file id —
