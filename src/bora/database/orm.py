@@ -240,7 +240,35 @@ class Manager(Generic[M]):
             self.pk_column.name,
         )
 
+        self._guard_schema()
         self.create_table_if_not_exists()
+
+    def _guard_schema(self) -> None:
+        """Drops the table if its on-disk columns don't match the model.
+
+        These tables (index, history, hash cache, ...) are derived caches:
+        every row can be reconstructed from a full remote re-sync or local
+        rescan. When a released model gains/loses/renames a column, an
+        on-disk table from an older version would otherwise silently diverge
+        from the model, e.g. queries selecting the new column would fail or
+        ``INSERT`` with the precomputed column list would raise. Since these
+        are caches, the sanctioned fix is DROP + recreate (never ALTER
+        TABLE) -- :meth:`create_table_if_not_exists` recreates the table
+        with the current schema immediately afterwards, and callers already
+        handle a freshly emptied index via the normal bootstrap path.
+
+        A missing table (fresh database) is a no-op; creation is handled by
+        :meth:`create_table_if_not_exists`. A table whose columns already
+        match the model is left untouched -- rows must not be dropped on
+        every open.
+        """
+        rows = self.db.execute(f"PRAGMA table_info({self.table_name});").fetchall()
+        if not rows:
+            return
+        existing_columns = {row["name"] for row in rows}
+        expected_columns = {col.name for col in self.model.__columns__}
+        if existing_columns != expected_columns:
+            self.db.executescript(f"DROP TABLE IF EXISTS {self.table_name};")
 
     def create_table_if_not_exists(self) -> None:
         """Creates the table as defined by the model."""
