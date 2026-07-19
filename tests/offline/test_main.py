@@ -62,6 +62,32 @@ def test_bora_wires_path_cache_into_client(m: Bora) -> None:
     assert isinstance(m.client._path_cache, PathIDCache)
 
 
+def test_export_google_docs_property_reflects_conf(m: Bora) -> None:
+    assert m.export_google_docs is True
+
+    m.export_google_docs = False
+
+    assert m.export_google_docs is False
+    assert m._conf.get("sync", "export_google_docs") is False
+
+    m.export_google_docs = True
+
+    assert m._conf.get("sync", "export_google_docs") is True
+
+
+def test_export_google_docs_markdown_property_reflects_conf(m: Bora) -> None:
+    assert m.export_google_docs_markdown is True
+
+    m.export_google_docs_markdown = False
+
+    assert m.export_google_docs_markdown is False
+    assert m._conf.get("sync", "export_google_docs_markdown") is False
+
+    m.export_google_docs_markdown = True
+
+    assert m._conf.get("sync", "export_google_docs_markdown") is True
+
+
 def test_shutdown_daemon_calls_client_close(m: Bora) -> None:
     """Stage 5: shutdown_daemon must call client.close() before stop_sync()
     so that any in-flight change-feed poll is aborted before workers are joined."""
