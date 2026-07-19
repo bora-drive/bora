@@ -115,7 +115,14 @@ def to_file_metadata(
     rev: str
     content_hash: str | None
     if opts.enabled and is_exportable(mime):
-        rev = str(file["version"])
+        # Native docs have no headRevisionId; Drive's monotonic `version`
+        # counter is the export identity's rev. Its presence on the live API
+        # is unverified, so fail soft: a missing `version` falls back to the
+        # (also change-sensitive) modifiedTime rather than raising KeyError
+        # out of iter_remote_changes, which would wedge every poll cycle
+        # (plan-authorized fallback).
+        version = file.get("version")
+        rev = str(version) if version is not None else file.get("modifiedTime", "")
         content_hash = None
         export_mime = export_target(cast(str, mime), opts.markdown)[0]
     else:
