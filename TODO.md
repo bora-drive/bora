@@ -154,13 +154,31 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   and `bora export markdown off` re-exports as `.docx`.
 - [ ] Verify empirically that the live Drive `version` field is present and
   monotonically increments on native-doc edits (design assumption replacing
-  `headRevisionId`; UNVERIFIED against live Drive — fall back to `modifiedTime`
-  if not). Part of the skipped live check.
-- [ ] DEFECT: a server-side re-export of an exported mirror spawns a spurious
-  writable conflicted copy of the prior mirror (exports have no server hash, so
-  `_check_download_conflict` falls through to the ctime heuristic, and the
-  read-only chmod bumps ctime after `last_sync` is recorded). Re-export itself
-  succeeds; the litter accumulates one copy per edit.
+  `headRevisionId`; UNVERIFIED against live Drive). The `modifiedTime` fallback
+  is now implemented — `to_file_metadata` reads `version` via `.get` and
+  derives the rev from `modifiedTime` when it is absent, so a missing field
+  degrades gracefully instead of wedging the poll cycle. Part of the skipped
+  live check.
+- [x] FIXED (f15d19c, with tests): a server-side re-export of an exported
+  mirror used to spawn a spurious writable conflicted copy of the prior mirror
+  (exports have no server hash, so `_check_download_conflict` fell through to
+  the ctime heuristic, and the read-only chmod bumps ctime after `last_sync` is
+  recorded). `_check_download_conflict` now decides an *untouched* mirror the
+  robust way — byte-comparing the local file against the surviving
+  `download_only` index row's `content_hash` — so a re-export of an unedited
+  mirror is `RemoteNewer` (no conflict copy); only a genuinely edited mirror is
+  preserved.
+- [ ] KNOWN LIMITATION (rebuild-with-mirrors): the fix above depends on the
+  `download_only` index row (holding the export hash) surviving. After a
+  `rebuild-index` / `reset_sync_state` / re-link while exported mirrors are
+  already on disk, that row is gone, so an untouched mirror no longer matches
+  and hits the ctime heuristic instead. Result: with export ON the mirror is
+  conflict-copied and (being writable) re-uploaded to Drive as a new binary;
+  with export OFF the mirror uploads as a new binary. First upgrade is safe —
+  no mirrors exist yet when the schema-drift reset runs. Suggested future fix:
+  byte-compare freshly exported bytes against the local file via the
+  `.bora-part` sidecar and adopt the mirror silently on a match (no
+  conflict copy, no upload), re-seeding the index row.
 
 ---
 
