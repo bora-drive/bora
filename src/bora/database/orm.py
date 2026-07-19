@@ -240,6 +240,13 @@ class Manager(Generic[M]):
             self.pk_column.name,
         )
 
+        # Set by _guard_schema when an on-disk table was dropped for column
+        # drift. Callers (e.g. SyncEngine._create_or_load_db) read this to pair
+        # the drop with a sync-state reset -- the dropped tables are a derived
+        # cache, but sibling state (the change-feed cursor) survives in the
+        # state file and must be reset so the cache is re-derived from scratch.
+        self.did_drop_table = False
+
         self._guard_schema()
         self.create_table_if_not_exists()
 
@@ -261,6 +268,11 @@ class Manager(Generic[M]):
         :meth:`create_table_if_not_exists`. A table whose columns already
         match the model is left untouched -- rows must not be dropped on
         every open.
+
+        Sets :attr:`did_drop_table` when a drop happens so the owner can pair
+        the drop with a reset of any sibling state that survives it (e.g. the
+        engine's change-feed cursor, which lives in the state file, not this
+        table).
         """
         rows = self.db.execute(f"PRAGMA table_info({self.table_name});").fetchall()
         if not rows:
@@ -269,6 +281,7 @@ class Manager(Generic[M]):
         expected_columns = {col.name for col in self.model.__columns__}
         if existing_columns != expected_columns:
             self.db.executescript(f"DROP TABLE IF EXISTS {self.table_name};")
+            self.did_drop_table = True
 
     def create_table_if_not_exists(self) -> None:
         """Creates the table as defined by the model."""

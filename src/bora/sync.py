@@ -623,6 +623,35 @@ class SyncEngine:
             self._history_table = Manager(self._db, SyncEvent)
             self._hash_table = Manager(self._db, HashCacheEntry)
             self._sync_errors_table = Manager(self._db, SyncErrorEntry)
+            dropped_on_drift = any(
+                table.did_drop_table
+                for table in (
+                    self._index_table,
+                    self._history_table,
+                    self._hash_table,
+                    self._sync_errors_table,
+                )
+            )
+
+        if dropped_on_drift:
+            # Schema drift dropped one or more derived-cache tables (e.g. an
+            # upgrade that added the download_only column). The remote cursor
+            # lives in the state file and survives the drop, so without this
+            # reset the engine would run an empty index against a live cursor:
+            # the change feed only emits future edits, so pre-existing rows
+            # (including previously exported native docs) would never be
+            # re-derived and deletion / conflict propagation would stay broken
+            # until a manual rebuild. Reset sync state so the normal bootstrap
+            # full listing (remote_cursor == "") runs -- this mirrors
+            # BoraApp._update_from_pre_v1_6_0, which likewise pairs a
+            # derived-cache drop with reset_to_defaults("sync"). Safe on first
+            # upgrade: no local mirrors exist yet, so re-derivation is clean.
+            self._logger.info(
+                "Schema drift dropped cache tables; resetting sync state to "
+                "trigger a full reindex"
+            )
+            self._state.reset_to_defaults("sync")
+            self.reload_cached_config()
 
     def reload_cached_config(self) -> None:
         """
