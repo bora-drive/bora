@@ -70,7 +70,14 @@ from .exceptions import (
     UnsupportedFileError,
 )
 from .export import ExportOptions, project_leaf_name
-from .native_docs import is_exportable, is_google_folder, is_google_native, is_shortcut
+from .native_docs import (
+    export_target,
+    is_exportable,
+    is_google_folder,
+    is_google_native,
+    is_shortcut,
+    is_unsupported_native,
+)
 from .path_cache import PathIDCache
 from .path_codec import compose_path, fold_path
 from .utils import natural_size
@@ -738,9 +745,17 @@ class GoogleDriveClient:
         error messages; otherwise *remote_path* is resolved through the
         path cache.
 
+        When *remote_path* resolves to an exportable native doc
+        (Docs/Sheets/Slides) and ``self.export_opts.enabled`` is
+        ``True``, the file is instead streamed via
+        ``files().export_media`` and its content hash is computed
+        locally (Drive has no server-side md5 for exports, so no
+        :exc:`DataCorruptionError` check applies to this path).
+
         :raises NotFoundError: if *remote_path* is unknown to the cache.
-        :raises UnsupportedFileError: if it resolves to a native doc.
-        :raises DataCorruptionError: on an MD5 mismatch.
+        :raises UnsupportedFileError: if it resolves to a native doc that
+            is not exportable, or is exportable but export is disabled.
+        :raises DataCorruptionError: on an MD5 mismatch (get_media path only).
         """
         self._ensure_root_id()
         if file_id is None:
@@ -760,13 +775,27 @@ class GoogleDriveClient:
                 .execute()
             )
             self._count_request()
-            if is_google_native(meta_file.get("mimeType")):
+            mime = meta_file.get("mimeType")
+            if is_unsupported_native(mime):
                 raise UnsupportedFileError(
                     "Cannot download file",
-                    "Google-native documents (Docs, Sheets, Slides, "
+                    "Google-native documents (Forms, Sites, Drawings, "
                     "etc.) cannot be synced as files.",
                     remote_path=remote_path,
                     local_path=local_path,
+                )
+            if is_exportable(mime):
+                if not self.export_opts.enabled:
+                    raise UnsupportedFileError(
+                        "Cannot download file",
+                        "Google-native documents (Docs, Sheets, Slides, "
+                        "etc.) cannot be synced as files.",
+                        remote_path=remote_path,
+                        local_path=local_path,
+                    )
+                return self._download_export(
+                    meta_file, mime, file_id, remote_path, local_path,
+                    tmp_path, sync_event,
                 )
             request = self._get_service().files().get_media(fileId=file_id)
             try:
@@ -804,6 +833,56 @@ class GoogleDriveClient:
                     os.remove(tmp_path)
                 raise
         return to_file_metadata(meta_file, remote_path)
+
+    def _download_export(
+        self,
+        meta_file: dict[str, Any],
+        mime: str,
+        file_id: str,
+        remote_path: str,
+        local_path: str,
+        tmp_path: str,
+        sync_event: SyncEvent | None,
+    ) -> FileMetadata:
+        """Downloads an exportable native doc via ``files().export_media``.
+
+        Mirrors the ``get_media`` path's chunked-download / sidecar /
+        atomic-rename structure, but there is no server-side md5 for an
+        export, so the content hash is computed locally from the
+        downloaded bytes instead of being checked against Drive.
+        """
+        export_mime, _ext = export_target(mime, self.export_opts.markdown)
+        request = self._get_service().files().export_media(
+            fileId=file_id, mimeType=export_mime
+        )
+        try:
+            with open(tmp_path, "wb") as fh:
+                downloader = MediaIoBaseDownload(
+                    fh, request, chunksize=_DOWNLOAD_CHUNK_SIZE
+                )
+                done = False
+                while not done:
+                    status, done = self._retry_transient(
+                        lambda: downloader.next_chunk()
+                    )
+                    if sync_event is not None and status is not None:
+                        sync_event.completed = status.resumable_progress
+                    self._throttle_down(_DOWNLOAD_CHUNK_SIZE)
+            self._count_request()
+
+            hasher = hashlib.md5(usedforsecurity=False)
+            with open(tmp_path, "rb") as fh:
+                for block in iter(lambda: fh.read(1 << 20), b""):
+                    hasher.update(block)
+            os.replace(tmp_path, local_path)
+        except BaseException:
+            with suppress(OSError):
+                os.remove(tmp_path)
+            raise
+        md = to_file_metadata(meta_file, remote_path, export_opts=self.export_opts)
+        md.content_hash = hasher.hexdigest()
+        md.size = os.path.getsize(local_path)
+        return md
 
     def _throttle_down(self, nbytes: int) -> None:
         """Crude download bandwidth throttle: sleep proportionally to the
