@@ -4123,6 +4123,19 @@ class SyncEngine:
         if self._is_read_only_event(event):
             self._apply_read_only(event.local_path, is_dir=False)
 
+        if event.download_only:
+            # Exported read-only mirror of a native doc (Docs/Sheets/Slides):
+            # clear the write bits so an accidental local edit can't silently
+            # diverge from Drive. Ignore the resulting chmod so it is not
+            # echoed back as a local modification.
+            with self.fs_events.ignore(
+                FileModifiedEvent(event.local_path), recursive=False
+            ):
+                try:
+                    os.chmod(event.local_path, 0o444)
+                except OSError as err:
+                    self._logger.debug("Cannot set read-only: %s", err)
+
         self._save_local_hash(
             stat.st_ino, event.local_path, event.content_hash, stat.st_mtime
         )

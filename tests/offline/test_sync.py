@@ -21,6 +21,7 @@ from bora.core import (
 )
 from bora.database.core import Database
 from bora.exceptions import DataChangedError
+from bora.export import ExportOptions
 from bora.keyring import CredentialStorage
 from bora.models import (
     ChangeType,
@@ -3413,4 +3414,82 @@ def test_non_symlink_delete_in_readonly_folder_not_gated_by_parent_check(
 
     assert status == SyncStatus.Done
     assert calls == [remote_path]
+
+
+# ==== Task 7 (export): exported mirrors are chmod'd read-only on download ===
+#
+# client.download() exports natives (returns FileMetadata with export_mime +
+# a locally-computed md5), SyncEvent.from_metadata sets download_only from
+# md.export_mime, and update_index_from_sync_event persists it. This drives
+# a full download cycle for a native Doc through the real
+# client.download -> SyncEvent.from_metadata -> _on_remote_file seam and
+# asserts the on-disk read-only bit + persisted download_only/content_hash.
+
+
+_DOCX_MIME = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+
+def test_export_download_marks_file_read_only_and_download_only(
+    sync_engine: SyncEngine,
+) -> None:
+    """A full download cycle for an exportable native Doc (export enabled)
+    must land the exported bytes locally, chmod the local mirror read-only,
+    and persist download_only=1 alongside the exported content's md5 in the
+    index -- exercising the real _on_remote_file code path rather than
+    hand-rolling the assertions.
+
+    The seeded event's content_hash is the real pre-download ``None`` that
+    ``to_file_metadata`` produces for exportable docs (Drive has no
+    server-side hash for an export), exercising the true first-download path.
+    This relies on the ``_check_download_conflict`` fix that stops a None
+    remote hash from being misread as "identical" to a None local hash for a
+    not-yet-downloaded path (see the preceding conflict-check fix commit)."""
+    fake = FakeDrive()
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client.export_opts = ExportOptions(True, False)
+
+    file_id = fake.add_native(name="Report", kind="document")
+    content = b"exported docx bytes"
+    fake.set_export_bytes(file_id, _DOCX_MIME, content)
+    # SyncEvent.from_metadata (called internally by _on_remote_file with the
+    # post-download metadata) falls back to sync_engine.client.account_info
+    # for change_remote_id when md.shared is False, which requires a linked
+    # account. Mark shared=True (mirrors the read-only-folder test's
+    # approach below) so it takes the md.modified_by branch instead.
+    fake.files[file_id]["shared"] = True
+
+    local_path = sync_engine.to_local_path_from_cased("/Report.docx")
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path="/Report.docx",
+        remote_path_lower="/report.docx",
+        remote_id=file_id,
+        local_path=local_path,
+        rev="0",
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+    status = sync_engine._on_remote_file(event)
+
+    assert status == SyncStatus.Done
+    assert os.path.isfile(local_path)
+    with open(local_path, "rb") as f:
+        assert f.read() == content
+
+    mode = os.stat(local_path).st_mode
+    assert mode & 0o222 == 0, "exported mirror must be written read-only"
+
+    entry = sync_engine.get_index_entry("/report.docx")
+    assert entry is not None
+    assert entry.is_download_only is True
+    assert entry.content_hash == _md5(content)
 
