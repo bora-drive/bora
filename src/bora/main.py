@@ -1464,6 +1464,7 @@ class Bora:
         # poll is signalled here.
         self.client.close()
         self.stop_sync()
+        self.sync.close()
         self._client_db.close()
 
         if self.shutdown_future and self._loop and self._loop.is_running():
