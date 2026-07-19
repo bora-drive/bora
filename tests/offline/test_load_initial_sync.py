@@ -110,6 +110,13 @@ def sync_engine():
 
     yield sync
 
+    # Close the index DB before purging its files. The connection is otherwise
+    # only closed by GC at an arbitrary later time — and since this fixture
+    # reuses one FIXED db path across tests, a stale open connection (or its
+    # hot journal) can corrupt the NEXT test's fresh connection at the same
+    # path, surfacing as sqlite3 "disk I/O error" / "attempt to write a
+    # readonly database" / "bad parameter or other API misuse" flakes.
+    sync._db.close()
     _purge_load_state(local_dir)
 
 

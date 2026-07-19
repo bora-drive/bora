@@ -3267,3 +3267,75 @@ def test_non_symlink_delete_in_readonly_folder_not_gated_by_parent_check(
     assert status == SyncStatus.Done
     assert calls == [remote_path]
 
+
+
+# ==== DB lock discipline for read-only gates ================================
+#
+# Regression tests for a thread-safety crash seen in CI
+# (test_s0_crash_resume_small on macOS / Python 3.14): the read-only gates
+# queried the index table directly, without _database_access(). They run
+# inside do_parallel worker threads (via _create_local_entry /
+# _create_remote_entry), so the unlocked read races with locked statements
+# from sibling workers on the shared sqlite3 connection and crashes with
+# sqlite3.InterfaceError ("bad parameter or other API misuse").
+
+
+def _forbid_unlocked_db_statements(sync_engine: SyncEngine, monkeypatch) -> None:
+    """Patch the engine's Database.execute to fail any statement that is
+    executed without holding the engine's _db_lock."""
+    real_execute = sync_engine._db.execute
+
+    def checked_execute(sql, *args):
+        assert sync_engine._db_lock._is_owned(), (
+            f"database statement executed without _db_lock held: {sql}"
+        )
+        return real_execute(sql, *args)
+
+    monkeypatch.setattr(sync_engine._db, "execute", checked_execute)
+
+
+def test_read_only_gates_hold_db_lock(sync_engine: SyncEngine, monkeypatch) -> None:
+    """_is_read_only_event and _parent_is_read_only must serialize their index
+    lookups through _database_access()."""
+    event = _download_event(sync_engine, "/folder/nope.pdf", "r1", "h")
+
+    _forbid_unlocked_db_statements(sync_engine, monkeypatch)
+
+    assert sync_engine._is_read_only_event(event) is False
+    assert sync_engine._parent_is_read_only(event) is False
+
+
+def test_local_symlink_gate_holds_db_lock(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """The known-shortcut index lookup in _on_local_file_modified must
+    serialize through _database_access()."""
+    from bora.exceptions import SymlinkError
+
+    event = _local_modified_event(sync_engine, "/nope/link", content_hash="unused")
+    event.symlink_target = "to_nowhere"
+
+    _forbid_unlocked_db_statements(sync_engine, monkeypatch)
+
+    # An unknown symlink still raises SymlinkError; what matters here is that
+    # the index lookups on the way there hold the lock.
+    with pytest.raises(SymlinkError):
+        sync_engine._on_local_file_modified(event)
+
+
+def test_local_deleted_symlink_gate_holds_db_lock(
+    sync_engine: SyncEngine, monkeypatch
+) -> None:
+    """The symlink-row index lookup in _on_local_deleted must serialize
+    through _database_access()."""
+    monkeypatch.setattr(
+        sync_engine.client, "get_metadata", lambda path, **kwargs: None
+    )
+
+    event = _local_deleted_event(sync_engine, "/nope/link")
+
+    _forbid_unlocked_db_statements(sync_engine, monkeypatch)
+
+    status = sync_engine._on_local_deleted(event)
+
+    assert status == SyncStatus.Skipped
