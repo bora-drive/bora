@@ -173,12 +173,17 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   `rebuild-index` / `reset_sync_state` / re-link while exported mirrors are
   already on disk, that row is gone, so an untouched mirror no longer matches
   and hits the ctime heuristic instead. Result: with export ON the mirror is
-  conflict-copied and (being writable) re-uploaded to Drive as a new binary;
-  with export OFF the mirror uploads as a new binary. First upgrade is safe —
-  no mirrors exist yet when the schema-drift reset runs. Suggested future fix:
-  byte-compare freshly exported bytes against the local file via the
-  `.bora-part` sidecar and adopt the mirror silently on a match (no
-  conflict copy, no upload), re-seeding the index row.
+  conflict-copied and re-uploaded to Drive as a new binary (the copy keeps the
+  mirror's read-only perms; upload happens regardless); with export OFF the
+  mirror uploads as a new binary. First upgrade is safe — no mirrors exist yet
+  when the schema-drift reset runs. Suggested future fix: byte-compare freshly
+  exported bytes against the local file via the `.bora-part` sidecar and adopt
+  the mirror silently on a match (no conflict copy, no upload), re-seeding the
+  index row.
+- [ ] FOLLOW-UP: `Manager.did_drop_table` is read only by the sync-engine DB
+  owner; the path-cache (client DB) `Manager` sets it with no reader. Inert
+  today (`PathCacheEntry` schema unchanged), but a future column change there
+  would hit the same drop-without-reset class of problem.
 
 ---
 
@@ -188,7 +193,7 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   `False`; no `driveId`/`supportsAllDrives` usage.
 - **Google Docs/Sheets/Slides export** — LANDED (see "Google Docs Export"
   above); Forms/Sites/Drawings remain skipped, and the live spot-check plus
-  the re-export conflicted-copy defect are still open.
+  the rebuild-with-mirrors limitation are still open.
 - **Webhook change notifications** — polling only (~180 s), by design.
 - **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
   desktop entry references `bora gui` but there is no GUI.
