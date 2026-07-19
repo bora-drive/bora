@@ -94,6 +94,23 @@ def test_to_file_metadata_rev_is_head_revision_id():
     assert md.rev == "HEADREV9"
 
 
+def test_export_rev_falls_back_to_modified_time_when_version_absent():
+    """Finding 4: a native doc under export whose Drive resource omits
+    ``version`` must not raise KeyError (which would wedge every poll cycle).
+    The rev falls back to modifiedTime, which is still change-sensitive."""
+    doc = {
+        "id": "DOCID",
+        "name": "Report",
+        "mimeType": "application/vnd.google-apps.document",
+        "modifiedTime": "2026-01-02T03:04:05.678Z",
+        # No "version" key at all.
+    }
+    md = to_file_metadata(doc, "/Report.docx", export_opts=ExportOptions(True, False))
+    assert md.rev == "2026-01-02T03:04:05.678Z"
+    assert md.export_mime == DOCX_MIME
+    assert md.content_hash is None
+
+
 def test_to_folder_metadata_maps_fields():
     meta = to_folder_metadata(SAMPLE_FOLDER, "/Documents")
     assert isinstance(meta, FolderMetadata)
