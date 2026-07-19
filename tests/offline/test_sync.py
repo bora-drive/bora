@@ -3965,3 +3965,187 @@ def test_export_toggle_on_to_off_does_not_reindex(sync_engine: SyncEngine) -> No
     assert sync_engine.index_count() == 1
     assert sync_engine.remote_cursor == "SOME-CURSOR"
 
+
+# ==== Task 12 (export): full-cycle end-to-end integration test ==============
+#
+# Capstone verification for the Google Docs export feature. Unlike the
+# per-task unit tests above (which drive a single hand-built SyncEvent through
+# a specific seam), this test runs the REAL download engine end to end:
+# SyncEngine.download_sync_cycle -> client.list_folder_iterator /
+# list_remote_changes_iterator -> SyncEvent.from_metadata -> apply_remote_changes
+# -> _on_remote_file -> client.download (export_media). Nothing is poked into the
+# index directly; every leg is produced by the engine from FakeDrive state.
+#
+# The five legs (per the Task 12 brief):
+#   1+2. multi-type export on a full initial index: Doc -> Report.md (markdown
+#        default ON), Sheet -> Book.xlsx, Slides -> Deck.pptx, all read-only +
+#        download_only; a Form never lands on disk;
+#   3.   a server-side edit (Drive `version` bump) re-exports the Doc mirror
+#        via the change feed, content updated, stays read-only;
+#   4.   flipping export_google_docs_markdown OFF re-projects the Doc mirror to
+#        Report.docx, keyed by the same remote_id, old .md removed;
+#   5.   the Form still never lands on disk.
+#
+# KNOWN DEFECT surfaced by this test (see .superpowers/sdd/task-12-report.md):
+# an exported mirror has NO server-side content hash (Drive provides no md5 for
+# exports, so SyncEvent.content_hash is None), and _on_remote_file records the
+# index `last_sync` from the mirror's ctime BEFORE applying the read-only chmod
+# -- which bumps the ctime. So on any subsequent server-side re-export,
+# _check_download_conflict cannot take its content-equality short-circuit and
+# falls through to the ctime heuristic, which reads the untouched mirror as
+# "locally modified" -> Conflict -> a spurious writable conflicted copy of the
+# prior mirror. The re-export itself still succeeds (content updated, read-only),
+# so the brief's positive assertions hold; the conflicted-copy litter is
+# asserted below as characterization so the defect is visible and regression-
+# locked until it is fixed.
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_PPTX_MIME = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+)
+_MD_MIME = "text/markdown"
+
+
+def _wire_export_cycle(sync_engine: SyncEngine, fake: FakeDrive) -> None:
+    """Wire the offline SyncEngine's client onto a FakeDrive for a real
+    download_sync_cycle: fake Drive service, a linked account (from_metadata
+    reads account_info for non-shared items), and neutralised retry backoff."""
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Export Tester",
+        email="export@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+    sync_engine.client._poll_event = Mock()
+    sync_engine.client._poll_event.wait = Mock(return_value=False)
+    sync_engine.client._poll_event.is_set = Mock(return_value=False)
+
+
+def _conflicted_copies(directory: str) -> list[str]:
+    return sorted(n for n in os.listdir(directory) if "conflicted copy" in n)
+
+
+def _is_read_only(path: str) -> bool:
+    return (os.stat(path).st_mode & 0o222) == 0
+
+
+def test_export_full_cycle_integration(sync_engine: SyncEngine) -> None:
+    """End-to-end export cycle through the real download engine (Task 12).
+
+    Drives SyncEngine.download_sync_cycle against FakeDrive across all five
+    legs of the brief. Every mirror is produced by the engine (no direct index
+    seeding), and assertions are made on real on-disk bytes/permissions, the
+    persisted index, and FakeDrive state."""
+    local_dir = sync_engine.sync_path
+    L = sync_engine.to_local_path_from_cased
+
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+
+    # Export is ON by default for both keys (verified by the Task 10 tests).
+    assert sync_engine.client.export_opts.enabled is True
+    assert sync_engine.client.export_opts.markdown is True
+
+    # ---- Leg 1: seed native Doc / Sheet / Slides / Form on FakeDrive -------
+    doc = fake.add_native(name="Report", kind="document")
+    sheet = fake.add_native(name="Book", kind="spreadsheet")
+    slides = fake.add_native(name="Deck", kind="presentation")
+    form = fake.add_native(name="Survey", kind="form")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Report v1\n")
+    fake.set_export_bytes(sheet, _XLSX_MIME, b"xlsx-bytes-v1")
+    fake.set_export_bytes(slides, _PPTX_MIME, b"pptx-bytes-v1")
+
+    # ---- Leg 2: full initial download cycle --------------------------------
+    sync_engine.download_sync_cycle()
+
+    expected = {
+        "/Report.md": b"# Report v1\n",
+        "/Book.xlsx": b"xlsx-bytes-v1",
+        "/Deck.pptx": b"pptx-bytes-v1",
+    }
+    for remote_path, content in expected.items():
+        local = L(remote_path)
+        assert osp.isfile(local), f"{remote_path} was not exported to disk"
+        with open(local, "rb") as fh:
+            assert fh.read() == content, f"{remote_path} has wrong exported bytes"
+        assert _is_read_only(local), f"{remote_path} mirror must be read-only"
+        entry = sync_engine.get_index_entry(remote_path.lower())
+        assert entry is not None, f"{remote_path} missing from index"
+        assert entry.is_download_only is True, f"{remote_path} not download_only"
+        assert entry.content_hash == _md5(content)
+
+    # ---- Leg 5 (part 1): the Form never lands on disk or in the index ------
+    assert not any("Survey" in n for n in os.listdir(local_dir)), os.listdir(local_dir)
+    assert sync_engine.get_index_entry_by_remote_id(form) is None
+    # No conflicted copies from a clean first download.
+    assert _conflicted_copies(local_dir) == []
+
+    # ---- Leg 3: server-side edit bumps the Doc's version; re-export --------
+    fake.set_export_bytes(doc, _MD_MIME, b"# Report v2 EDITED\n")
+    fake._record_change(doc, is_edit=True)  # bumps Drive `version`, logs change
+    doc_rev_before = sync_engine.get_index_entry("/report.md").rev
+
+    sync_engine.download_sync_cycle()
+
+    report_md = L("/Report.md")
+    assert osp.isfile(report_md)
+    with open(report_md, "rb") as fh:
+        assert fh.read() == b"# Report v2 EDITED\n", "mirror was not re-exported"
+    assert _is_read_only(report_md), "re-exported mirror must stay read-only"
+    md_entry = sync_engine.get_index_entry("/report.md")
+    assert md_entry is not None and md_entry.is_download_only is True
+    assert md_entry.rev != doc_rev_before, "index rev must advance on re-export"
+    # The mirror is still keyed by the Doc's remote_id (an in-place re-export).
+    assert md_entry.remote_id == doc
+
+    # KNOWN DEFECT (characterization): the server-side re-export spawns exactly
+    # one spurious conflicted copy of the PRIOR (v1) mirror. Remove this block
+    # once the ctime/last_sync ordering defect is fixed.
+    ccs = _conflicted_copies(local_dir)
+    assert len(ccs) == 1 and ccs[0].endswith(".md"), ccs
+    with open(osp.join(local_dir, ccs[0]), "rb") as fh:
+        assert fh.read() == b"# Report v1\n"
+
+    # ---- Leg 4: flip markdown OFF; a subsequent server edit re-projects ----
+    # The markdown toggle alone re-emits nothing (it does not reset sync state
+    # nor trigger a re-list); a real cycle converges the projection change on
+    # the next server-side edit, which the change feed delivers with the new
+    # Report.docx projection against the indexed Report.md -> a rename by
+    # remote_id + a content re-export as .docx.
+    sync_engine._conf.set("sync", "export_google_docs_markdown", False)
+    sync_engine.reload_cached_config()
+    assert sync_engine.client.export_opts.markdown is False
+
+    fake.set_export_bytes(doc, _DOCX_MIME, b"docx-bytes-v3")
+    fake._record_change(doc, is_edit=True)
+
+    sync_engine.download_sync_cycle()
+
+    report_docx = L("/Report.docx")
+    assert osp.isfile(report_docx), "Doc mirror did not re-project to .docx"
+    with open(report_docx, "rb") as fh:
+        assert fh.read() == b"docx-bytes-v3", "Report.docx has wrong exported bytes"
+    assert _is_read_only(report_docx), "re-projected mirror must be read-only"
+    docx_entry = sync_engine.get_index_entry("/report.docx")
+    assert docx_entry is not None and docx_entry.is_download_only is True
+    # Same Drive document, now keyed at the new projected path (rename by id).
+    assert docx_entry.remote_id == doc
+    # The old .md mirror is gone from disk and from the index.
+    assert not osp.isfile(L("/Report.md")), "old .md mirror was not removed"
+    assert sync_engine.get_index_entry("/report.md") is None
+
+    # KNOWN DEFECT (characterization): the .md -> .docx re-export adds one more
+    # spurious conflicted copy (of the v2 mirror), for two in total. Remove
+    # once the ctime/last_sync ordering defect is fixed.
+    ccs = _conflicted_copies(local_dir)
+    assert len(ccs) == 2, ccs
+
+    # ---- Leg 5 (part 2): the Form STILL never lands on disk ----------------
+    assert not any("Survey" in n for n in os.listdir(local_dir)), os.listdir(local_dir)
+    assert sync_engine.get_index_entry_by_remote_id(form) is None
+
+    # The other mirrors are untouched by the Doc-only edits.
+    assert osp.isfile(L("/Book.xlsx")) and osp.isfile(L("/Deck.pptx"))
+
