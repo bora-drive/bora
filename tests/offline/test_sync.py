@@ -2194,6 +2194,126 @@ def test_get_remote_item_creates_shared_with_me_mount(
         assert f.read() == content
 
 
+# ==== Task 6: download_only index column threaded from export_mime metadata =
+
+
+def test_index_records_download_only_from_metadata(
+    sync_engine: SyncEngine,
+) -> None:
+    """update_index_from_remote_metadata must derive IndexEntry.download_only
+    from the metadata's export_mime field, so exported native docs
+    (Google Docs/Sheets/Slides) are flagged as read-only local mirrors."""
+    remote_path_lower = "/doc.gdoc"
+    md = FileMetadata(
+        name="doc.gdoc",
+        path_lower=remote_path_lower,
+        path_display="/doc.gdoc",
+        id="D1",
+        modified=datetime.today(),
+        rev="r1",
+        size=1,
+        symlink_target=None,
+        shared=False,
+        modified_by=None,
+        is_downloadable=True,
+        content_hash=None,
+        can_edit=True,
+        export_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+    sync_engine.update_index_from_remote_metadata(md)
+
+    entry = sync_engine.get_index_entry(remote_path_lower)
+    assert entry is not None
+    assert entry.is_download_only is True
+
+
+def test_index_records_download_only_false_without_export_mime(
+    sync_engine: SyncEngine,
+) -> None:
+    """An ordinary binary file (export_mime unset) must not be flagged
+    download_only."""
+    remote_path_lower = "/plain.txt"
+    md = FileMetadata(
+        name="plain.txt",
+        path_lower=remote_path_lower,
+        path_display="/plain.txt",
+        id="P1",
+        modified=datetime.today(),
+        rev="r1",
+        size=1,
+        symlink_target=None,
+        shared=False,
+        modified_by=None,
+        is_downloadable=True,
+        content_hash="h",
+        can_edit=True,
+    )
+
+    sync_engine.update_index_from_remote_metadata(md)
+
+    entry = sync_engine.get_index_entry(remote_path_lower)
+    assert entry is not None
+    assert entry.is_download_only is False
+
+
+def test_index_records_download_only_false_for_folder(
+    sync_engine: SyncEngine,
+) -> None:
+    """Folders are never exportable native docs, so download_only must be
+    falsy for FolderMetadata regardless of can_edit."""
+    remote_path_lower = "/afolder"
+    md = FolderMetadata(
+        name="afolder",
+        path_lower=remote_path_lower,
+        path_display="/afolder",
+        id="F1",
+        shared=False,
+        can_edit=True,
+    )
+
+    sync_engine.update_index_from_remote_metadata(md)
+
+    entry = sync_engine.get_index_entry(remote_path_lower)
+    assert entry is not None
+    assert entry.is_download_only is False
+
+
+def test_sync_event_from_metadata_sets_download_only_from_export_mime(
+    sync_engine: SyncEngine,
+) -> None:
+    """SyncEvent.from_metadata must set download_only truthy iff the
+    remote metadata's export_mime is set, and update_index_from_sync_event
+    (the seam used by the real download-apply path) must thread that value
+    through to the resulting IndexEntry."""
+    remote_path_lower = "/exported.gsheet"
+    md = FileMetadata(
+        name="exported.gsheet",
+        path_lower=remote_path_lower,
+        path_display="/exported.gsheet",
+        id="S1",
+        modified=datetime.today(),
+        rev="r1",
+        size=1,
+        symlink_target=None,
+        shared=True,
+        modified_by="tester",
+        is_downloadable=True,
+        content_hash=None,
+        can_edit=True,
+        export_mime="text/csv",
+    )
+
+    event = SyncEvent.from_metadata(md, sync_engine)
+    assert event.download_only == 1
+
+    sync_engine.update_index_from_sync_event(event)
+
+    entry = sync_engine.get_index_entry(remote_path_lower)
+    assert entry is not None
+    assert entry.is_download_only is True
+
+
 # ==== Task 7: read_only index column threaded from can_edit metadata =========
 
 

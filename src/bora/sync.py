@@ -1084,6 +1084,19 @@ class SyncEngine:
                     existing = self._index_table.get(remote_path_lower)
                     read_only = existing.read_only if existing is not None else 0
 
+                # download_only mirrors the read_only fallback above:
+                # SyncEvent.from_metadata sets it from the remote metadata's
+                # export_mime, but events not derived from remote metadata
+                # (e.g. local file system events) leave it unset, so fall
+                # back to the existing index row's value in that case.
+                if event.download_only is not None:
+                    download_only = event.download_only
+                else:
+                    existing = self._index_table.get(remote_path_lower)
+                    download_only = (
+                        (existing.download_only or 0) if existing is not None else 0
+                    )
+
                 # Create or update entry.
                 entry = IndexEntry(
                     remote_path_cased=event.remote_path,
@@ -1095,6 +1108,7 @@ class SyncEngine:
                     content_hash=event.content_hash,
                     symlink_target=event.symlink_target,
                     read_only=read_only,
+                    download_only=download_only,
                 )
 
                 self._index_table.update(entry)
@@ -1116,6 +1130,9 @@ class SyncEngine:
                 symlink_target = md.symlink_target
                 md_id = md.id
                 read_only = int(not md.can_edit)
+                # export_mime is set for exportable native docs (Google
+                # Docs/Sheets/Slides) rendered as a read-only local mirror.
+                download_only = 1 if md.export_mime else None
             elif isinstance(md, FolderMetadata):
                 rev = "folder"
                 hash_str = "folder"
@@ -1123,6 +1140,8 @@ class SyncEngine:
                 symlink_target = None
                 md_id = md.id
                 read_only = int(not md.can_edit)
+                # Folders are never exportable native docs.
+                download_only = None
             else:
                 raise RuntimeError(f"Unknown metadata type: {md}")
 
@@ -1154,6 +1173,7 @@ class SyncEngine:
                 content_hash=hash_str,
                 symlink_target=symlink_target,
                 read_only=read_only,
+                download_only=download_only,
             )
 
             self._index_table.update(entry)

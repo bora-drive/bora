@@ -199,6 +199,15 @@ class SyncEvent(Model):
     should fall back to the existing index row in that case.
     """
 
+    download_only = Column(SqlInt())
+    """
+    1 if this download represents an exportable native doc (Google Docs/
+    Sheets/Slides) rendered as a read-only local mirror, i.e. the remote
+    metadata's ``export_mime`` was set. ``None`` when this event was not
+    derived from remote file metadata (e.g. local file system events or
+    folder/deletion events), for which the flag is not meaningful.
+    """
+
     change_type = NonNullColumn(SqlEnum(ChangeType))
     """
     The :class:`ChangeType`. Remote SyncEvents currently do not generate moved events
@@ -319,6 +328,7 @@ class SyncEvent(Model):
             # Leave read_only unset so update_index_from_sync_event falls
             # back to removing the row rather than writing a flag for it.
             read_only = None
+            download_only = None
 
             entry = sync_engine.get_index_entry(md.path_lower)
             item_type = ItemType.Unknown if entry is None else entry.item_type
@@ -338,6 +348,8 @@ class SyncEvent(Model):
             # and FolderMetadata -- no getattr guard needed, same as the
             # direct access in update_index_from_remote_metadata.
             read_only = int(not md.can_edit)
+            # Folders are never exportable native docs.
+            download_only = None
 
         elif isinstance(md, FileMetadata):
             item_type = ItemType.File
@@ -348,6 +360,9 @@ class SyncEvent(Model):
             size = md.size
             change_time = md.modified.timestamp()
             read_only = int(not md.can_edit)
+            # export_mime is set by the client for exportable native docs
+            # (Google Docs/Sheets/Slides) rendered as a read-only mirror.
+            download_only = 1 if md.export_mime else None
             if sync_engine.get_local_rev(md.path_lower):
                 change_type = ChangeType.Modified
             else:
@@ -375,6 +390,7 @@ class SyncEvent(Model):
             content_hash=hash_str,
             symlink_target=symlink_target,
             read_only=read_only,
+            download_only=download_only,
             change_type=change_type,
             change_time=change_time,
             change_remote_id=change_remote_id,
@@ -544,6 +560,12 @@ class IndexEntry(Model):
     Consulted as the upload gate so no remote fetch is needed at local-change
     time. Defaults 0 (editable)."""
 
+    download_only = Column(SqlInt())
+    """1 if this item is an exported read-only mirror of a Google-native doc
+    (Docs/Sheets/Slides), rendered locally via Drive's export API rather than
+    downloaded byte-for-byte. ``None``/0 for ordinary files. Nullable so that
+    legacy rows (written before this column existed) read back falsy."""
+
     @property
     def is_file(self) -> bool:
         """Returns True for files"""
@@ -563,6 +585,11 @@ class IndexEntry(Model):
     def is_read_only(self) -> bool:
         """Returns True for view-only shared items."""
         return bool(self.read_only)
+
+    @property
+    def is_download_only(self) -> bool:
+        """Returns True for exported read-only mirrors of native docs."""
+        return bool(self.download_only)
 
     def __repr__(self) -> str:
         return (
