@@ -131,13 +131,46 @@ that name survives only as the Google Cloud project id `cumulus-496101` in
 
 ---
 
+## Google Docs Export (landed 2026-07-19)
+
+One-way export of native Google Workspace files to Office/Markdown on download.
+Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
+(both default ON), CLI `bora export docs on|off` / `bora export markdown on|off`.
+
+- Doc → `.md` (markdown default on) or `.docx`, Sheet → `.xlsx`, Slides → `.pptx`
+  via `files().export_media`; md5 computed locally (Drive has no server hash for
+  exports). Forms/Sites/Drawings/shortcuts stay skipped entirely.
+- Mirrors land read-only and `download_only` in the index; local edits are never
+  uploaded (a genuine local divergence is preserved as a conflicted copy).
+- Server-side edits re-export via the Drive `version` change signal; the export
+  leaf name is the canonical `remote_path` (projected across listing, change feed
+  and path cache), so a Doc keeps one identity keyed by `remote_id`.
+- Covered end-to-end by `tests/offline/test_sync.py::test_export_full_cycle_integration`.
+
+**Remaining manual work / known gaps** (see `.superpowers/sdd/task-12-report.md`):
+- [ ] Live spot-check against a real linked Google account (SKIPPED — no account
+  in this environment): verify the mirrors open correctly, a web-UI Doc edit
+  auto-updates the mirror within a poll interval, nothing is ever re-uploaded,
+  and `bora export markdown off` re-exports as `.docx`.
+- [ ] Verify empirically that the live Drive `version` field is present and
+  monotonically increments on native-doc edits (design assumption replacing
+  `headRevisionId`; UNVERIFIED against live Drive — fall back to `modifiedTime`
+  if not). Part of the skipped live check.
+- [ ] DEFECT: a server-side re-export of an exported mirror spawns a spurious
+  writable conflicted copy of the prior mirror (exports have no server hash, so
+  `_check_download_conflict` falls through to the ctime heuristic, and the
+  read-only chmod bumps ctime after `last_sync` is recorded). Re-export itself
+  succeeds; the litter accumulates one copy per edit.
+
+---
+
 ## Known limitations / deferred
 
 - **Shared Drives (Team Drives)** — My Drive only; `is_team_space` hardcoded
   `False`; no `driveId`/`supportsAllDrives` usage.
-- **Google Docs/Sheets/Slides export** — native docs are detected and skipped
-  (`native_docs.py`); export as one-way read-only mirrors is spec'd
-  (`docs/` design docs, commits `dc7588a`, `54292db`) but not implemented.
+- **Google Docs/Sheets/Slides export** — LANDED (see "Google Docs Export"
+  above); Forms/Sites/Drawings remain skipped, and the live spot-check plus
+  the re-export conflicted-copy defect are still open.
 - **Webhook change notifications** — polling only (~180 s), by design.
 - **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
   desktop entry references `bora gui` but there is no GUI.
