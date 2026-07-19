@@ -31,7 +31,7 @@ from googleapiclient.errors import HttpError
 
 from .core import DeletedMetadata, FileMetadata, FolderMetadata, ListFolderResult
 from .exceptions import CursorResetError
-from .export import ExportOptions
+from .export import ExportOptions, project_leaf_name
 from .native_docs import (
     GOOGLE_FOLDER_MIME_TYPE,
     GOOGLE_SHORTCUT_MIME_TYPE,
@@ -39,6 +39,7 @@ from .native_docs import (
     is_exportable,
     is_google_native,
     is_shortcut,
+    is_unsupported_native,
 )
 from .path_cache import SHARED_WITH_ME_ID
 from .path_codec import compose_path, fold_path
@@ -244,15 +245,20 @@ def _emit_apply(
     out_entries: list[Any],
     *,
     warn_on_conflict: bool = True,
+    export_opts: ExportOptions | None = None,
 ) -> bool:
     """Apply an in-scope create / content-update / move: write the path
     cache and append the projected metadata.
 
     Shortcuts are projected into symlink metadata via
-    :func:`_emit_shortcut`. Other native docs (Docs/Sheets/…) are still
-    dropped (no cache write, no entry). The caller invokes this only
-    when :func:`classify` returned ``APPLY``, which guarantees at least
-    one in-scope parent.
+    :func:`_emit_shortcut`. Unsupported native docs (Forms/Sites/Drawings)
+    are always dropped (no cache write, no entry). Exportable native docs
+    (Docs/Sheets/Slides) pass through with their leaf name projected
+    (``Report`` -> ``Report.docx``) only when *export_opts* is enabled;
+    otherwise they are dropped too, so export-disabled behavior is
+    byte-identical to today. The caller invokes this only when
+    :func:`classify` returned ``APPLY``, which guarantees at least one
+    in-scope parent.
 
     Returns ``True`` when the change was consumed (metadata emitted, or
     intentionally dropped as a non-shortcut native doc) and ``False``
@@ -263,14 +269,18 @@ def _emit_apply(
     ``warn_on_conflict=False`` so the duplicate-name warning fires only
     when the entry is finally dropped for good.
     """
+    opts = export_opts or ExportOptions.disabled()
     file = change["file"]
     mime = file.get("mimeType")
     if is_shortcut(mime):
         return _emit_shortcut(
             change, path_cache, out_entries, warn_on_conflict=warn_on_conflict
         )
-    # Other Google-native docs (Docs/Sheets/…) are still dropped.
-    if is_google_native(mime):
+    # Forms/Sites/Drawings are always dropped; exportable Docs/Sheets/Slides
+    # are dropped too unless export is enabled.
+    if is_unsupported_native(mime):
+        return True
+    if is_google_native(mime) and not (opts.enabled and is_exportable(mime)):
         return True
     parents = file.get("parents") or []
     parent_id = next(
@@ -285,7 +295,7 @@ def _emit_apply(
     assert parent_id is not None
     parent_path = path_cache.id_to_path(parent_id)
     assert parent_path is not None
-    new_path = compose_path(parent_path, file["name"])
+    new_path = compose_path(parent_path, project_leaf_name(file["name"], mime, opts))
     old_path = path_cache.id_to_path(file["id"])
     is_folder = mime == GOOGLE_FOLDER_MIME_TYPE
     if old_path is None:
@@ -293,7 +303,7 @@ def _emit_apply(
             new_path, file["id"], parent_id, file["name"], is_folder
         )
     elif old_path != new_path:
-        stored = path_cache.move(old_path, new_path)
+        stored = path_cache.move(old_path, new_path, name=file["name"])
     else:
         stored = True  # pure content update; cache path already correct.
     if not stored:
@@ -314,7 +324,7 @@ def _emit_apply(
     if is_folder:
         out_entries.append(to_folder_metadata(file, new_path))
     else:
-        out_entries.append(to_file_metadata(file, new_path))
+        out_entries.append(to_file_metadata(file, new_path, export_opts=opts))
     return True
 
 
@@ -405,16 +415,19 @@ def iter_remote_changes(
     path_cache: "PathIDCache",
     last_cursor: str,
     resolve_deleted_path: "Callable[[str], str | None] | None" = None,
+    export_opts: ExportOptions | None = None,
 ) -> "Iterator[ListFolderResult]":
     """Drain Drive's ``changes.list`` pages and yield one
     :class:`~bora.core.ListFolderResult` per poll cycle.
 
     Each yielded entry has its path resolved via *path_cache*, and the
     cache is mutated as a side effect (``set`` / ``move`` / ``remove``).
-    Non-shortcut native docs are dropped; shortcuts are projected into
-    symlink metadata (see :func:`_emit_shortcut`). The cursor on the
-    single yielded result is the ``newStartPageToken`` to resume polling
-    from.
+    Unsupported native docs (Forms/Sites/Drawings) are always dropped;
+    exportable Docs/Sheets/Slides pass through with a projected leaf name
+    only when *export_opts* is enabled (else dropped too); shortcuts are
+    projected into symlink metadata (see :func:`_emit_shortcut`). The
+    cursor on the single yielded result is the ``newStartPageToken`` to
+    resume polling from.
 
     ``changes.list`` does not guarantee parent-before-child ordering —
     a file created inside a brand-new folder can arrive before the
@@ -447,6 +460,9 @@ def iter_remote_changes(
     :param resolve_deleted_path: optional fileId -> cased-path fallback
         for replayed deletes whose id the cache has already evicted; the
         engine passes :meth:`SyncEngine._index_path_for_remote_id`.
+    :param export_opts: export configuration; when enabled, exportable
+        native docs pass through with their projected leaf name. Defaults
+        to disabled (drop all native docs, as before).
     """
     # Phase 1: drain every page to the final newStartPageToken, buffering
     # raw changes. Parent-before-child is not guaranteed even ACROSS
@@ -521,6 +537,7 @@ def iter_remote_changes(
                         path_cache,
                         out_entries,
                         warn_on_conflict=False,
+                        export_opts=export_opts,
                     ):
                         progress = True
                     else:
@@ -556,7 +573,7 @@ def iter_remote_changes(
             elif decision is ChangeDecision.APPLY:
                 # Deterministically rejected again (no cache mutation
                 # since the stall); emits the Task-2 conflict warning.
-                _emit_apply(change, path_cache, out_entries)
+                _emit_apply(change, path_cache, out_entries, export_opts=export_opts)
         logger.debug(
             "%d changes unresolved or out of scope after fixpoint",
             len(pending),

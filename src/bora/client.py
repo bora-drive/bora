@@ -69,7 +69,8 @@ from .exceptions import (
     NotLinkedError,
     UnsupportedFileError,
 )
-from .native_docs import is_google_folder, is_google_native, is_shortcut
+from .export import ExportOptions, project_leaf_name
+from .native_docs import is_exportable, is_google_folder, is_google_native, is_shortcut
 from .path_cache import PathIDCache
 from .path_codec import compose_path, fold_path
 from .utils import natural_size
@@ -194,6 +195,13 @@ class GoogleDriveClient:
         # Throttling config.
         self.bandwidth_limit_up = bandwidth_limit_up
         self.bandwidth_limit_down = bandwidth_limit_down
+
+        # Export configuration. Defaults to disabled; the sync engine /
+        # manager assigns this from user config (Task 10). When enabled,
+        # exportable native docs (Docs/Sheets/Slides) are listed with a
+        # projected leaf name (Report -> Report.docx) instead of being
+        # dropped.
+        self.export_opts: ExportOptions = ExportOptions.disabled()
 
         # Request counter (kept for status/diagnostics; see comment near DEFAULT_POLL_INTERVAL).
         self._request_count = 0
@@ -581,9 +589,12 @@ class GoogleDriveClient:
 
         :param remote_path: Encoded virtual path of the item.
         :param include_deleted: Whether to return data for trashed items.
-        :returns: Metadata of the item, or ``None`` for Google-native
-            documents (which cannot be synced) and for trashed items
-            when *include_deleted* is ``False``.
+        :returns: Metadata of the item, or ``None`` for unsupported
+            Google-native documents (Forms/Sites/Drawings/shortcuts), for
+            exportable native docs when export is disabled, and for trashed
+            items when *include_deleted* is ``False``. When export is enabled,
+            exportable native docs (Docs/Sheets/Slides) return metadata on the
+            export identity.
         :raises NotFoundError: if *remote_path* is not known to the
             path cache.
         """
@@ -610,11 +621,16 @@ class GoogleDriveClient:
         if file.get("trashed") and not include_deleted:
             return None
         mime = file.get("mimeType")
-        if is_google_native(mime):
+        # Unsupported natives (Forms/Sites/Drawings/shortcuts) always return
+        # None; exportable Docs/Sheets/Slides return None too unless export is
+        # enabled (then they project onto the export identity).
+        if is_google_native(mime) and not (
+            self.export_opts.enabled and is_exportable(mime)
+        ):
             return None
         if is_google_folder(mime):
             return to_folder_metadata(file, cased_path)
-        return to_file_metadata(file, cased_path)
+        return to_file_metadata(file, cased_path, export_opts=self.export_opts)
 
     def list_revisions(self, remote_path: str, limit: int = 10) -> list[FileMetadata]:
         """Lists revisions for the file at *remote_path*, most recent
@@ -984,7 +1000,10 @@ class GoogleDriveClient:
         *remote_path* must already be known to the path cache.
 
         Google-native documents are filtered out unless
-        *include_non_downloadable_files* is ``True``.
+        *include_non_downloadable_files* is ``True``; additionally, when
+        ``self.export_opts`` is enabled, exportable native docs
+        (Docs/Sheets/Slides) are kept and listed under their projected leaf
+        name (``Report`` -> ``Report.docx``).
 
         ``include_mounted_folders`` and ``limit`` are accepted for interface
         compatibility with the sync engine; ``limit`` sizes the API page,
@@ -1036,13 +1055,21 @@ class GoogleDriveClient:
             entries: list[Metadata] = []
             for file in resp.get("files", []):
                 mime = file.get("mimeType")
-                if is_google_native(mime) and not include_non_downloadable_files:
+                if is_google_native(mime) and not (
+                    include_non_downloadable_files
+                    or (self.export_opts.enabled and is_exportable(mime))
+                ):
                     continue
-                child_path = compose_path(remote_path, file["name"])
+                child_path = compose_path(
+                    remote_path,
+                    project_leaf_name(file["name"], mime, self.export_opts),
+                )
                 if is_google_folder(mime):
                     entries.append(to_folder_metadata(file, child_path))
                 else:
-                    entries.append(to_file_metadata(file, child_path))
+                    entries.append(
+                        to_file_metadata(file, child_path, export_opts=self.export_opts)
+                    )
             page_token = resp.get("nextPageToken")
             yield ListFolderResult(
                 entries=entries,
@@ -1138,7 +1165,8 @@ class GoogleDriveClient:
         # folders regardless; is_google_native already excludes folders.
         # Shortcuts are kept even though is_google_native covers them: the
         # change-feed's _emit_shortcut projects them into symlink metadata,
-        # so bootstrap must not filter them out.
+        # so bootstrap must not filter them out. Exportable native docs are
+        # kept when export is enabled (populate projects their leaf name).
         filtered = [
             it
             for it in raw_items
@@ -1147,6 +1175,7 @@ class GoogleDriveClient:
                 include_non_downloadable_files
                 or not is_google_native(it.get("mimeType"))
                 or is_shortcut(it.get("mimeType"))
+                or (self.export_opts.enabled and is_exportable(it.get("mimeType")))
             )
         ]
 
@@ -1166,7 +1195,9 @@ class GoogleDriveClient:
 
         # Atomic populate. The cache BFS-filters to items reachable from
         # root_id; Computers/Backup, shared-with-me and orphans drop out.
-        self._path_cache.populate_from_listing(filtered)
+        self._path_cache.populate_from_listing(
+            filtered, export_opts=self.export_opts
+        )
         indexed = self._path_cache.count()
         skipped = len(filtered) - indexed
         if skipped > 0:
@@ -1202,7 +1233,9 @@ class GoogleDriveClient:
                 if is_google_folder(file.get("mimeType")):
                     entries.append(to_folder_metadata(file, path))
                 else:
-                    entries.append(to_file_metadata(file, path))
+                    entries.append(
+                        to_file_metadata(file, path, export_opts=self.export_opts)
+                    )
             yield ListFolderResult(
                 entries=entries,
                 has_more=not is_last,
@@ -1255,9 +1288,15 @@ class GoogleDriveClient:
                 entries: list[Metadata] = []
                 for file in resp.get("files", []):
                     mime = file.get("mimeType")
-                    if is_google_native(mime) and not include_non_downloadable_files:
+                    if is_google_native(mime) and not (
+                        include_non_downloadable_files
+                        or (self.export_opts.enabled and is_exportable(mime))
+                    ):
                         continue
-                    child_path = compose_path(folder_path, file["name"])
+                    child_path = compose_path(
+                        folder_path,
+                        project_leaf_name(file["name"], mime, self.export_opts),
+                    )
                     is_folder = is_google_folder(mime)
                     stored = self._path_cache.set(
                         child_path,
@@ -1276,7 +1315,9 @@ class GoogleDriveClient:
                         entries.append(to_folder_metadata(file, child_path))
                         queue.append((file["id"], child_path))
                     else:
-                        entries.append(to_file_metadata(file, child_path))
+                        entries.append(
+                            to_file_metadata(file, child_path, export_opts=self.export_opts)
+                        )
                 page_token = resp.get("nextPageToken")
                 yield ListFolderResult(
                     entries=entries,
