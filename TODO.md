@@ -115,7 +115,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] `download(remote_path, dst_path)` → resolve ID, use `MediaIoBaseDownload`
 - [ ] Stream to temp file, verify MD5 checksum, then move to destination
 - [ ] Handle bandwidth throttling during download (sleep between `MediaIoBaseDownload.next_chunk()` calls to enforce `bandwidth_limit_down` bytes/sec)
-- [ ] Handle Google Docs/Sheets/Slides (skip or export)
+- [x] Handle Google Docs/Sheets/Slides (skip or export) — export landed (see "Google Docs Export" note below)
 - [ ] Return `FileMetadata` with correct fields
 
 ### 5e: Upload
@@ -189,7 +189,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Update all references from `DropboxContentHasher` to `ContentHasher`
 - [ ] Update `content_hash` comparison logic in `sync.py` (compare MD5 strings)
 - [ ] Verify Google Drive's `md5Checksum` field matches locally computed MD5
-- [ ] Handle files without `md5Checksum` (Google Docs/Sheets/Slides have none)
+- [x] Handle files without `md5Checksum` (Google Docs/Sheets/Slides have none) — exported mirrors compute md5 locally from the downloaded bytes
 
 ## Phase 8: Sync Engine Adaptations
 
@@ -201,7 +201,7 @@ All known tasks, roughly in dependency order. Check off as completed.
 - [ ] Update `_on_remote_file` — verify MD5 instead of Dropbox content hash
 - [ ] Replace `f"rev:{event.rev}"` download call (~line 3542) with `event.change_remote_id` (file-ID-based download)
 - [ ] Update `upload_local_changes_while_inactive` — hash comparison logic
-- [ ] Handle Google Docs/Sheets/Slides in remote changes (skip or export)
+- [x] Handle Google Docs/Sheets/Slides in remote changes (skip or export) — change feed re-exports on `version` bump
 - [ ] Handle Google Drive's "file removed from folder" vs "file trashed" distinction
 - [ ] Update `reset_sync_state` for new cursor format
 - [ ] Selective sync: when a folder rename arrives via change feed, check if old path is in the exclusion list and update it to the new path
@@ -311,10 +311,41 @@ All known tasks, roughly in dependency order. Check off as completed.
 
 ---
 
+## Google Docs Export (landed 2026-07-19)
+
+One-way export of native Google Workspace files to Office/Markdown on download.
+Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
+(both default ON), CLI `bora export docs on|off` / `bora export markdown on|off`.
+
+- Doc → `.md` (markdown default on) or `.docx`, Sheet → `.xlsx`, Slides → `.pptx`
+  via `files().export_media`; md5 computed locally (Drive has no server hash for
+  exports). Forms/Sites/Drawings/shortcuts stay skipped entirely.
+- Mirrors land read-only and `download_only` in the index; local edits are never
+  uploaded (a genuine local divergence is preserved as a conflicted copy).
+- Server-side edits re-export via the Drive `version` change signal; the export
+  leaf name is the canonical `remote_path` (projected across listing, change feed
+  and path cache), so a Doc keeps one identity keyed by `remote_id`.
+- Covered end-to-end by `tests/offline/test_sync.py::test_export_full_cycle_integration`.
+
+**Remaining manual work / known gaps** (see `.superpowers/sdd/task-12-report.md`):
+- [ ] Live spot-check against a real linked Google account (SKIPPED — no account
+  in this environment): verify the mirrors open correctly, a web-UI Doc edit
+  auto-updates the mirror within a poll interval, nothing is ever re-uploaded,
+  and `bora export markdown off` re-exports as `.docx`.
+- [ ] Verify empirically that the live Drive `version` field is present and
+  monotonically increments on native-doc edits (design assumption replacing
+  `headRevisionId`; UNVERIFIED against live Drive — fall back to `modifiedTime`
+  if not). Part of the skipped live check.
+- [ ] DEFECT: a server-side re-export of an exported mirror spawns a spurious
+  writable conflicted copy of the prior mirror (exports have no server hash, so
+  `_check_download_conflict` falls through to the ctime heuristic, and the
+  read-only chmod bumps ctime after `last_sync` is recorded). Re-export itself
+  succeeds; the litter accumulates one copy per edit.
+
 ## Known Limitations / Out of Scope for MVP
 
 - [ ] Shared Drives (team spaces) — support "My Drive" only initially
-- [ ] Google Docs/Sheets/Slides export — skip native Google files initially
+- [x] Google Docs/Sheets/Slides export — LANDED (see "Google Docs Export" above); was originally scoped as skip-only for MVP
 - [ ] Webhook-based change notifications — use polling initially
 - [ ] Batch API calls — use sequential calls initially, optimize later
 - [ ] Files with multiple parents — pick first parent, log warning

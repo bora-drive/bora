@@ -288,7 +288,7 @@ Before any code runs, a Google Cloud project is required:
 | Files with multiple parents | **Low** | Pick first parent as canonical; log warning |
 | No long-poll equivalent | **Medium** | Polling every 180s is fine for desktop; webhooks later |
 | OAuth verification for public distribution | **Medium** | Apply early; use restricted scopes where possible |
-| Google Docs/Sheets/Slides (not real files) | **Medium** | Skip or export as PDF/OOXML; they have no content hash or downloadable bytes |
+| Google Docs/Sheets/Slides (not real files) | **Medium** | RESOLVED (landed 2026-07-19): one-way export to `.docx`/`.md`, `.xlsx`, `.pptx` via `files().export_media`; read-only `download_only` mirrors; md5 computed locally; re-export on Drive `version` bump. Forms/Sites/Drawings stay skipped. See TODO.md "Google Docs Export" note (incl. skipped live spot-check + open re-export conflicted-copy defect). |
 | Symlinks (no Google Drive equivalent) | **Low** | Skip symlinks during upload; log warning. `symlink_target` field kept in schema but always `None`. |
 | Selective sync exclusions go stale on folder rename while offline | **Low** | Update exclusion paths when rename arrives via change feed; user can re-exclude if missed |
 | No migration from Dropbox schema | **None** | Fresh database on first run. Dropbox hashes, revisions, and IDs are not transferable. |
