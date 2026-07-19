@@ -25,15 +25,18 @@ import enum
 import logging
 import posixpath
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 
 from googleapiclient.errors import HttpError
 
 from .core import DeletedMetadata, FileMetadata, FolderMetadata, ListFolderResult
 from .exceptions import CursorResetError
+from .export import ExportOptions
 from .native_docs import (
     GOOGLE_FOLDER_MIME_TYPE,
     GOOGLE_SHORTCUT_MIME_TYPE,
+    export_target,
+    is_exportable,
     is_google_native,
     is_shortcut,
 )
@@ -59,7 +62,7 @@ __all__ = [
 # verbatim by client.py's files.get / files.list calls and embedded into
 # the change-feed field selector below.
 FILE_FIELDS = (
-    "id, name, parents, mimeType, modifiedTime, size, md5Checksum, "
+    "id, name, parents, mimeType, modifiedTime, size, md5Checksum, version, "
     "shared, headRevisionId, trashed, lastModifyingUser(permissionId), "
     "sharedWithMe, ownedByMe, capabilities(canEdit), "
     "shortcutDetails(targetId, targetMimeType)"
@@ -86,27 +89,53 @@ def parse_drive_time(value: str | None) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def to_file_metadata(file: dict[str, Any], path_display: str) -> FileMetadata:
+def to_file_metadata(
+    file: dict[str, Any],
+    path_display: str,
+    export_opts: ExportOptions | None = None,
+) -> FileMetadata:
     """Project a Drive ``files`` resource into a :class:`FileMetadata`.
 
     *path_display* is the encoded virtual path the caller has already
-    resolved for this file."""
+    resolved for this file.
+
+    *export_opts*, when given and enabled, switches exportable native docs
+    (Google Docs/Sheets/Slides) onto the export identity: ``rev`` becomes the
+    Drive ``version`` field (they have no ``headRevisionId``), ``content_hash``
+    is ``None`` (no server hash for these), and ``export_mime`` is set to the
+    target export mime type. Ordinary files, and callers that omit
+    *export_opts*, keep today's behavior."""
+    opts = export_opts or ExportOptions.disabled()
+    mime = file.get("mimeType")
     modified = parse_drive_time(file.get("modifiedTime"))
     last_user = file.get("lastModifyingUser") or {}
+
+    export_mime: str | None = None
+    rev: str
+    content_hash: str | None
+    if opts.enabled and is_exportable(mime):
+        rev = str(file["version"])
+        content_hash = None
+        export_mime = export_target(cast(str, mime), opts.markdown)[0]
+    else:
+        rev = file.get("headRevisionId", "")
+        content_hash = file.get("md5Checksum", "")
+
     return FileMetadata(
         name=file["name"],
         path_lower=fold_path(path_display),
         path_display=path_display,
         id=file["id"],
         modified=modified,
-        rev=file.get("headRevisionId", ""),
+        rev=rev,
         size=int(file.get("size", 0) or 0),
         symlink_target=None,
         shared=bool(file.get("shared", False)),
         modified_by=last_user.get("permissionId"),
         is_downloadable=True,
-        content_hash=file.get("md5Checksum", ""),
+        content_hash=content_hash,
         can_edit=bool(file.get("capabilities", {}).get("canEdit", True)),
+        export_mime=export_mime,
     )
 
 
