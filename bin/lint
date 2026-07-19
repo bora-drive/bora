@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Run the same checks as the "Linting" GitHub Actions workflow.
+# Usage: bin/setup once, then bin/lint.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [ ! -x .venv/bin/python ]; then
+    echo "No .venv found - run bin/setup first." >&2
+    exit 1
+fi
+PATH="$PWD/.venv/bin:$PATH"
+
+# Same steps, same order, as .github/workflows/lint.yml.
+echo "==> black"
+black --check --diff src tests
+echo "==> flake8"
+flake8 src tests
+echo "==> mypy"
+mypy src
+echo "==> isort"
+isort --check-only --diff src tests
+
+echo
+echo "All lint checks passed."

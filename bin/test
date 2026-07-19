@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Run the same checks as the offline job of the "Run tests" GitHub Actions
+# workflow. Usage: bin/setup once, then bin/test [extra pytest args].
+#
+# The linked-unit and linked-integration jobs need Drive account
+# credentials and are not run here.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [ ! -x .venv/bin/python ]; then
+    echo "No .venv found - run bin/setup first." >&2
+    exit 1
+fi
+
+# CI tests the installed package, not the working tree - reinstall so the
+# venv matches the current sources.
+.venv/bin/python -m pip install -q -U '.[test]'
+
+# Same invocation as the "Test with pytest" step of the offline job.
+.venv/bin/python -m pytest --cov=bora --cov-report=xml tests/offline "$@"
