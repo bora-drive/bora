@@ -1554,3 +1554,62 @@ def test_bootstrap_projects_exportable_and_keeps_shortcut(client_on_fake):
     # Shortcut is still indexed by the bootstrap (symlink flow unaffected).
     assert cache.path_to_id("/Link") is not None
     assert target is not None
+
+
+# ==== Task 5: download() export branch =====================================
+
+
+def test_download_exports_native_doc(client_on_fake, tmp_path):
+    """Export enabled: downloading an exportable Doc streams export_media
+    bytes, hashes them locally, and returns the export identity."""
+    cof = client_on_fake
+    fake = cof.fake
+    cof.client.export_opts = ExportOptions(True, False)
+    file_id = fake.add_native(name="Report", kind="document")
+    fake.set_export_bytes(file_id, _DOCX_MIME, b"DOCX")
+    cof.client._path_cache.set("/Report.docx", file_id, ROOT_ID, "Report", False)
+
+    dest = tmp_path / "Report.docx"
+    md = cof.client.download("/Report.docx", str(dest), file_id=file_id)
+
+    assert dest.read_bytes() == b"DOCX"
+    assert not (tmp_path / "Report.docx.bora-part").exists()
+    assert md.content_hash == hashlib.md5(b"DOCX").hexdigest()
+    assert md.export_mime == _DOCX_MIME
+    assert md.rev == "1"
+    assert md.path_display == "/Report.docx"
+    assert md.size == len(b"DOCX")
+
+
+def test_download_exports_markdown_variant(client_on_fake, tmp_path):
+    """Export enabled + markdown: a Doc is exported via text/markdown."""
+    from bora.native_docs import MARKDOWN_MIME
+
+    cof = client_on_fake
+    fake = cof.fake
+    cof.client.export_opts = ExportOptions(True, True)
+    file_id = fake.add_native(name="Report", kind="document")
+    fake.set_export_bytes(file_id, MARKDOWN_MIME, b"# Report\n")
+    cof.client._path_cache.set("/Report.md", file_id, ROOT_ID, "Report", False)
+
+    dest = tmp_path / "Report.md"
+    md = cof.client.download("/Report.md", str(dest), file_id=file_id)
+
+    assert dest.read_bytes() == b"# Report\n"
+    assert md.content_hash == hashlib.md5(b"# Report\n").hexdigest()
+    assert md.export_mime == MARKDOWN_MIME
+
+
+def test_download_exportable_doc_raises_when_export_disabled(client_on_fake, tmp_path):
+    """Export disabled: an exportable Doc still raises UnsupportedFileError,
+    so behavior is unchanged when the feature is off."""
+    from bora.exceptions import UnsupportedFileError
+
+    cof = client_on_fake
+    fake = cof.fake
+    file_id = fake.add_native(name="Report", kind="document")
+    cof.client._path_cache.set("/Report", file_id, ROOT_ID, "Report", False)
+
+    dest = tmp_path / "Report"
+    with pytest.raises(UnsupportedFileError):
+        cof.client.download("/Report", str(dest), file_id=file_id)
