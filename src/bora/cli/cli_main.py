@@ -14,7 +14,7 @@ from .cli_maintenance import (
     restore,
     revs,
 )
-from .cli_settings import autostart, bandwidth_limit, excluded, notify
+from .cli_settings import autostart, bandwidth_limit, excluded, export, notify
 
 # local imports
 from .core import OrderedGroup
@@ -44,6 +44,7 @@ main.add_command(autostart, section="Settings")
 main.add_command(excluded, section="Settings")
 main.add_command(notify, section="Settings")
 main.add_command(bandwidth_limit, section="Settings")
+main.add_command(export, section="Settings")
 
 main.add_command(move_dir, section="Maintenance")
 main.add_command(rebuild_index, section="Maintenance")
