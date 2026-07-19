@@ -2101,6 +2101,15 @@ class SyncEngine:
             if self.is_excluded(event.local_path) or self.is_mignore(event):
                 continue
 
+            dl_entry = self._download_only_entry_for(event)
+            if dl_entry is not None:
+                # A read-only exported mirror of a native doc was changed
+                # locally. These are never uploaded (the exported bytes are
+                # not the Doc's own content); handle out of band and skip the
+                # normal upload sort below.
+                self._handle_download_only_local_change(event, dl_entry)
+                continue
+
             if event.is_deleted:
                 deleted.append(event)
             elif event.is_directory and event.is_moved:
@@ -3957,6 +3966,77 @@ class SyncEngine:
         else:
             suffix = f"conflicted copy {date}"
         return generate_cc_name(local_path, suffix)
+
+    def _download_only_entry_for(self, event: SyncEvent) -> IndexEntry | None:
+        """Return the ``download_only`` index entry a *local* change targets,
+        or ``None``.
+
+        A read-only export mirror's index entry lives at its canonical path,
+        so a rename/move must be matched by its *source* path too -- not just
+        the event's (destination) path. Without the source check a moved
+        mirror would fall through to the normal upload path and rename the
+        backing Google Doc (and drive a projected export leaf name into
+        ``PathCache.move`` at ``writes.py`` -> corrupting the raw-name
+        column)."""
+        entry = self.get_index_entry(event.remote_path_lower)
+        if entry is not None and entry.is_download_only:
+            return entry
+        if event.remote_path_from_lower is not None:
+            src_entry = self.get_index_entry(event.remote_path_from_lower)
+            if src_entry is not None and src_entry.is_download_only:
+                return src_entry
+        return None
+
+    def _handle_download_only_local_change(
+        self, event: SyncEvent, entry: IndexEntry
+    ) -> None:
+        """A read-only exported mirror of a native doc (Docs/Sheets/Slides)
+        was changed locally.
+
+        These mirrors are never uploaded: the exported ``.docx``/``.md`` bytes
+        are not the Doc's own content, so an upload would clobber the live
+        document. If the content genuinely differs from the last export, the
+        user's edit is preserved as a normal, writable conflicted copy and the
+        canonical path is dropped from the index so the next download pass
+        re-exports the untouched server version to the original read-only
+        name.
+        """
+        if event.is_deleted or event.is_moved:
+            # The mirror was removed from its canonical path (deleted or
+            # renamed/moved). Don't propagate to Drive; forget the index entry
+            # so a subsequent download pass re-exports the server version. A
+            # moved mirror leaves the user's copy in place at the destination
+            # (a new, unindexed path), untouched.
+            self.remove_node_from_index(entry.remote_path_lower)
+            return
+
+        local_hash = self.get_local_hash(event.local_path)
+        if local_hash == entry.content_hash:
+            # Metadata-only touch (e.g. the read-only chmod being echoed, or an
+            # mtime change with identical bytes): nothing to preserve, nothing
+            # to upload.
+            return
+
+        # Content genuinely diverged. Preserve the user's edit as a normal,
+        # writable conflicted copy and drop the mirror's index entry so the
+        # server version is re-exported to the original name on the next
+        # download pass.
+        cc_path = self._local_cc_filename(event.local_path, None)
+        with self.fs_events.ignore(FileMovedEvent(event.local_path, cc_path)):
+            with convert_api_errors():
+                move(event.local_path, cc_path, raise_error=True)
+        # The mirror was written read-only (0o444); the preserved copy is the
+        # user's own file again, so restore write permission on it.
+        self._restore_writable(cc_path)
+        # cc_path is a brand-new path with no index entry -> the rescan feeds
+        # it through the normal (writable, uploadable) create path.
+        self.remove_node_from_index(entry.remote_path_lower)
+        self.rescan(cc_path)
+        self._logger.info(
+            'Preserved local edit of read-only export "%s" as "%s"',
+            event.local_path,
+            cc_path,
+        )
 
     def _apply_read_only(self, local_path: str, *, is_dir: bool) -> None:
         """Clear write bits on a view-only shared item, ignoring the
