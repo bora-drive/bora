@@ -312,6 +312,40 @@ def _symlink_event(
     )
 
 
+def test_schema_drift_drop_resets_remote_cursor(sync_engine: SyncEngine):
+    """Finding 1: a schema-drift drop of the index/history tables must also
+    reset the remote cursor.
+
+    The derived-cache tables are dropped + recreated on column drift (e.g. an
+    upgrade that adds ``download_only``), but the remote cursor lives in the
+    state file and survives the drop. Without a paired reset the engine would
+    run an empty index against a live cursor: the change feed only emits
+    future edits, so pre-existing rows (including previously exported native
+    docs) are never re-derived and deletion / conflict propagation stays
+    broken until a manual rebuild. Resetting the cursor to "" makes the normal
+    bootstrap full listing run.
+    """
+    sync = sync_engine
+    # Simulate a live install with a saved change-feed cursor.
+    sync.remote_cursor = "live-cursor-123"
+    assert sync.remote_cursor == "live-cursor-123"
+
+    # Simulate an on-disk index table from an older release whose columns
+    # drift from the current model (here: only the primary key remains).
+    with sync._database_access():
+        sync._db.executescript(
+            "DROP TABLE IF EXISTS 'index';"
+            "CREATE TABLE 'index' (remote_path_lower TEXT PRIMARY KEY);"
+        )
+
+    # Re-open the tables: the guard drops the drifted table, and the engine
+    # must reset sync state so the cursor no longer points past the (now
+    # empty) index.
+    sync._create_or_load_db()
+
+    assert sync.remote_cursor == ""
+
+
 def test_conflict_equal_rev_is_local_newer_or_identical(sync_engine: SyncEngine):
     """Most load-bearing assertion: equal headRevisionId => skip the download.
 
