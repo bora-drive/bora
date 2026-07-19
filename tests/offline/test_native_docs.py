@@ -7,10 +7,14 @@ import pytest
 from bora.native_docs import (
     GOOGLE_FOLDER_MIME_TYPE,
     GOOGLE_SHORTCUT_MIME_TYPE,
+    export_display_name,
+    export_target,
     filter_native_docs,
+    is_exportable,
     is_google_folder,
     is_google_native,
     is_shortcut,
+    is_unsupported_native,
 )
 
 KNOWN_NATIVE = [
@@ -26,6 +30,10 @@ KNOWN_NATIVE = [
     "application/vnd.google-apps.shortcut",
     "application/vnd.google-apps.drive-sdk",
 ]
+
+DOC = "application/vnd.google-apps.document"
+SHEET = "application/vnd.google-apps.spreadsheet"
+SLIDES = "application/vnd.google-apps.presentation"
 
 
 @pytest.mark.parametrize("mime", KNOWN_NATIVE)
@@ -79,19 +87,6 @@ def test_filter_native_docs_keeps_items_without_mimetype():
     items = [{"id": "1"}, {"id": "2", "mimeType": "application/vnd.google-apps.document"}]
     kept = filter_native_docs(items)
     assert [it["id"] for it in kept] == ["1"]
-
-
-from bora.native_docs import (
-    EXPORT_MIME_MAP,
-    export_display_name,
-    export_target,
-    is_exportable,
-    is_unsupported_native,
-)
-
-DOC = "application/vnd.google-apps.document"
-SHEET = "application/vnd.google-apps.spreadsheet"
-SLIDES = "application/vnd.google-apps.presentation"
 
 
 @pytest.mark.parametrize("mime", [DOC, SHEET, SLIDES])
