@@ -772,3 +772,102 @@ def test_fail_every_rejects_non_positive_n():
     fake = FakeDrive()
     with pytest.raises(ValueError):
         fake.fail_every("files.list", 0, make_http_error(429))
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — native docs + export_media
+# ---------------------------------------------------------------------------
+
+
+def test_add_native_sets_expected_fields():
+    fake = FakeDrive()
+    fid = fake.add_native("Notes", "document")
+    rec = fake.files[fid]
+    assert rec["mimeType"] == "application/vnd.google-apps.document"
+    assert rec["md5Checksum"] is None
+    assert rec["headRevisionId"] is None
+    assert rec["version"] == "1"
+    assert rec["name"] == "Notes"
+    assert rec["parents"] == [ROOT_ID]
+
+
+def test_add_native_all_kinds_map_to_expected_mime():
+    fake = FakeDrive()
+    expected = {
+        "document": "application/vnd.google-apps.document",
+        "spreadsheet": "application/vnd.google-apps.spreadsheet",
+        "presentation": "application/vnd.google-apps.presentation",
+        "form": "application/vnd.google-apps.form",
+    }
+    for kind, mime in expected.items():
+        fid = fake.add_native(f"f-{kind}", kind)
+        assert fake.files[fid]["mimeType"] == mime
+
+
+def test_add_native_under_subfolder():
+    fake = FakeDrive()
+    fake.add_folder("/Docs")
+    fid = fake.add_native("Report", "document", parent="/Docs")
+    assert fake.files[fid]["parents"] == [fake.id_of("/Docs")]
+
+
+def test_export_media_round_trip_via_real_downloader():
+    fake = FakeDrive()
+    fid = fake.add_native("Report", "document")
+    export_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    content = b"PK\x03\x04fake-docx-bytes"
+    fake.set_export_bytes(fid, export_mime, content)
+
+    svc = fake.service()
+    request = svc.files().export_media(fileId=fid, mimeType=export_mime)
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request, chunksize=1024 * 1024)
+    done = False
+    while not done:
+        _status, done = downloader.next_chunk()
+    assert buf.getvalue() == content
+
+
+def test_export_media_unregistered_mime_raises_404():
+    fake = FakeDrive()
+    fid = fake.add_native("Report", "document")
+    svc = fake.service()
+    try:
+        svc.files().export_media(fileId=fid, mimeType="text/markdown")
+        assert False, "expected 404"
+    except HttpError as e:
+        assert e.resp.status == 404
+
+
+def test_version_is_projected_by_files_get_and_list():
+    fake = FakeDrive()
+    fid = fake.add_native("Report", "document", version="3")
+    svc = fake.service()
+    got = svc.files().get(fileId=fid, fields="id, version").execute()
+    assert got["version"] == "3"
+
+    listed = svc.files().list(
+        q="trashed=false", fields="files(id, version)"
+    ).execute()
+    versions = {f["id"]: f["version"] for f in listed["files"]}
+    assert versions[fid] == "3"
+
+
+def test_native_doc_version_bumps_on_update():
+    fake = FakeDrive()
+    fid = fake.add_native("Report", "document")
+    assert fake.files[fid]["version"] == "1"
+    svc = fake.service()
+    svc.files().update(fileId=fid, body={"name": "Report v2"}, fields="id").execute()
+    assert fake.files[fid]["version"] == "2"
+    svc.files().update(fileId=fid, body={"name": "Report v3"}, fields="id").execute()
+    assert fake.files[fid]["version"] == "3"
+
+
+def test_regular_file_update_does_not_touch_version():
+    fake = FakeDrive()
+    fid = fake.add_file("/a.txt", content=b"x")
+    assert "version" not in fake.files[fid]
+    svc = fake.service()
+    svc.files().update(fileId=fid, body={"name": "b.txt"}, fields="id").execute()
+    assert "version" not in fake.files[fid]
