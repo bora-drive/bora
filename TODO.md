@@ -127,7 +127,7 @@ that name survives only as the Google Cloud project id `cumulus-496101` in
 - [ ] Google OAuth app verification (consent screen still in Testing mode —
   refresh tokens expire after 7 days)
 - [ ] Publish to PyPI (optional)
-- [ ] Create a Homebrew formula, modeled on the formula for `maestral`
+- [ ] Create a Homebrew formula, modeled on the formula for `maestral
 
 ---
 
