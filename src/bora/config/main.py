@@ -42,6 +42,8 @@ DEFAULTS_CONFIG: _DefaultsType = {
         "keep_history": 60 * 60 * 24 * 7,  # default: one week
         "upload": True,  # if download sync is enabled
         "download": True,  # if upload sync is enabled
+        "export_google_docs": True,  # export native Docs/Sheets/Slides
+        "export_google_docs_markdown": True,  # Docs -> .md (else .docx)
     },
 }
 

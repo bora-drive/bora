@@ -100,6 +100,7 @@ from .exceptions import (
     SymlinkError,
     SyncError,
 )
+from .export import ExportOptions
 from .logging import scoped_logger
 from .models import (
     ChangeType,
@@ -554,6 +555,11 @@ class SyncEngine:
 
         self._conf = BoraConfig(self.config_name)
         self._state = BoraState(self.config_name)
+        # Guards the export-toggle reindex trigger in reload_cached_config: the
+        # index tables do not exist yet during __init__ (they are created by
+        # _create_or_load_db below), so a reindex must not be scheduled from
+        # the first, construction-time call. Flipped on once the DB is ready.
+        self._export_reindex_ready = False
         self.reload_cached_config()
 
         self.desktop_notifier = desktop_notifier
@@ -599,6 +605,8 @@ class SyncEngine:
 
             self._create_or_load_db()
 
+        self._export_reindex_ready = True
+
         # Caches.
         self._case_conversion_cache = LRUCache(capacity=5000)
         self.clean_cache_dir(raise_error=False)
@@ -621,7 +629,29 @@ class SyncEngine:
         Reloads all config and state values that are otherwise cached by this class for
         faster access. Call this method if config or state values where modified
         directly instead of using :class:`SyncEngine` APIs.
+
+        This also refreshes :attr:`client`'s :class:`~bora.export.ExportOptions` from
+        the ``sync.export_google_docs`` / ``sync.export_google_docs_markdown`` config
+        keys. If export just transitioned off -> on, a full reindex is scheduled (via
+        :meth:`reset_sync_state`, the same drop-and-rebuild mechanism used elsewhere for
+        this derived-cache index) so native docs that were previously skipped are picked
+        up on the next sync cycle.
         """
+        new_export_opts = ExportOptions.from_config(self._conf)
+        old_export_opts = self.client.export_opts
+        self.client.export_opts = new_export_opts
+
+        if (
+            self._export_reindex_ready
+            and not old_export_opts.enabled
+            and new_export_opts.enabled
+        ):
+            self._logger.info(
+                "Google Docs export enabled, scheduling reindex to pick up "
+                "previously-skipped native docs"
+            )
+            self.reset_sync_state()
+
         self._sync_path: str = self._conf.get("sync", "path")
         self._mignore_path: str = osp.join(self._sync_path, MIGNORE_FILE)
         self._file_cache_path: str = osp.join(self._sync_path, FILE_CACHE)
