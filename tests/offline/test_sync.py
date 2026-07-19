@@ -3493,3 +3493,163 @@ def test_export_download_marks_file_read_only_and_download_only(
     assert entry.is_download_only is True
     assert entry.content_hash == _md5(content)
 
+
+# ==== Task 9 (export): local edits of read-only mirrors never upload ========
+#
+# A native doc is exported to a read-only local mirror (download_only=1 in the
+# index). Local changes to that mirror must NEVER be uploaded (an upload would
+# overwrite the live Google Doc with its own exported bytes). If the content
+# actually diverged, the user's edit is preserved as a normal writable
+# conflicted copy and the server version is re-exported to the original name.
+
+
+def _export_native_doc(
+    sync_engine: SyncEngine,
+    name: str = "Report",
+    content: bytes = b"exported docx bytes",
+) -> tuple[FakeDrive, str, str, str, bytes]:
+    """Run a real export-download cycle so the local mirror, its read-only
+    bit and its download_only index entry all exist (mirrors
+    test_export_download_marks_file_read_only_and_download_only). Returns
+    (fake, file_id, remote_path, local_path, content)."""
+    fake = FakeDrive()
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client.export_opts = ExportOptions(True, False)
+
+    file_id = fake.add_native(name=name, kind="document")
+    fake.set_export_bytes(file_id, _DOCX_MIME, content)
+    # shared=True routes from_metadata down the md.modified_by branch (no
+    # linked account needed offline) -- see the setup test above.
+    fake.files[file_id]["shared"] = True
+
+    remote_path = f"/{name}.docx"
+    local_path = sync_engine.to_local_path_from_cased(remote_path)
+    event = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=file_id,
+        local_path=local_path,
+        rev="0",
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+    assert sync_engine._on_remote_file(event) == SyncStatus.Done
+    return fake, file_id, remote_path, local_path, content
+
+
+def test_download_only_never_uploads(sync_engine: SyncEngine) -> None:
+    """A local file event on a read-only export mirror must never produce an
+    upload: apply_local_changes returns no result for it and the backing
+    Google Doc on the server is left untouched (no files.update ran, so its
+    version counter and empty content are unchanged). A metadata-only touch
+    (here: making the mirror writable without changing bytes, e.g. the
+    read-only chmod being echoed) is ignored outright -- no conflicted copy."""
+    fake, file_id, remote_path, local_path, content = _export_native_doc(
+        sync_engine
+    )
+
+    # Simulate a metadata touch: user flips the read-only bit off, bytes
+    # unchanged. The local content hash still equals the indexed export hash.
+    os.chmod(local_path, 0o644)
+    event = _local_modified_event(
+        sync_engine, remote_path, content_hash=_md5(content)
+    )
+
+    results = sync_engine.apply_local_changes([event])
+
+    # Nothing was uploaded for the mirror.
+    assert all(r.remote_path_lower != remote_path.lower() for r in results)
+    # The native doc on the server is untouched: an upload would have called
+    # files.update (bumping the native doc's version and writing docx bytes
+    # into the Doc). version stays "1" and content stays empty.
+    assert fake.files[file_id]["version"] == "1"
+    assert fake.files[file_id]["content"] == b""
+    # A pure touch leaves the mirror in place -- no conflicted copy spawned.
+    siblings = os.listdir(osp.dirname(local_path))
+    assert not any("conflicted copy" in n for n in siblings), siblings
+    # Index entry is untouched (still the read-only mirror).
+    entry = sync_engine.get_index_entry(remote_path.lower())
+    assert entry is not None and entry.is_download_only is True
+
+
+def test_download_only_edit_makes_conflict_copy(sync_engine: SyncEngine) -> None:
+    """When the mirror's content genuinely diverges from the last export, the
+    user's edit is preserved as a normal, writable, NON-download_only
+    conflicted copy, and the original path is dropped from the index so the
+    next download pass re-exports the untouched server version to the original
+    read-only name."""
+    fake, file_id, remote_path, local_path, content = _export_native_doc(
+        sync_engine
+    )
+    directory = osp.dirname(local_path)
+
+    # User edits the mirror: make it writable and change the bytes.
+    edited = b"the user's own local edits"
+    os.chmod(local_path, 0o644)
+    with open(local_path, "wb") as f:
+        f.write(edited)
+
+    event = _local_modified_event(
+        sync_engine, remote_path, content_hash=_md5(edited)
+    )
+    results = sync_engine.apply_local_changes([event])
+
+    # Never uploaded to the native doc.
+    assert all(r.remote_path_lower != remote_path.lower() for r in results)
+    assert fake.files[file_id]["version"] == "1"
+    assert fake.files[file_id]["content"] == b""
+
+    # A conflicted copy preserving the user's edit appears.
+    cc_names = [
+        n
+        for n in os.listdir(directory)
+        if "conflicted copy" in n and n.endswith(".docx")
+    ]
+    assert len(cc_names) == 1, os.listdir(directory)
+    cc_path = osp.join(directory, cc_names[0])
+    with open(cc_path, "rb") as f:
+        assert f.read() == edited
+    # The preserved copy is a normal, writable file...
+    assert os.stat(cc_path).st_mode & 0o200, "conflicted copy must be writable"
+    # ...and carries NO download_only index entry (it is a brand-new path).
+    cc_remote_lower = sync_engine.to_remote_path_lower(cc_path)
+    assert sync_engine.get_index_entry(cc_remote_lower) is None
+
+    # The original path was dropped from the index so the next download pass
+    # re-exports the server version (rather than being skipped as "identical").
+    assert sync_engine.get_index_entry(remote_path.lower()) is None
+
+    # Prove the re-export actually happens: replay the download event for the
+    # original path. With the stale index entry gone this is NOT skipped as
+    # LocalNewerOrIdentical -- the untouched server bytes land back at the
+    # original read-only name with download_only restored.
+    reexport = SyncEvent(
+        direction=SyncDirection.Down,
+        item_type=ItemType.File,
+        sync_time=datetime.today().timestamp(),
+        remote_path=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=file_id,
+        local_path=local_path,
+        rev="0",
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+    assert sync_engine._on_remote_file(reexport) == SyncStatus.Done
+    with open(local_path, "rb") as f:
+        assert f.read() == content
+    assert os.stat(local_path).st_mode & 0o222 == 0, "re-export must be read-only"
+    reexported = sync_engine.get_index_entry(remote_path.lower())
+    assert reexported is not None and reexported.is_download_only is True
+

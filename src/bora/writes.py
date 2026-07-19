@@ -826,6 +826,16 @@ class _WriteHelper:
                 .execute()
             )
         client._count_request()
+        # NB: ``cache.move`` is called WITHOUT ``name=`` here, so it derives the
+        # raw-name column from ``new_path``'s leaf. For an exported native doc
+        # that leaf is a *projected* export name (e.g. "Report.docx", not the
+        # Drive name "Report"), which would corrupt the path cache. This call
+        # site is only reached via SyncEngine._on_local_moved (an upload of a
+        # local move), and SyncEngine.apply_local_changes now intercepts every
+        # local change whose source OR destination path is a download_only
+        # export mirror (see _download_only_entry_for) and handles it out of
+        # band -- so no exported file ever reaches this move. Regular files
+        # carry no export projection, so the leaf-derived name is correct.
         if not cache.move(remote_path, new_path):
             logger.warning(
                 "path_cache.move(%r -> %r) rejected by case-conflict; "
