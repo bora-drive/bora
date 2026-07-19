@@ -429,15 +429,24 @@ class PathIDCache:
             if parent_id is not None:
                 children_of.setdefault(parent_id, []).append(item)
 
-        # Phase 2: plan. Detect duplicates by fold key (NFC + casefold);
-        # then BFS from root building encoded paths.
+        # Phase 2: plan. Detect duplicates by fold key (NFC + casefold) of the
+        # PROJECTED leaf, so an exportable's projection (Report -> Report.docx)
+        # collides with a binary literally named "Report.docx" in the same
+        # folder — otherwise two file-ids would silently land on one
+        # remote_path_fold in Phase 3 (there is no per-row has_case_conflict
+        # guard there). First by file-id order wins, mirroring the raw-name
+        # dedup; with export off project_leaf_name is the identity, so
+        # behavior is unchanged. Then BFS from root building encoded paths.
         skip_ids: set[str] = set()
         seen: dict[tuple[str | None, str], str] = {}
 
         for parent_id, kids in children_of.items():
             kids.sort(key=lambda x: x["id"])
             for kid in kids:
-                key = (parent_id, fold_key(kid["name"]))
+                projected_leaf = project_leaf_name(
+                    kid["name"], kid.get("mimeType"), opts
+                )
+                key = (parent_id, fold_key(projected_leaf))
                 if key in seen:
                     skip_ids.add(kid["id"])
                     logger.warning(
