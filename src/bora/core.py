@@ -143,7 +143,9 @@ class FileMetadata(Metadata):
     modified: datetime
     """Last-modified time in UTC (Google Drive ``modifiedTime``)"""
     rev: str
-    """Unique ID of this version of a file"""
+    """Unique ID of this version of a file. For exportable native docs
+    (Google Docs/Sheets/Slides) this is the Drive ``version`` field, since
+    those items have no ``headRevisionId``."""
     size: int
     """File size in bytes"""
     symlink_target: str | None
@@ -154,11 +156,16 @@ class FileMetadata(Metadata):
     """Unique ID of the account that created / modified this revision"""
     is_downloadable: bool
     """Whether the file can be downloaded"""
-    content_hash: str
-    """A content hash of the file"""
+    content_hash: str | None
+    """A content hash of the file. ``None`` for exportable native docs, which
+    have no server-side content hash."""
     can_edit: bool = True
     """Whether the current user may edit this item (Drive capabilities.canEdit).
     Defaults True for owned My-Drive items; False for view-only shared items."""
+    export_mime: str | None = None
+    """The export mime type (e.g. ``application/vnd.openxmlformats-...``) when
+    this item is an exportable native doc rendered as a read-only local
+    mirror; ``None`` for ordinary binary files."""
 
 
 @dataclass
