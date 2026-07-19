@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 from .database.orm import Column, Manager, Model, NonNullColumn
 from .database.types import SqlInt, SqlPath, SqlString
+from .export import ExportOptions, project_leaf_name
 from .native_docs import GOOGLE_FOLDER_MIME_TYPE
 from .path_codec import compose_path, decode_name, encode_name, fold_key, fold_path
 
@@ -259,12 +260,21 @@ class PathIDCache:
             for child in children:
                 self._table.delete_primary_key(child.file_id)
 
-    def move(self, old_path: str, new_path: str) -> bool:
+    def move(
+        self, old_path: str, new_path: str, name: str | None = None
+    ) -> bool:
         """Rename *old_path* → *new_path*, updating all children atomically.
 
         Both paths are encoded. Returns ``False`` (and does nothing) if
         *new_path* case-conflicts with an existing entry that isn't the
         item being moved.
+
+        *name* is the raw Drive name for the moved entry. Export-aware
+        callers pass it explicitly because the projected leaf of *new_path*
+        (e.g. ``Report.docx``) cannot be decoded back to the raw name
+        (``Report``); when omitted the raw name is recovered from the
+        *new_path* leaf (projection is the identity for ordinary files, so
+        the decoded leaf is already the raw name).
         """
         with self._lock:
             old_fold = fold_path(old_path)
@@ -287,11 +297,16 @@ class PathIDCache:
 
             new_fold = fold_path(new_path)
 
-            # Update the entry itself: new path, new fold, new raw name. The
-            # leaf of new_path is encoded; decode it to recover the raw Drive
-            # name (the column stores raw form for upload).
-            new_leaf_encoded = new_path.rsplit("/", 1)[-1]
-            new_leaf_raw = decode_name(new_leaf_encoded)
+            # Update the entry itself: new path, new fold, new raw name. When
+            # the caller supplies the raw name, use it verbatim (an exportable's
+            # projected leaf can't be decoded back to the raw name); otherwise
+            # the leaf of new_path is encoded, so decode it to recover the raw
+            # Drive name (the column stores raw form for upload).
+            if name is not None:
+                new_leaf_raw = name
+            else:
+                new_leaf_encoded = new_path.rsplit("/", 1)[-1]
+                new_leaf_raw = decode_name(new_leaf_encoded)
 
             for row in rows:
                 row.remote_path = new_path
@@ -349,11 +364,23 @@ class PathIDCache:
             if current_id == SHARED_WITH_ME_ID:
                 parts.append(SHARED_WITH_ME_PATH.lstrip("/"))
             parts.reverse()
-            return "/" + "/".join(parts)
+            rebuilt = "/" + "/".join(parts)
+            # The leaf's stored remote_path already carries any export-name
+            # projection (e.g. 'Report' -> 'Report.docx'); rebuilding the leaf
+            # from the raw `name` column would drop it. Prefer the stored path
+            # when they diverge (the walk above still validated the chain).
+            target = self._table.get(file_id)
+            if target is not None and target.remote_path != rebuilt:
+                return target.remote_path
+            return rebuilt
 
     # -- Bulk operations ---------------------------------------------------
 
-    def populate_from_listing(self, items: list[dict[str, Any]]) -> None:
+    def populate_from_listing(
+        self,
+        items: list[dict[str, Any]],
+        export_opts: ExportOptions | None = None,
+    ) -> None:
         """Build the entire cache from a flat list of Google Drive file resources.
 
         Each dict should contain at least::
@@ -364,9 +391,16 @@ class PathIDCache:
         the first item by file-ID lexicographic order wins; later
         duplicates are skipped with a warning.
 
+        *export_opts*, when given and enabled, projects the export leaf name
+        onto each exportable native doc's canonical ``remote_path`` (``Report``
+        -> ``Report.docx``); the ``name`` column always stores the raw Drive
+        name. With export disabled (the default) paths are byte-identical to
+        today.
+
         Atomic: either all non-skipped items are present after this
         returns, or the cache is restored to its prior state.
         """
+        opts = export_opts or ExportOptions.disabled()
         if self._root_id is None:
             raise RuntimeError(
                 "root_id must be set before calling populate_from_listing"
@@ -437,7 +471,13 @@ class PathIDCache:
                 visited.add(cid)
 
                 raw_name = child["name"]
-                encoded_path = compose_path(parent_path, raw_name)
+                mime = child.get("mimeType")
+                # The canonical remote_path carries the projected leaf
+                # (Report -> Report.docx for an exportable when export is on);
+                # the name column keeps the raw Drive name for id-keyed calls.
+                encoded_path = compose_path(
+                    parent_path, project_leaf_name(raw_name, mime, opts)
+                )
                 # The virtual root owns "/Shared with me"; a real My-Drive
                 # folder that folds to it gets a conflict suffix (spec §8).
                 if (
@@ -445,14 +485,16 @@ class PathIDCache:
                     and cid not in shared_root_ids
                 ):
                     raw_name = f"{raw_name} (name conflict)"
-                    encoded_path = compose_path(parent_path, raw_name)
+                    encoded_path = compose_path(
+                        parent_path, project_leaf_name(raw_name, mime, opts)
+                    )
                     logger.warning(
                         "Real folder %r collides with the reserved "
                         "'/Shared with me' path; renamed to %r locally",
                         child["name"],
                         raw_name,
                     )
-                is_folder = child.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE
+                is_folder = mime == GOOGLE_FOLDER_MIME_TYPE
 
                 plan.append(
                     PathCacheEntry(

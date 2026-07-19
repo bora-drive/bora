@@ -7,7 +7,10 @@ import sqlite3
 import pytest
 
 from bora.database.core import Database
+from bora.export import ExportOptions
 from bora.path_cache import SHARED_WITH_ME_ID, SHARED_WITH_ME_PATH, PathIDCache
+
+DOC_MIME = "application/vnd.google-apps.document"
 
 
 def make_cache(root_id: str = "ROOT") -> PathIDCache:
@@ -782,3 +785,75 @@ class TestSharedWithMeVirtualRoot:
         )
         assert cache.resolve_path("S1") == "/Shared with me/Report.pdf"
         assert cache.id_to_path("S1") == "/Shared with me/Report.pdf"
+
+
+class TestExportLeafProjection:
+    """Task 4a: populate_from_listing/move/resolve_path project the export
+    leaf name onto the canonical remote_path while keeping the raw Drive
+    name in the ``name`` column."""
+
+    def test_populate_projects_export_leaf(self) -> None:
+        cache = make_cache()
+        items = [
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
+             "parents": ["ROOT"]},
+        ]
+        cache.populate_from_listing(items, export_opts=ExportOptions(True, False))
+        assert cache.path_to_id("/Report.docx") == "d1"
+        # Raw Drive name survives in the name column (id-keyed API calls).
+        entry = cache.get_entry("d1")
+        assert entry is not None and entry.name == "Report"
+
+    def test_populate_disabled_keeps_raw_leaf(self) -> None:
+        cache = make_cache()
+        items = [
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
+             "parents": ["ROOT"]},
+        ]
+        # Export disabled (default) -> byte-identical to today: no extension.
+        cache.populate_from_listing(items)
+        assert cache.path_to_id("/Report") == "d1"
+        assert cache.path_to_id("/Report.docx") is None
+
+    def test_populate_markdown_projects_md_extension(self) -> None:
+        cache = make_cache()
+        items = [
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
+             "parents": ["ROOT"]},
+        ]
+        cache.populate_from_listing(items, export_opts=ExportOptions(True, True))
+        assert cache.path_to_id("/Report.md") == "d1"
+
+    def test_move_preserves_raw_name(self) -> None:
+        cache = make_cache()
+        cache.populate_from_listing(
+            [{"id": "d1", "name": "Report", "mimeType": DOC_MIME,
+              "parents": ["ROOT"]}],
+            export_opts=ExportOptions(True, False),
+        )
+        # A pure relocation: the projected leaf ('Report.docx') must NOT leak
+        # into the name column — the raw Drive name stays "Report".
+        cache.move("/Report.docx", "/Sub/Report.docx", name="Report")
+        assert cache.path_to_id("/Sub/Report.docx") == "d1"
+        entry = cache.get_entry("d1")
+        assert entry is not None and entry.name == "Report"
+
+    def test_move_without_name_still_decodes_leaf(self) -> None:
+        # Regression: ordinary callers (no name arg) keep decoding the raw
+        # name from the new path leaf.
+        cache = make_cache()
+        cache.set("/old.pdf", "F1", "ROOT", "old.pdf", False)
+        cache.move("/old.pdf", "/new.pdf")
+        entry = cache.get_entry("F1")
+        assert entry is not None and entry.name == "new.pdf"
+
+    def test_resolve_path_returns_projected_leaf(self) -> None:
+        cache = make_cache()
+        cache.populate_from_listing(
+            [{"id": "d1", "name": "Report", "mimeType": DOC_MIME,
+              "parents": ["ROOT"]}],
+            export_opts=ExportOptions(True, False),
+        )
+        # resolve_path must return the stored projected path, not a path
+        # rebuilt from the raw name column ("/Report").
+        assert cache.resolve_path("d1") == "/Report.docx"

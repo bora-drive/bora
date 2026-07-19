@@ -11,6 +11,9 @@ from bora.changes import (
 )
 from bora.core import FileMetadata, FolderMetadata
 from bora.exceptions import CursorResetError
+from bora.export import ExportOptions
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 SAMPLE_FILE = {
     "id": "F1",
@@ -916,3 +919,89 @@ def test_invalid_page_token_raises_cursor_reset(make_http_error):
 
     with pytest.raises(CursorResetError):
         list(iter_remote_changes(lambda: _Svc(), lambda fn: fn(), cache, "stale"))
+
+
+# ==== Task 4b: export projection through the change feed ==================
+
+
+def _drain_export(fake, cache, start, opts, resolve_deleted_path=None):
+    """Like _drain, but threads *opts* (ExportOptions) into iter_remote_changes."""
+    def factory():
+        return fake.service()
+
+    def retry(fn):
+        return fn()
+
+    pages = list(
+        iter_remote_changes(
+            factory, retry, cache, start,
+            resolve_deleted_path=resolve_deleted_path,
+            export_opts=opts,
+        )
+    )
+    return [e for page in pages for e in page.entries], pages
+
+
+def test_exportable_doc_emitted_with_projection():
+    """A Doc change under export produces a projected APPLY entry whose path
+    carries the extension and whose export identity is set; the name column
+    keeps the raw Drive name."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    fid = fake.add_native("Report", "document", parent="/")
+    entries, pages = _drain_export(fake, cache, start, ExportOptions(True, False))
+    paths = [e.path_display for e in entries]
+    assert "/Report.docx" in paths
+    assert cache.path_to_id("/Report.docx") == fid
+    md = next(e for e in entries if e.path_display == "/Report.docx")
+    assert isinstance(md, FileMetadata)
+    assert md.export_mime == DOCX_MIME
+    assert md.name == "Report"  # raw Drive name preserved
+    # Raw name survives in the cache for id-keyed API calls.
+    entry = cache.get_entry(fid)
+    assert entry is not None and entry.name == "Report"
+
+
+def test_exportable_doc_dropped_when_export_disabled():
+    """With export disabled the Doc is dropped entirely — behavior identical
+    to today (no entry, nothing cached)."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    fake.add_native("Report", "document", parent="/")
+    entries, pages = _drain(fake, cache, start)
+    assert entries == []
+    assert cache.path_to_id("/Report.docx") is None
+    assert cache.path_to_id("/Report") is None
+
+
+def test_form_still_dropped_even_with_export_enabled():
+    """A Google Form is unsupported-native: dropped whether export is on or
+    off. It must never appear in the emitted entries."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    start = _start(fake)
+    fake.add_native("Survey", "form", parent="/")
+    entries, pages = _drain_export(fake, cache, start, ExportOptions(True, False))
+    assert entries == []
+    assert cache.path_to_id("/Survey") is None
+
+
+def test_exportable_doc_rename_reprojects_and_keeps_raw_name():
+    """A Doc renamed on Drive re-projects the path and updates the raw name,
+    but never lets the projected leaf leak into the name column."""
+    fake = FakeDrive()
+    cache = _fake_cache()
+    fid = fake.add_native("Report", "document", parent="/")
+    # Seed the cache as populate would (projected path, raw name).
+    cache.set("/Report.docx", fid, ROOT_ID, "Report", False)
+    start = _start(fake)
+    fake.service().files().update(
+        fileId=fid, body={"name": "Renamed"}
+    ).execute()
+    entries, pages = _drain_export(fake, cache, start, ExportOptions(True, False))
+    assert cache.path_to_id("/Report.docx") is None
+    assert cache.path_to_id("/Renamed.docx") == fid
+    entry = cache.get_entry(fid)
+    assert entry is not None and entry.name == "Renamed"
