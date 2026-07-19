@@ -69,16 +69,20 @@ def test_shutdown_daemon_calls_client_close(m: Bora) -> None:
 
     with (
         patch.object(m.client, "close", side_effect=lambda: call_order.append("close")),
-        patch.object(m, "stop_sync", side_effect=lambda: call_order.append("stop_sync")),
-        patch.object(m._client_db, "close", side_effect=lambda: call_order.append("db_close")),
+        patch.object(
+            m, "stop_sync", side_effect=lambda: call_order.append("stop_sync")
+        ),
+        patch.object(
+            m._client_db, "close", side_effect=lambda: call_order.append("db_close")
+        ),
     ):
         m.shutdown_daemon()
 
     assert "close" in call_order, "client.close() was not called"
     assert "stop_sync" in call_order, "stop_sync() was not called"
-    assert call_order.index("close") < call_order.index("stop_sync"), (
-        "client.close() must be called before stop_sync()"
-    )
+    assert call_order.index("close") < call_order.index(
+        "stop_sync"
+    ), "client.close() must be called before stop_sync()"
 
 
 def test_shutdown_daemon_closes_sync_db(m: Bora) -> None:
@@ -98,15 +102,19 @@ def test_shutdown_daemon_closes_sync_db_after_stop_sync(m: Bora) -> None:
     call_order: list[str] = []
 
     with (
-        patch.object(m, "stop_sync", side_effect=lambda: call_order.append("stop_sync")),
-        patch.object(m.sync, "close", side_effect=lambda: call_order.append("sync_close")),
+        patch.object(
+            m, "stop_sync", side_effect=lambda: call_order.append("stop_sync")
+        ),
+        patch.object(
+            m.sync, "close", side_effect=lambda: call_order.append("sync_close")
+        ),
     ):
         m.shutdown_daemon()
 
     assert "sync_close" in call_order, "sync.close() was not called"
-    assert call_order.index("stop_sync") < call_order.index("sync_close"), (
-        "sync.close() must be called after stop_sync()"
-    )
+    assert call_order.index("stop_sync") < call_order.index(
+        "sync_close"
+    ), "sync.close() must be called after stop_sync()"
 
 
 # ==== excluded-items pipeline: fold_human form throughout =============================
@@ -130,7 +138,9 @@ def _bypass_link_checks():
     return (
         patch.object(Bora, "_check_linked"),
         patch.object(Bora, "_check_sync_dir"),
-        patch.object(Bora, "pending_link", new_callable=PropertyMock, return_value=False),
+        patch.object(
+            Bora, "pending_link", new_callable=PropertyMock, return_value=False
+        ),
     )
 
 
@@ -188,9 +198,9 @@ def test_exclude_items_removes_index_entries_by_fold_path_key(m: Bora) -> None:
         m.exclude_items("/Ördner")
 
     assert m.sync.excluded_items == {"/ördner"}
-    assert m.sync.get_index_entry(folded) is None, (
-        "index entry keyed by fold_path form was not removed on exclusion"
-    )
+    assert (
+        m.sync.get_index_entry(folded) is None
+    ), "index entry keyed by fold_path form was not removed on exclusion"
 
 
 def test_include_items_readds_children_in_fold_human_form(m: Bora) -> None:
@@ -271,12 +281,12 @@ def test_exclude_shared_with_me_subfolder_removes_index_and_local(
         m.exclude_items(remote_path)
 
     assert m.sync.excluded_items == {fold_human(remote_path)}
-    assert not os.path.exists(local_path), (
-        "local tree under 'Shared with me' was not deleted on exclusion"
-    )
-    assert m.sync.get_index_entry(folded) is None, (
-        "index entry for the shared item was not removed on exclusion"
-    )
+    assert not os.path.exists(
+        local_path
+    ), "local tree under 'Shared with me' was not deleted on exclusion"
+    assert (
+        m.sync.get_index_entry(folded) is None
+    ), "index entry for the shared item was not removed on exclusion"
 
 
 def test_exclude_shared_with_me_root_disables_whole_feature(m: Bora, tmp_path) -> None:
@@ -311,9 +321,9 @@ def test_exclude_shared_with_me_root_disables_whole_feature(m: Bora, tmp_path) -
         m.exclude_items("/Shared with me")
 
     assert m.sync.excluded_items == {"/shared with me"}
-    assert not os.path.exists(local_root), (
-        "'Shared with me' mount point was not removed when the root was excluded"
-    )
-    assert m.sync.get_index_entry(folded) is None, (
-        "index entry for the shared child was not removed when the root was excluded"
-    )
+    assert not os.path.exists(
+        local_root
+    ), "'Shared with me' mount point was not removed when the root was excluded"
+    assert (
+        m.sync.get_index_entry(folded) is None
+    ), "index entry for the shared child was not removed when the root was excluded"

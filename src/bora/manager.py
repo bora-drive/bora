@@ -7,7 +7,6 @@ import errno
 import gc
 
 # system imports
-import os
 import time
 from contextlib import contextmanager
 from functools import wraps
@@ -24,11 +23,11 @@ from .config import BoraConfig, BoraState, PersistentMutableSet
 from .config.user import UserConfig
 from .constants import CONNECTED, CONNECTING, DISCONNECTED, IDLE, PAUSED, SYNCING
 from .exceptions import (
+    BoraApiError,
     CancelledError,
     ConnectionError,
     CursorResetError,
     InotifyError,
-    BoraApiError,
     NoSyncDirError,
     ServerError,
 )
@@ -149,7 +148,7 @@ class SyncManager:
 
         self.local_observer_thread: ObserverType | None = None
 
-    def _with_lock(  # type:ignore[misc]
+    def _with_lock(  # type: ignore[misc]
         fn: Callable[Concatenate[SyncManager, P], T],
     ) -> Callable[Concatenate[SyncManager, P], T]:
         @wraps(fn)

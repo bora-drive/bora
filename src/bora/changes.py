@@ -110,9 +110,7 @@ def to_file_metadata(file: dict[str, Any], path_display: str) -> FileMetadata:
     )
 
 
-def to_folder_metadata(
-    file: dict[str, Any], path_display: str
-) -> FolderMetadata:
+def to_folder_metadata(file: dict[str, Any], path_display: str) -> FolderMetadata:
     """Project a Drive folder resource into a :class:`FolderMetadata`."""
     return FolderMetadata(
         name=file["name"],
@@ -137,9 +135,7 @@ class ChangeDecision(enum.Enum):
     """A malformed change entry with no file body — drop with a log."""
 
 
-def classify(
-    change: dict[str, Any], path_cache: "PathIDCache"
-) -> ChangeDecision:
+def classify(change: dict[str, Any], path_cache: "PathIDCache") -> ChangeDecision:
     """Classify a Drive ``changes.list`` entry per the A4 disambiguation
     table (spec §6.3).
 
@@ -255,7 +251,11 @@ def _emit_apply(
     if parent_id is None and file.get("sharedWithMe"):
         # New shared-with-me attach point — mount under the virtual root.
         parent_id = SHARED_WITH_ME_ID
+    # classify() returns APPLY only with at least one in-scope parent (or a
+    # shared-with-me attach point), so the parent always resolves here.
+    assert parent_id is not None
     parent_path = path_cache.id_to_path(parent_id)
+    assert parent_path is not None
     new_path = compose_path(parent_path, file["name"])
     old_path = path_cache.id_to_path(file["id"])
     is_folder = mime == GOOGLE_FOLDER_MIME_TYPE
@@ -278,7 +278,8 @@ def _emit_apply(
                 "Dropping change for %r (id=%s): path conflicts with an "
                 "existing item. Rename one of the duplicates in the Google "
                 "Drive web UI to sync both.",
-                new_path, file["id"],
+                new_path,
+                file["id"],
             )
         return False
     if is_folder:
@@ -341,9 +342,9 @@ def _emit_shortcut(
         # a later change in the batch might still resolve the target.
         if warn_on_conflict:
             logger.warning(
-                "Shortcut %r targets %s which is not synced; not creating "
-                "a symlink",
-                file.get("name"), target_id,
+                "Shortcut %r targets %s which is not synced; not creating " "a symlink",
+                file.get("name"),
+                target_id,
             )
         return False
 
@@ -426,17 +427,21 @@ def iter_remote_changes(
     raw: list[dict[str, Any]] = []
     while True:
         try:
-            resp = retry(
-                lambda c=cursor: service_factory()
-                .changes()
-                .list(
-                    pageToken=c,
-                    fields=_CHANGE_FIELDS,
-                    pageSize=_CHANGE_PAGE_SIZE,
-                    includeRemoved=True,
+
+            def _list_changes_page(c: str = cursor) -> Any:
+                return (
+                    service_factory()
+                    .changes()
+                    .list(
+                        pageToken=c,
+                        fields=_CHANGE_FIELDS,
+                        pageSize=_CHANGE_PAGE_SIZE,
+                        includeRemoved=True,
+                    )
+                    .execute()
                 )
-                .execute()
-            )
+
+            resp = retry(_list_changes_page)
         except HttpError as exc:
             if exc.resp.status == 400:
                 raise CursorResetError(
@@ -483,7 +488,9 @@ def iter_remote_changes(
             for change in pending:
                 if classify(change, path_cache) is ChangeDecision.APPLY:
                     if _emit_apply(
-                        change, path_cache, out_entries,
+                        change,
+                        path_cache,
+                        out_entries,
                         warn_on_conflict=False,
                     ):
                         progress = True

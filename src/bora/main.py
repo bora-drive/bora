@@ -14,7 +14,6 @@ import os.path as osp
 import random
 import shutil
 import sqlite3
-import tempfile
 import time
 from asyncio import AbstractEventLoop, Future
 from datetime import datetime, timezone
@@ -55,11 +54,10 @@ from .core import (
 from .database.core import Database
 from .errorhandling import CONNECTION_ERRORS, convert_api_errors
 from .exceptions import (
+    BoraApiError,
     BusyError,
     KeyringAccessError,
-    BoraApiError,
     NoSyncDirError,
-    NotFoundError,
     NotLinkedError,
     UnsupportedFileTypeForDiff,
     UpdateCheckError,
@@ -76,10 +74,10 @@ from .manager import SyncManager
 from .models import SyncErrorEntry, SyncEvent, SyncStatus
 from .notify import BoraDesktopNotifier
 from .path_cache import PathIDCache
+from .path_codec import decode_path, encode_path, fold_human, fold_path
 from .sync import SyncDirection, SyncEngine, pf_repr
 from .utils import get_newer_version
 from .utils.appdirs import get_cache_path, get_data_path
-from .path_codec import decode_path, encode_path, fold_human, fold_path
 from .utils.path import (
     delete,
     is_child,
@@ -197,9 +195,7 @@ class Bora:
         # The SyncEngine still opens its own connection to the same DB
         # file; Stage 5's sync-engine port consolidates the two onto a
         # single shared Database/PathIDCache.
-        self._client_db_path = get_data_path(
-            "bora", f"{self.config_name}.db"
-        )
+        self._client_db_path = get_data_path("bora", f"{self.config_name}.db")
         self._client_db = Database(
             sqlite3.connect(self._client_db_path, check_same_thread=False)
         )
@@ -321,7 +317,9 @@ class Bora:
         try:
             self.client.unlink()
         except (ConnectionError, BoraApiError):
-            self._logger.debug("Could not invalidate token with the remote", exc_info=True)
+            self._logger.debug(
+                "Could not invalidate token with the remote", exc_info=True
+            )
         except KeyringAccessError:
             self._logger.debug("Could not remove token from keyring", exc_info=True)
 
@@ -1290,7 +1288,9 @@ class Bora:
         # Apply the same fold to the caller-supplied path before comparing.
         remote_path_lower = fold_human(remote_path.rstrip("/"))
 
-        if any(is_equal_or_child(remote_path_lower, f) for f in self.sync.excluded_items):
+        if any(
+            is_equal_or_child(remote_path_lower, f) for f in self.sync.excluded_items
+        ):
             return "excluded"
         elif any(is_child(f, remote_path_lower) for f in self.sync.excluded_items):
             return "partially excluded"

@@ -10,7 +10,6 @@ from bora.exceptions import AuthError, NotFoundError
 from bora.main import Bora
 from bora.utils.appdirs import get_home_dir
 from bora.utils.path import delete, generate_cc_name
-
 from tests.linked.conftest import _make_client
 
 fsevents_logger = logging.getLogger("fsevents")

@@ -66,7 +66,10 @@ def _drain(
 
     pages = list(
         iter_remote_changes(
-            factory, retry, cache, start,
+            factory,
+            retry,
+            cache,
+            start,
             resolve_deleted_path=resolve_deleted_path,
         )
     )
@@ -96,7 +99,9 @@ def sync_engine():
     cache = PathIDCache(Database(sqlite3.connect(":memory:", check_same_thread=False)))
     cache.root_id = ROOT_ID
     sync = SyncEngine(
-        GoogleDriveClient("fault-feed-config", CredentialStorage("fault-feed-config"), cache)
+        GoogleDriveClient(
+            "fault-feed-config", CredentialStorage("fault-feed-config"), cache
+        )
     )
     sync.sync_path = local_dir
     sync.local_cursor = 0.0
@@ -323,12 +328,12 @@ def test_cross_page_stale_child_echo_not_resurrected(sync_engine: SyncEngine):
     # (i.e. it is on page 2).
     _sorted_visible = sorted(_visible_latest.items(), key=lambda kv: kv[1])
     _page1_ids = {fid for fid, _ in _sorted_visible[:_PAGE_SIZE]}
-    assert dir_id not in _page1_ids, (
-        "dir_id must be on page 2, not page 1, for the cross-page scenario"
-    )
-    assert kid_id in _page1_ids, (
-        "kid_id must be on page 1 so the stale echo fires before the rename"
-    )
+    assert (
+        dir_id not in _page1_ids
+    ), "dir_id must be on page 2, not page 1, for the cross-page scenario"
+    assert (
+        kid_id in _page1_ids
+    ), "kid_id must be on page 1 so the stale echo fires before the rename"
     # ────────────────────────────────────────────────────────────────────────
 
     # Wire the fake (after all mutations so service() returns final state).
@@ -337,11 +342,20 @@ def test_cross_page_stale_child_echo_not_resurrected(sync_engine: SyncEngine):
     # Fully synced PRE-rename state: /old/kid.txt on disk + index at /old.
     _write_local_file(sync_engine, "/old/kid.txt", data)
     _seed_entry(
-        sync_engine, "/old", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
+        sync_engine,
+        "/old",
+        dir_id,
+        ItemType.Folder,
+        rev="folder",
+        content_hash="folder",
     )
     _seed_entry(
-        sync_engine, "/old/kid.txt", kid_id, ItemType.File,
-        rev=kid_rev, content_hash=kid_hash,
+        sync_engine,
+        "/old/kid.txt",
+        kid_id,
+        ItemType.File,
+        rev=kid_rev,
+        content_hash=kid_hash,
     )
 
     # Drive end-to-end: drain both pages and apply.
@@ -434,8 +448,11 @@ def test_fail_after_redeliver_idempotent_end_to_end(sync_engine: SyncEngine):
     file_id = fake.add_file("/retry_idempotent.txt", content=data)
 
     sync_engine.client._path_cache.set(
-        "/retry_idempotent.txt", file_id, parent_id=ROOT_ID,
-        name="retry_idempotent.txt", is_folder=False,
+        "/retry_idempotent.txt",
+        file_id,
+        parent_id=ROOT_ID,
+        name="retry_idempotent.txt",
+        is_folder=False,
     )
     _wire_fake(sync_engine, fake)
 
@@ -540,9 +557,7 @@ def test_direct_changelog_duplicate_still_collapsed():
     assert len(raw_for_fid) == 2, "precondition: two change log entries for fid"
 
     # Both entries must be visible from the start cursor.
-    visible_for_fid = [
-        (seq, fid) for seq, fid in raw_for_fid if seq >= int(start)
-    ]
+    visible_for_fid = [(seq, fid) for seq, fid in raw_for_fid if seq >= int(start)]
     assert len(visible_for_fid) == 2, (
         "both entries must be above the start cursor so the dedup is exercised; "
         f"start={start}, entries={raw_for_fid}"

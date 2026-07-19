@@ -3,6 +3,7 @@
 POSIX gets a real symlink. Windows without Developer Mode / admin cannot
 create symlinks; there we fall back to a minimal MS-SHLLINK (.lnk) file
 carrying a relative-path target. Pure-Python — no extra dependency."""
+
 from __future__ import annotations
 
 import os

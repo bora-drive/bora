@@ -11,7 +11,13 @@ from bora.client import GoogleDriveClient
 from bora.database.core import Database
 from bora.keyring import CredentialStorage
 from bora.path_cache import PathIDCache
-from tests.fake_drive import ROOT_ID, FakeDrive, make_conn_reset, make_http_error, make_timeout
+from tests.fake_drive import (
+    ROOT_ID,
+    FakeDrive,
+    make_conn_reset,
+    make_http_error,
+    make_timeout,
+)
 
 
 def test_seed_root_and_file():
@@ -44,11 +50,15 @@ def test_get_returns_file_fields():
     fake = FakeDrive()
     fid = fake.add_file("/a.txt", content=b"hello")
     svc = fake.service()
-    resp = svc.files().get(
-        fileId=fid,
-        fields="id, name, parents, mimeType, modifiedTime, size, md5Checksum, "
-        "shared, headRevisionId, trashed, lastModifyingUser(permissionId)",
-    ).execute()
+    resp = (
+        svc.files()
+        .get(
+            fileId=fid,
+            fields="id, name, parents, mimeType, modifiedTime, size, md5Checksum, "
+            "shared, headRevisionId, trashed, lastModifyingUser(permissionId)",
+        )
+        .execute()
+    )
     assert resp["id"] == fid
     assert resp["name"] == "a.txt"
     assert resp["md5Checksum"] == hashlib.md5(b"hello").hexdigest()
@@ -63,20 +73,28 @@ def test_list_children_filters_trashed_and_paginates():
     fake.add_file("/d/a.txt", content=b"a")
     fake.add_file("/d/b.txt", content=b"b")
     svc = fake.service()
-    resp = svc.files().list(
-        q=f"'{folder}' in parents and trashed=false",
-        fields="nextPageToken, files(id, name)",
-        pageSize=1,
-        pageToken=None,
-    ).execute()
+    resp = (
+        svc.files()
+        .list(
+            q=f"'{folder}' in parents and trashed=false",
+            fields="nextPageToken, files(id, name)",
+            pageSize=1,
+            pageToken=None,
+        )
+        .execute()
+    )
     assert len(resp["files"]) == 1
     token = resp["nextPageToken"]
-    resp2 = svc.files().list(
-        q=f"'{folder}' in parents and trashed=false",
-        fields="nextPageToken, files(id, name)",
-        pageSize=1,
-        pageToken=token,
-    ).execute()
+    resp2 = (
+        svc.files()
+        .list(
+            q=f"'{folder}' in parents and trashed=false",
+            fields="nextPageToken, files(id, name)",
+            pageSize=1,
+            pageToken=token,
+        )
+        .execute()
+    )
     assert len(resp2["files"]) == 1
     assert "nextPageToken" not in resp2
     names = {resp["files"][0]["name"], resp2["files"][0]["name"]}
@@ -97,9 +115,7 @@ def _client_on(fake: FakeDrive) -> GoogleDriveClient:
     """
     cache = PathIDCache(Database(sqlite3.connect(":memory:")))
     cache.root_id = ROOT_ID
-    client = GoogleDriveClient(
-        "test-config", CredentialStorage("test-config"), cache
-    )
+    client = GoogleDriveClient("test-config", CredentialStorage("test-config"), cache)
     # Bypass the linked / OAuth check in _get_service by replacing it with
     # a lambda that returns the fake service directly.
     client._get_service = lambda: fake.service()  # type: ignore[method-assign]
@@ -131,11 +147,19 @@ def test_create_simple_upload():
     fake = FakeDrive()
     svc = fake.service()
     media = MediaInMemoryUpload(b"data", mimetype="text/plain", resumable=False)
-    resp = svc.files().create(
-        body={"name": "n.txt", "parents": [ROOT_ID], "modifiedTime": "2026-01-02T00:00:00Z"},
-        media_body=media,
-        fields="id,name,md5Checksum,size,headRevisionId",
-    ).execute()
+    resp = (
+        svc.files()
+        .create(
+            body={
+                "name": "n.txt",
+                "parents": [ROOT_ID],
+                "modifiedTime": "2026-01-02T00:00:00Z",
+            },
+            media_body=media,
+            fields="id,name,md5Checksum,size,headRevisionId",
+        )
+        .execute()
+    )
     assert resp["name"] == "n.txt"
     assert resp["md5Checksum"] == hashlib.md5(b"data").hexdigest()
     assert resp["size"] == 4
@@ -166,9 +190,11 @@ def test_update_trash_sets_flag():
     fake = FakeDrive()
     fid = fake.add_file("/a.txt", content=b"x")
     svc = fake.service()
-    resp = svc.files().update(
-        fileId=fid, body={"trashed": True}, fields="id,trashed"
-    ).execute()
+    resp = (
+        svc.files()
+        .update(fileId=fid, body={"trashed": True}, fields="id,trashed")
+        .execute()
+    )
     assert resp["trashed"] is True
     assert fake.files[fid]["trashed"] is True
 
@@ -222,9 +248,11 @@ def test_changes_removed_reason_semantics():
     svc.files().update(fileId=trashed, body={"trashed": True}, fields="id").execute()
     svc.files().delete(fileId=hard).execute()
     fields = "nextPageToken, newStartPageToken, changes(removed, fileId, file(id, name, trashed))"
-    resp = svc.changes().list(
-        pageToken=str(base), pageSize=100, fields=fields, includeRemoved=True
-    ).execute()
+    resp = (
+        svc.changes()
+        .list(pageToken=str(base), pageSize=100, fields=fields, includeRemoved=True)
+        .execute()
+    )
     by_id = {c["fileId"]: c for c in resp["changes"]}
     assert by_id[trashed]["removed"] is False
     assert by_id[trashed]["file"]["trashed"] is True
@@ -239,16 +267,28 @@ def test_changes_pagination():
     fake.add_file("/a.txt", content=b"a")
     fake.add_file("/b.txt", content=b"b")
     svc = fake.service()
-    resp = svc.changes().list(
-        pageToken="100", pageSize=1, fields="nextPageToken, changes(fileId)",
-        includeRemoved=True,
-    ).execute()
+    resp = (
+        svc.changes()
+        .list(
+            pageToken="100",
+            pageSize=1,
+            fields="nextPageToken, changes(fileId)",
+            includeRemoved=True,
+        )
+        .execute()
+    )
     assert len(resp["changes"]) == 1
     assert "nextPageToken" in resp
-    resp2 = svc.changes().list(
-        pageToken=resp["nextPageToken"], pageSize=1,
-        fields="nextPageToken, newStartPageToken, changes(fileId)", includeRemoved=True,
-    ).execute()
+    resp2 = (
+        svc.changes()
+        .list(
+            pageToken=resp["nextPageToken"],
+            pageSize=1,
+            fields="nextPageToken, newStartPageToken, changes(fileId)",
+            includeRemoved=True,
+        )
+        .execute()
+    )
     assert len(resp2["changes"]) == 1
     assert "newStartPageToken" in resp2
 
@@ -269,13 +309,22 @@ def test_changes_move_rename_single_entry():
     base = fake._seq
     svc = fake.service()
     svc.files().update(
-        fileId=fid, body={"name": "b.txt"}, addParents=dst, removeParents=src,
+        fileId=fid,
+        body={"name": "b.txt"},
+        addParents=dst,
+        removeParents=src,
         fields="id",
     ).execute()
-    resp = svc.changes().list(
-        pageToken=str(base), pageSize=100,
-        fields="changes(removed, fileId, file(id, name, parents))", includeRemoved=True,
-    ).execute()
+    resp = (
+        svc.changes()
+        .list(
+            pageToken=str(base),
+            pageSize=100,
+            fields="changes(removed, fileId, file(id, name, parents))",
+            includeRemoved=True,
+        )
+        .execute()
+    )
     assert [c["fileId"] for c in resp["changes"]] == [fid]
     assert resp["changes"][0]["file"]["name"] == "b.txt"
     assert resp["changes"][0]["file"]["parents"] == [dst]
@@ -289,10 +338,14 @@ def test_changes_move_rename_single_entry():
 def test_about_get():
     fake = FakeDrive()
     svc = fake.service()
-    resp = svc.about().get(
-        fields="user(emailAddress,displayName,permissionId,photoLink),"
-        "storageQuota(usage,limit)"
-    ).execute()
+    resp = (
+        svc.about()
+        .get(
+            fields="user(emailAddress,displayName,permissionId,photoLink),"
+            "storageQuota(usage,limit)"
+        )
+        .execute()
+    )
     assert resp["user"]["emailAddress"] == "bora-test@example.com"
     assert resp["storageQuota"]["limit"] == "16106127360"
 
@@ -306,13 +359,17 @@ def test_revisions_list():
         media_body=MediaInMemoryUpload(b"v2", mimetype="text/plain"),
         fields="id",
     ).execute()
-    resp = svc.revisions().list(
-        fileId=fid,
-        fields="nextPageToken, revisions(id, modifiedTime, size, md5Checksum, "
-        "lastModifyingUser(permissionId))",
-        pageSize=100,
-        pageToken=None,
-    ).execute()
+    resp = (
+        svc.revisions()
+        .list(
+            fileId=fid,
+            fields="nextPageToken, revisions(id, modifiedTime, size, md5Checksum, "
+            "lastModifyingUser(permissionId))",
+            pageSize=100,
+            pageToken=None,
+        )
+        .execute()
+    )
     assert len(resp["revisions"]) == 2
     assert resp["revisions"][-1]["md5Checksum"] == hashlib.md5(b"v2").hexdigest()
 
@@ -359,7 +416,9 @@ def test_resumable_create_drives_next_chunk():
     assert response["name"] == "r.txt"
     assert response["size"] == 100
     assert progress_seen  # at least one progress callback fired
-    assert fake.files[response["id"]]["md5Checksum"] == hashlib.md5(b"y" * 100).hexdigest()
+    assert (
+        fake.files[response["id"]]["md5Checksum"] == hashlib.md5(b"y" * 100).hexdigest()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -376,21 +435,31 @@ def test_batch_invokes_callbacks_with_signature():
         results[request_id] = (response, exception)
 
     batch = svc.new_batch_http_request()
-    batch.add(svc.files().create(body={"name": "x.txt", "parents": [ROOT_ID]},
-              media_body=MediaInMemoryUpload(b"x", mimetype="text/plain"),
-              fields="id,name"), request_id="0", callback=cb)
+    batch.add(
+        svc.files().create(
+            body={"name": "x.txt", "parents": [ROOT_ID]},
+            media_body=MediaInMemoryUpload(b"x", mimetype="text/plain"),
+            fields="id,name",
+        ),
+        request_id="0",
+        callback=cb,
+    )
     fake.fail_next("files.create", make_http_error(403, "storageQuotaExceeded"))
-    batch.add(svc.files().create(body={"name": "y.txt", "parents": [ROOT_ID]},
-              media_body=MediaInMemoryUpload(b"y", mimetype="text/plain"),
-              fields="id,name"), request_id="1", callback=cb)
+    batch.add(
+        svc.files().create(
+            body={"name": "y.txt", "parents": [ROOT_ID]},
+            media_body=MediaInMemoryUpload(b"y", mimetype="text/plain"),
+            fields="id,name",
+        ),
+        request_id="1",
+        callback=cb,
+    )
     batch.execute()
     # The fail_next queue is FIFO per key: the failure is consumed by whichever
     # files.create executes first inside batch.execute() — which is request "0".
     # Assert the batch contract (one success + one HttpError) without depending
     # on which request_id gets which outcome.
-    outcomes = sorted(
-        ("ok" if r[1] is None else "err") for r in results.values()
-    )
+    outcomes = sorted(("ok" if r[1] is None else "err") for r in results.values())
     assert outcomes == ["err", "ok"]
     ok = [r for r in results.values() if r[1] is None][0]
     err = [r for r in results.values() if r[1] is not None][0]
@@ -427,6 +496,7 @@ def test_client_fixture_is_wired_to_fake(client_on_fake):
 # Task 7b-E2 Task 1 — Generalized fault surface
 # ---------------------------------------------------------------------------
 
+
 def test_fail_next_count_fails_n_then_succeeds():
     fake = FakeDrive()
     fid = fake.add_file("/a.txt", content=b"x")
@@ -447,12 +517,24 @@ def test_fail_on_call_targets_the_nth_changes_list():
     fake.add_file("/b.txt", content=b"b")
     fake.fail_on_call("changes.list", 2, make_http_error(503))
     svc = fake.service()
-    r1 = svc.changes().list(pageToken="100", pageSize=1,
-                            fields="nextPageToken, changes(fileId)", includeRemoved=True).execute()
+    r1 = (
+        svc.changes()
+        .list(
+            pageToken="100",
+            pageSize=1,
+            fields="nextPageToken, changes(fileId)",
+            includeRemoved=True,
+        )
+        .execute()
+    )
     assert "nextPageToken" in r1
     try:
-        svc.changes().list(pageToken=r1["nextPageToken"], pageSize=1,
-                           fields="nextPageToken, changes(fileId)", includeRemoved=True).execute()
+        svc.changes().list(
+            pageToken=r1["nextPageToken"],
+            pageSize=1,
+            fields="nextPageToken, changes(fileId)",
+            includeRemoved=True,
+        ).execute()
         assert False, "expected 503 on 2nd changes.list"
     except HttpError as e:
         assert e.resp.status == 503
@@ -462,7 +544,9 @@ def test_fail_when_predicate_targets_one_fileid_in_batch():
     fake = FakeDrive()
     a = fake.add_file("/a.txt", content=b"a")
     b = fake.add_file("/b.txt", content=b"b")
-    fake.fail_when("files.update", lambda **kw: kw.get("fileId") == b, make_http_error(500))
+    fake.fail_when(
+        "files.update", lambda **kw: kw.get("fileId") == b, make_http_error(500)
+    )
     svc = fake.service()
     svc.files().update(fileId=a, body={"name": "a2.txt"}, fields="id").execute()  # ok
     try:
@@ -501,8 +585,12 @@ def test_get_media_can_fault():
 
 def test_exception_factory_shapes():
     assert make_http_error(429, "userRateLimitExceeded").resp.status == 429
-    assert isinstance(make_timeout(), (TimeoutError, socket.timeout, _requests.exceptions.Timeout))
-    assert isinstance(make_conn_reset(), (ConnectionError, _requests.exceptions.ConnectionError))
+    assert isinstance(
+        make_timeout(), (TimeoutError, socket.timeout, _requests.exceptions.Timeout)
+    )
+    assert isinstance(
+        make_conn_reset(), (ConnectionError, _requests.exceptions.ConnectionError)
+    )
 
 
 def test_fail_after_update_commits_then_raises():
@@ -524,17 +612,27 @@ def test_fail_after_changes_list_redelivers_on_next_poll():
     fake.fail_after("changes.list", make_http_error(500))
     svc = fake.service()
     try:
-        svc.changes().list(pageToken="100", pageSize=100,
-                           fields="changes(fileId), newStartPageToken",
-                           includeRemoved=True).execute()
+        svc.changes().list(
+            pageToken="100",
+            pageSize=100,
+            fields="changes(fileId), newStartPageToken",
+            includeRemoved=True,
+        ).execute()
         assert False, "expected post-commit 500"
     except HttpError as e:
         assert e.resp.status == 500
     # The read is non-mutating, so a fresh poll from the same cursor still
     # delivers the change (no loss).
-    resp = svc.changes().list(pageToken="100", pageSize=100,
-                              fields="changes(fileId), newStartPageToken",
-                              includeRemoved=True).execute()
+    resp = (
+        svc.changes()
+        .list(
+            pageToken="100",
+            pageSize=100,
+            fields="changes(fileId), newStartPageToken",
+            includeRemoved=True,
+        )
+        .execute()
+    )
     assert len(resp["changes"]) == 1
 
 
@@ -670,6 +768,7 @@ def test_corrupt_download_is_single_use():
 
 def test_fail_every_rejects_non_positive_n():
     import pytest
+
     fake = FakeDrive()
     with pytest.raises(ValueError):
         fake.fail_every("files.list", 0, make_http_error(429))

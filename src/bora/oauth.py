@@ -118,10 +118,10 @@ class PersistingCredentials(Credentials):
 
     def __init__(
         self,
-        *args,
+        *args: Any,
         cred_storage: CredentialStorage | None = None,
         account_id: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._cred_storage = cred_storage

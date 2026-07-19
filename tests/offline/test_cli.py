@@ -297,8 +297,8 @@ def test_local_server_dialog_returns_1_when_creds_lack_refresh_token():
 
 
 from bora.cli.cli_core import (
-    _paste_redirect_dialog,
     _parse_redirect_url_or_code,
+    _paste_redirect_dialog,
 )
 
 
@@ -346,9 +346,6 @@ def test_paste_redirect_dialog_returns_1_on_empty_parse(monkeypatch):
     res = _paste_redirect_dialog(m)
     m.link.assert_not_called()
     assert res == 1
-
-
-from bora.cli.cli_core import auth_link
 
 
 def _make_proxy_mock(*, pending_link: bool = True, config_name: str = "test-cli"):
@@ -414,7 +411,9 @@ def test_auth_link_uses_paste_redirect_when_flag_set(monkeypatch):
     )
 
     runner = CliRunner()
-    result = runner.invoke(main, ["auth", "link", "--no-local-server", "-c", "test-cli"])
+    result = runner.invoke(
+        main, ["auth", "link", "--no-local-server", "-c", "test-cli"]
+    )
 
     assert result.exit_code == 0, result.output
     assert called == ["paste"]
@@ -424,6 +423,7 @@ def test_sharelink_command_removed():
     """sharelink is cut for v0.1.0 (Drive sharing deferred); it must not be
     registered, so invoking it errors as an unknown command."""
     from click.testing import CliRunner
+
     from bora.cli.cli_main import main
 
     result = CliRunner().invoke(main, ["sharelink", "list"])

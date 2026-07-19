@@ -458,7 +458,9 @@ class SyncEvent(Model):
         remote_path_lower = fold_path(remote_path)
 
         remote_path_from = sync_engine.to_remote_path(from_path) if from_path else None
-        remote_path_from_lower = fold_path(remote_path_from) if remote_path_from else None
+        remote_path_from_lower = (
+            fold_path(remote_path_from) if remote_path_from else None
+        )
 
         # For file changes, update the change type based on our index. Local file system
         # events of created vs modified can be misleading for some safe save mechanisms.

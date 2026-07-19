@@ -18,7 +18,7 @@ import logging
 import os
 import posixpath
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -27,8 +27,8 @@ from .core import FileMetadata, FolderMetadata, WriteMode
 from .errorhandling import convert_api_errors, extract_http_reason, http_error_to_bora
 from .exceptions import (
     BadInputError,
-    CancelledError,
     BoraApiError,
+    CancelledError,
     DataChangedError,
     DataCorruptionError,
     FileConflictError,
@@ -137,18 +137,22 @@ class _WriteHelper:
             a collision with the item itself.
         """
         cache = self._client._path_cache
-        if cache.has_case_conflict(
-            parent_path + "/" + encoded_name, exclude_id
-        ) is None:
+        if (
+            cache.has_case_conflict(parent_path + "/" + encoded_name, exclude_id)
+            is None
+        ):
             return encoded_name
         decoded = decode_name(encoded_name)
         stem, ext = os.path.splitext(decoded)
         for n in range(1, _AUTORENAME_LIMIT + 1):
             candidate_decoded = f"{stem} ({n}){ext}"
             candidate_encoded = encode_name(candidate_decoded)
-            if cache.has_case_conflict(
-                parent_path + "/" + candidate_encoded, exclude_id
-            ) is None:
+            if (
+                cache.has_case_conflict(
+                    parent_path + "/" + candidate_encoded, exclude_id
+                )
+                is None
+            ):
                 return candidate_encoded
         raise BadInputError(
             "Autorename exhausted",
@@ -237,9 +241,7 @@ class _WriteHelper:
 
         # Resolve parent for create.
         if mode == "create":
-            parent_id = self._resolve_parent_id(
-                parent_path, for_path=remote_path
-            )
+            parent_id = self._resolve_parent_id(parent_path, for_path=remote_path)
         else:
             parent_id = None  # update has no parent change in upload
 
@@ -269,15 +271,19 @@ class _WriteHelper:
                 chunksize=_RESUMABLE_CHUNK_SIZE,
             )
 
-        fields = ("id,name,mimeType,md5Checksum,modifiedTime,size,"
-                  "headRevisionId")
+        fields = "id,name,mimeType,md5Checksum,modifiedTime,size," "headRevisionId"
 
         if size > _SIMPLE_UPLOAD_THRESHOLD:
             # Resumable path (large files).
             resp = self._upload_resumable(
-                mode=mode, target_id=target_id, parent_id=parent_id,
-                drive_name=drive_name, media=media, fields=fields,
-                remote_path=remote_path, local_path=local_path,
+                mode=mode,
+                target_id=target_id,
+                parent_id=parent_id,
+                drive_name=drive_name,
+                media=media,
+                fields=fields,
+                remote_path=remote_path,
+                local_path=local_path,
                 modified_rfc3339=modified_rfc3339,
                 sync_event=sync_event,
             )
@@ -294,8 +300,14 @@ class _WriteHelper:
                     "parents": [parent_id],
                     "modifiedTime": modified_rfc3339,
                 }
-                request = client._get_service().files().create(
-                    body=body, media_body=media, fields=fields,
+                request = (
+                    client._get_service()
+                    .files()
+                    .create(
+                        body=body,
+                        media_body=media,
+                        fields=fields,
+                    )
                 )
                 try:
                     with convert_api_errors(
@@ -324,13 +336,16 @@ class _WriteHelper:
                     else:
                         raise
             else:
-                with convert_api_errors(
-                    remote_path=remote_path, local_path=local_path
-                ):
-                    request = client._get_service().files().update(
-                        fileId=target_id,
-                        body={"modifiedTime": modified_rfc3339},
-                        media_body=media, fields=fields,
+                with convert_api_errors(remote_path=remote_path, local_path=local_path):
+                    request = (
+                        client._get_service()
+                        .files()
+                        .update(
+                            fileId=target_id,
+                            body={"modifiedTime": modified_rfc3339},
+                            media_body=media,
+                            fields=fields,
+                        )
                     )
                     resp = client._retry_transient(request.execute)
             client._count_request()
@@ -361,8 +376,11 @@ class _WriteHelper:
         if mode == "update" and update_rev is not None:
             try:
                 self._audit_update_rev(
-                    resp["id"], update_rev, resp.get("headRevisionId"),
-                    remote_path=remote_path, local_path=local_path,
+                    resp["id"],
+                    update_rev,
+                    resp.get("headRevisionId"),
+                    remote_path=remote_path,
+                    local_path=local_path,
                 )
             except (BoraApiError, OSError) as exc:
                 logger.warning(
@@ -370,13 +388,16 @@ class _WriteHelper:
                     "revision committed during our upload may not have been "
                     "rescued as a conflicted copy. It remains recoverable "
                     "from the file's revision history on Drive.",
-                    remote_path, exc,
+                    remote_path,
+                    exc,
                 )
 
         if mode == "create":
             cache.set(
-                remote_path, resp["id"],
-                parent_id=parent_id, name=drive_name,
+                remote_path,
+                resp["id"],
+                parent_id=parent_id,
+                name=drive_name,
                 is_folder=False,
             )
 
@@ -394,6 +415,7 @@ class _WriteHelper:
         self, resp: dict[str, Any], remote_path: str
     ) -> FileMetadata:
         from .changes import parse_drive_time
+
         return FileMetadata(
             name=resp.get("name", ""),
             path_lower=fold_path(remote_path),
@@ -410,9 +432,16 @@ class _WriteHelper:
         )
 
     def _upload_resumable(
-        self, *, mode: str, target_id: str | None, parent_id: str | None,
-        drive_name: str, media: Any, fields: str,
-        remote_path: str, local_path: str,
+        self,
+        *,
+        mode: str,
+        target_id: str | None,
+        parent_id: str | None,
+        drive_name: str,
+        media: Any,
+        fields: str,
+        remote_path: str,
+        local_path: str,
         modified_rfc3339: str,
         sync_event: "SyncEvent | None",
     ) -> dict[str, Any]:
@@ -429,15 +458,26 @@ class _WriteHelper:
                 "parents": [parent_id],
                 "modifiedTime": modified_rfc3339,
             }
-            request = client._get_service().files().create(
-                body=body, media_body=media, fields=fields,
+            request = (
+                client._get_service()
+                .files()
+                .create(
+                    body=body,
+                    media_body=media,
+                    fields=fields,
+                )
             )
         else:
             new_file_id = None
-            request = client._get_service().files().update(
-                fileId=target_id,
-                body={"modifiedTime": modified_rfc3339},
-                media_body=media, fields=fields,
+            request = (
+                client._get_service()
+                .files()
+                .update(
+                    fileId=target_id,
+                    body={"modifiedTime": modified_rfc3339},
+                    media_body=media,
+                    fields=fields,
+                )
             )
 
         response: dict[str, Any] | None = None
@@ -534,9 +574,7 @@ class _WriteHelper:
                     .execute()
                 )
 
-            with convert_api_errors(
-                remote_path=remote_path, local_path=local_path
-            ):
+            with convert_api_errors(remote_path=remote_path, local_path=local_path):
                 resp = client._retry_transient(_fetch_page)
             client._count_request()
             ids.extend(r["id"] for r in resp.get("revisions", []))
@@ -555,7 +593,8 @@ class _WriteHelper:
         logger.warning(
             "Remote revision %s of %r was committed during our upload and "
             "overwritten; rescuing it as a conflicted copy.",
-            prev, remote_path,
+            prev,
+            remote_path,
         )
         self._rescue_revision(file_id, prev, remote_path)
 
@@ -577,10 +616,14 @@ class _WriteHelper:
             parent_path, raw_leaf = self._split_parent_name(remote_path)
             stem, ext = os.path.splitext(decode_name(raw_leaf))
             date = datetime.now().strftime("%Y-%m-%d")
-            cc_path = compose_path(parent_path or "/", f"{stem} (conflicted copy {date}){ext}")
+            cc_path = compose_path(
+                parent_path or "/", f"{stem} (conflicted copy {date}){ext}"
+            )
             self.upload(
-                tmp_path, cc_path,
-                write_mode=WriteMode.Add, autorename=True,
+                tmp_path,
+                cc_path,
+                write_mode=WriteMode.Add,
+                autorename=True,
             )
         finally:
             try:
@@ -600,8 +643,7 @@ class _WriteHelper:
                 meta = client._retry_transient(
                     lambda: client._get_service()
                     .files()
-                    .get(fileId=file_id,
-                         fields="headRevisionId,mimeType")
+                    .get(fileId=file_id, fields="headRevisionId,mimeType")
                     .execute()
                 )
             client._count_request()
@@ -614,8 +656,7 @@ class _WriteHelper:
             if meta.get("headRevisionId") != parent_rev:
                 raise DataChangedError(
                     "Item changed on Google Drive",
-                    f"{remote_path!r} changed on Drive since Bora last "
-                    "saw it.",
+                    f"{remote_path!r} changed on Drive since Bora last " "saw it.",
                     remote_path=remote_path,
                 )
 
@@ -643,10 +684,7 @@ class _WriteHelper:
         file_id = self._resolve_file_id(remote_path)
         with convert_api_errors(remote_path=remote_path):
             client._retry_transient(
-                lambda: client._get_service()
-                .files()
-                .delete(fileId=file_id)
-                .execute()
+                lambda: client._get_service().files().delete(fileId=file_id).execute()
             )
         client._count_request()
         client._path_cache.remove(remote_path)
@@ -671,6 +709,7 @@ class _WriteHelper:
                 shared=False,
             )
         from .changes import parse_drive_time
+
         modified = parse_drive_time(resp.get("modifiedTime"))
         return FileMetadata(
             name=resp.get("name", ""),
@@ -713,12 +752,16 @@ class _WriteHelper:
                 continue
             if parent_rev is not None:
                 with convert_api_errors(remote_path=remote_path):
-                    meta = client._retry_transient(
-                        lambda fid=file_id: client._get_service()
-                        .files()
-                        .get(fileId=fid, fields="headRevisionId,mimeType")
-                        .execute()
-                    )
+
+                    def _get_head_rev(fid: str = file_id) -> Any:
+                        return (
+                            client._get_service()
+                            .files()
+                            .get(fileId=fid, fields="headRevisionId,mimeType")
+                            .execute()
+                        )
+
+                    meta = client._retry_transient(_get_head_rev)
                 client._count_request()
                 if meta.get("mimeType") == _FOLDER_MIME:
                     results[idx] = BadInputError(
@@ -738,11 +781,13 @@ class _WriteHelper:
 
         live = [r for r in resolved if r is not None]
         for chunk_start in range(0, len(live), batch_size):
-            chunk = live[chunk_start:chunk_start + batch_size]
+            chunk = live[chunk_start : chunk_start + batch_size]
             batch = client._get_service().new_batch_http_request()
             for idx, remote_path, file_id in chunk:
                 request = (
-                    client._get_service().files().update(
+                    client._get_service()
+                    .files()
+                    .update(
                         fileId=file_id,
                         body={"trashed": True},
                         fields="id,name,mimeType,trashed",
@@ -751,7 +796,9 @@ class _WriteHelper:
                 batch.add(
                     request,
                     callback=self._make_remove_batch_callback(
-                        results, idx, remote_path,
+                        results,
+                        idx,
+                        remote_path,
                     ),
                     request_id=str(idx),
                 )
@@ -759,24 +806,27 @@ class _WriteHelper:
                 client._retry_transient(batch.execute)
             client._count_request(len(chunk))
 
-        return [r if r is not None else BoraApiError(
-            "batch slot empty", "")
-                for r in results]
+        return [
+            r if r is not None else BoraApiError("batch slot empty", "")
+            for r in results
+        ]
 
     def _make_remove_batch_callback(
-        self, results: list, idx: int, remote_path: str,
-    ):
+        self,
+        results: list[Any],
+        idx: int,
+        remote_path: str,
+    ) -> Callable[[str, Any, Any], None]:
         """Build a per-sub-request callback for remove_batch."""
         client = self._client
 
-        def cb(request_id, response, exception):
+        def cb(request_id: str, response: Any, exception: Any) -> None:
             if exception is not None:
-                results[idx] = self._batch_exception_to_bora(
-                    exception, remote_path
-                )
+                results[idx] = self._batch_exception_to_bora(exception, remote_path)
                 return
             client._path_cache.remove(remote_path)
             results[idx] = self._wrap_metadata(response, remote_path)
+
         return cb
 
     def move(
@@ -802,12 +852,8 @@ class _WriteHelper:
 
         new_name = self._decode_segment(raw_new_name)
 
-        old_parent_id = self._resolve_parent_id(
-            old_parent_path, for_path=remote_path
-        )
-        new_parent_id = self._resolve_parent_id(
-            new_parent_path, for_path=new_path
-        )
+        old_parent_id = self._resolve_parent_id(old_parent_path, for_path=remote_path)
+        new_parent_id = self._resolve_parent_id(new_parent_path, for_path=new_path)
 
         update_kwargs: dict[str, Any] = {
             "fileId": file_id,
@@ -820,10 +866,7 @@ class _WriteHelper:
 
         with convert_api_errors(remote_path=remote_path):
             resp = client._retry_transient(
-                lambda: client._get_service()
-                .files()
-                .update(**update_kwargs)
-                .execute()
+                lambda: client._get_service().files().update(**update_kwargs).execute()
             )
         client._count_request()
         if not cache.move(remote_path, new_path):
@@ -831,7 +874,8 @@ class _WriteHelper:
                 "path_cache.move(%r -> %r) rejected by case-conflict; "
                 "cache and Drive may be out of sync until the change feed "
                 "corrects this.",
-                remote_path, new_path,
+                remote_path,
+                new_path,
             )
         return self._wrap_metadata(resp, new_path)
 
@@ -844,9 +888,7 @@ class _WriteHelper:
         """
         return name.replace("\\", "\\\\").replace("'", "\\'")
 
-    def make_dir(
-        self, remote_path: str, *, autorename: bool = False
-    ) -> FolderMetadata:
+    def make_dir(self, remote_path: str, *, autorename: bool = False) -> FolderMetadata:
         client = self._client
         client._ensure_root_id()
         parent_path, raw_name = self._split_parent_name(remote_path)
@@ -962,7 +1004,8 @@ class _WriteHelper:
                 "path_cache.set(%r, %r) rejected by case-conflict; "
                 "cache and Drive may be out of sync until the change feed "
                 "corrects this.",
-                remote_path, resp["id"],
+                remote_path,
+                resp["id"],
             )
         return FolderMetadata(
             name=resp["name"],
@@ -1008,8 +1051,11 @@ class _WriteHelper:
             )
         client._count_request()
         client._path_cache.set(
-            remote_path, resp["id"], parent_id=parent_id,
-            name=drive_name, is_folder=False,
+            remote_path,
+            resp["id"],
+            parent_id=parent_id,
+            name=drive_name,
+            is_folder=False,
         )
         # Relative-to-own-dir target, matching the download-side convention
         # (see changes.py:_emit_shortcut).
@@ -1017,11 +1063,19 @@ class _WriteHelper:
             target_remote_path, posixpath.dirname(remote_path)
         )
         return FileMetadata(
-            name=resp["name"], path_lower=fold_path(remote_path),
-            path_display=remote_path, id=resp["id"],
-            modified=datetime.now(timezone.utc), rev="", size=0,
-            symlink_target=rel_target, shared=False, modified_by=None,
-            is_downloadable=False, content_hash="", can_edit=True,
+            name=resp["name"],
+            path_lower=fold_path(remote_path),
+            path_display=remote_path,
+            id=resp["id"],
+            modified=datetime.now(timezone.utc),
+            rev="",
+            size=0,
+            symlink_target=rel_target,
+            shared=False,
+            modified_by=None,
+            is_downloadable=False,
+            content_hash="",
+            can_edit=True,
         )
 
     def retarget_shortcut(
@@ -1048,11 +1102,19 @@ class _WriteHelper:
             target_remote_path, posixpath.dirname(remote_path)
         )
         return FileMetadata(
-            name=resp["name"], path_lower=fold_path(remote_path),
-            path_display=remote_path, id=resp["id"],
-            modified=datetime.now(timezone.utc), rev="", size=0,
-            symlink_target=rel_target, shared=False, modified_by=None,
-            is_downloadable=False, content_hash="", can_edit=True,
+            name=resp["name"],
+            path_lower=fold_path(remote_path),
+            path_display=remote_path,
+            id=resp["id"],
+            modified=datetime.now(timezone.utc),
+            rev="",
+            size=0,
+            symlink_target=rel_target,
+            shared=False,
+            modified_by=None,
+            is_downloadable=False,
+            content_hash="",
+            can_edit=True,
         )
 
     def make_dir_batch(
@@ -1060,22 +1122,20 @@ class _WriteHelper:
     ) -> "list[FolderMetadata | BoraApiError]":
         client = self._client
         client._ensure_root_id()
-        results: list[FolderMetadata | BoraApiError | None] = [None] * len(
-            remote_paths
-        )
+        results: list[FolderMetadata | BoraApiError | None] = [None] * len(remote_paths)
 
         for chunk_start in range(0, len(remote_paths), _BATCH_LIMIT):
-            chunk = list(enumerate(
-                remote_paths[chunk_start:chunk_start + _BATCH_LIMIT],
-                start=chunk_start,
-            ))
+            chunk = list(
+                enumerate(
+                    remote_paths[chunk_start : chunk_start + _BATCH_LIMIT],
+                    start=chunk_start,
+                )
+            )
             batch = client._get_service().new_batch_http_request()
             scheduled_count = 0
             for idx, remote_path in chunk:
                 try:
-                    parent_path, raw_name = self._split_parent_name(
-                        remote_path
-                    )
+                    parent_path, raw_name = self._split_parent_name(remote_path)
                     drive_name = self._decode_segment(raw_name)
                     parent_id = self._resolve_parent_id(
                         parent_path, for_path=remote_path
@@ -1091,14 +1151,21 @@ class _WriteHelper:
                     "parents": [parent_id],
                 }
                 request = (
-                    client._get_service().files().create(
-                        body=body, fields="id,name,mimeType",
+                    client._get_service()
+                    .files()
+                    .create(
+                        body=body,
+                        fields="id,name,mimeType",
                     )
                 )
                 batch.add(
                     request,
                     callback=self._make_dir_batch_callback(
-                        results, idx, remote_path, drive_name, parent_id,
+                        results,
+                        idx,
+                        remote_path,
+                        drive_name,
+                        parent_id,
                         new_folder_id,
                     ),
                     request_id=str(idx),
@@ -1111,23 +1178,26 @@ class _WriteHelper:
                 client._count_request(scheduled_count)
 
         # Backfill any None slots (shouldn't happen, but defensive)
-        return [r if r is not None else BoraApiError(
-            "batch slot empty", "")
-                for r in results]
+        return [
+            r if r is not None else BoraApiError("batch slot empty", "")
+            for r in results
+        ]
 
     def _make_dir_batch_callback(
-        self, results: list, idx: int, remote_path: str,
-        drive_name: str, parent_id: str, new_folder_id: str,
-    ):
+        self,
+        results: list[Any],
+        idx: int,
+        remote_path: str,
+        drive_name: str,
+        parent_id: str,
+        new_folder_id: str,
+    ) -> Callable[[str, Any, Any], None]:
         """Build a per-sub-request callback for make_dir_batch."""
         client = self._client
 
-        def cb(request_id, response, exception):
+        def cb(request_id: str, response: Any, exception: Any) -> None:
             if exception is not None:
-                if (
-                    isinstance(exception, HttpError)
-                    and exception.resp.status == 409
-                ):
+                if isinstance(exception, HttpError) and exception.resp.status == 409:
                     # Previous create committed; fetch the existing folder by
                     # the pre-generated id.
                     try:
@@ -1142,12 +1212,11 @@ class _WriteHelper:
                         results[idx] = fetch_exc
                         return
                 else:
-                    results[idx] = self._batch_exception_to_bora(
-                        exception, remote_path
-                    )
+                    results[idx] = self._batch_exception_to_bora(exception, remote_path)
                     return
             client._path_cache.set(
-                remote_path, response["id"],
+                remote_path,
+                response["id"],
                 parent_id=parent_id,
                 name=drive_name,
                 is_folder=True,
@@ -1159,6 +1228,7 @@ class _WriteHelper:
                 id=response["id"],
                 shared=False,
             )
+
         return cb
 
     @staticmethod
@@ -1202,7 +1272,9 @@ class _WriteHelper:
         tmp_path = self._download_revision_to_tempfile(file_id, rev)
         try:
             return self.upload(
-                tmp_path, remote_path, write_mode=WriteMode.Update,
+                tmp_path,
+                remote_path,
+                write_mode=WriteMode.Update,
             )
         finally:
             try:
@@ -1212,6 +1284,7 @@ class _WriteHelper:
 
     def _download_revision_to_tempfile(self, file_id: str, rev: str) -> str:
         import tempfile as _t
+
         client = self._client
         fd, path = _t.mkstemp(prefix="bora-restore-")
         os.close(fd)
@@ -1220,12 +1293,19 @@ class _WriteHelper:
         # clean it up here on any failure (including cancellation).
         try:
             with convert_api_errors():
-                request = client._get_service().revisions().get_media(
-                    fileId=file_id, revisionId=rev,
+                request = (
+                    client._get_service()
+                    .revisions()
+                    .get_media(
+                        fileId=file_id,
+                        revisionId=rev,
+                    )
                 )
                 with open(path, "wb") as fh:
                     downloader = MediaIoBaseDownload(
-                        fh, request, chunksize=_RESUMABLE_CHUNK_SIZE,
+                        fh,
+                        request,
+                        chunksize=_RESUMABLE_CHUNK_SIZE,
                     )
                     done = False
                     while not done:
@@ -1235,9 +1315,7 @@ class _WriteHelper:
                                 f"Restore of {file_id!r}@{rev!r} interrupted "
                                 "by shutdown.",
                             )
-                        _status, done = client._retry_transient(
-                            downloader.next_chunk
-                        )
+                        _status, done = client._retry_transient(downloader.next_chunk)
         except BaseException:
             try:
                 os.unlink(path)

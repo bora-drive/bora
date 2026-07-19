@@ -599,7 +599,9 @@ def test_create_crash_idempotent_via_reserved_id(tmp_path):
 
         from bora.core import WriteMode
 
-        result = client._writes.upload(str(local), "/upload_me.txt", write_mode=WriteMode.Add)
+        result = client._writes.upload(
+            str(local), "/upload_me.txt", write_mode=WriteMode.Add
+        )
 
         # Exactly one file exists with the reserved id.
         assert result.id in fake.files, "returned id must be in fake.files"

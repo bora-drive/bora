@@ -331,10 +331,7 @@ def test_conflict_equal_rev_is_local_newer_or_identical(sync_engine: SyncEngine)
         sync_engine, remote_path, rev="REV-HEAD-1", content_hash="REMOTE-DIFFERENT-HASH"
     )
 
-    assert (
-        sync_engine._check_download_conflict(event)
-        is Conflict.LocalNewerOrIdentical
-    )
+    assert sync_engine._check_download_conflict(event) is Conflict.LocalNewerOrIdentical
 
 
 def test_conflict_equal_hash_is_identical(sync_engine: SyncEngine):
@@ -437,9 +434,7 @@ def test_requires_upload_skips_when_remote_hash_matches(
         is_downloadable=True,
         content_hash=md5,
     )
-    monkeypatch.setattr(
-        sync_engine.client, "get_metadata", lambda path: md_remote
-    )
+    monkeypatch.setattr(sync_engine.client, "get_metadata", lambda path: md_remote)
 
     event = SyncEvent(
         direction=SyncDirection.Up,
@@ -483,9 +478,7 @@ def test_requires_upload_true_when_remote_hash_differs(
         is_downloadable=True,
         content_hash=_md5(b"different remote content"),
     )
-    monkeypatch.setattr(
-        sync_engine.client, "get_metadata", lambda path: md_remote
-    )
+    monkeypatch.setattr(sync_engine.client, "get_metadata", lambda path: md_remote)
 
     event = SyncEvent(
         direction=SyncDirection.Up,
@@ -601,10 +594,7 @@ def test_echo_suppression_records_headrevisionid_and_skips_download(
         content_hash="A-DIFFERENT-REMOTE-HASH",
     )
 
-    assert (
-        sync_engine._check_download_conflict(echo)
-        is Conflict.LocalNewerOrIdentical
-    )
+    assert sync_engine._check_download_conflict(echo) is Conflict.LocalNewerOrIdentical
 
 
 # ==== Cluster A conflict chain (upload signal + download check) ======================
@@ -842,7 +832,11 @@ def test_remote_case_only_folder_rename_recases_child_index(sync_engine: SyncEng
         "/FOLDER", folder_id, parent_id=ROOT_ID, name="FOLDER", is_folder=True
     )
     sync_engine.client._path_cache.set(
-        "/FOLDER/Subfolder", sub_id, parent_id=folder_id, name="Subfolder", is_folder=True
+        "/FOLDER/Subfolder",
+        sub_id,
+        parent_id=folder_id,
+        name="Subfolder",
+        is_folder=True,
     )
     sync_engine.client._path_cache.set(
         "/FOLDER/Subfolder/nested.txt",
@@ -961,7 +955,11 @@ def test_out_of_order_children_before_parent_all_created(sync_engine: SyncEngine
         "/parent", parent_id, parent_id=ROOT_ID, name="parent", is_folder=True
     )
     sync_engine.client._path_cache.set(
-        "/parent/child_1", child1_id, parent_id=parent_id, name="child_1", is_folder=True
+        "/parent/child_1",
+        child1_id,
+        parent_id=parent_id,
+        name="child_1",
+        is_folder=True,
     )
     sync_engine.client._path_cache.set(
         "/parent/child_2",
@@ -1046,15 +1044,28 @@ def test_update_index_from_remote_metadata_evicts_stale_same_remote_id(
     file_id = "file-1"
     # Stale row: same remote_id indexed at the OLD path.
     _seed_entry(
-        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1",
+        sync_engine,
+        "/a.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
         content_hash=_md5(data),
     )
 
     md = FileMetadata(
-        name="b.txt", path_lower="/b.txt", path_display="/b.txt", id=file_id,
-        modified=datetime.now(timezone.utc), rev="rev-1", size=len(data),
-        symlink_target=None, shared=False, modified_by=None,
-        is_downloadable=True, content_hash=_md5(data), can_edit=True,
+        name="b.txt",
+        path_lower="/b.txt",
+        path_display="/b.txt",
+        id=file_id,
+        modified=datetime.now(timezone.utc),
+        rev="rev-1",
+        size=len(data),
+        symlink_target=None,
+        shared=False,
+        modified_by=None,
+        is_downloadable=True,
+        content_hash=_md5(data),
+        can_edit=True,
     )
     # Must not raise DatabaseError (UNIQUE(remote_id)).
     sync_engine.update_index_from_remote_metadata(md)
@@ -1088,7 +1099,12 @@ def test_remote_file_rename_moves_local_file(sync_engine: SyncEngine):
     # Fully synced state before the remote rename: local /a.txt + index entry.
     local_old = _write_local_file(sync_engine, "/a.txt", data)
     _seed_entry(
-        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+        sync_engine,
+        "/a.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
+        content_hash=_md5(data),
     )
 
     # The change feed delivers ONE file event, at the new path, same id and rev.
@@ -1134,7 +1150,12 @@ def test_remote_folder_rename_moves_local_tree(sync_engine: SyncEngine):
     # Fully synced state before the remote rename: /old/kid.txt on disk + index.
     _write_local_file(sync_engine, "/old/kid.txt", b"kid")
     _seed_entry(
-        sync_engine, "/old", "id-dir", ItemType.Folder, rev="folder", content_hash="folder"
+        sync_engine,
+        "/old",
+        "id-dir",
+        ItemType.Folder,
+        rev="folder",
+        content_hash="folder",
     )
     _seed_entry(
         sync_engine,
@@ -1211,7 +1232,12 @@ def test_remote_reparent_into_unsynced_parent_moves_local_file(
     # Fully synced state before the remote reparent: local /a.txt only.
     local_old = _write_local_file(sync_engine, "/a.txt", data)
     _seed_entry(
-        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+        sync_engine,
+        "/a.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
+        content_hash=_md5(data),
     )
 
     event = SyncEvent(
@@ -1290,7 +1316,12 @@ def test_remote_move_with_occupied_target_evicts_stale_index_and_conflicts(
     # Fully synced state before the remote rename: local /a.txt + index entry.
     local_old = _write_local_file(sync_engine, "/a.txt", data)
     _seed_entry(
-        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+        sync_engine,
+        "/a.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
+        content_hash=_md5(data),
     )
 
     # A DIFFERENT local item (no index row) occupies the move target.
@@ -1387,10 +1418,19 @@ def test_remote_folder_rename_with_same_batch_stale_child_echo(sync_engine: Sync
     # Fully synced PRE-rename state: /old/kid.txt on disk + index at /old.
     _write_local_file(sync_engine, "/old/kid.txt", data)
     _seed_entry(
-        sync_engine, "/old", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
+        sync_engine,
+        "/old",
+        dir_id,
+        ItemType.Folder,
+        rev="folder",
+        content_hash="folder",
     )
     _seed_entry(
-        sync_engine, "/old/kid.txt", kid_id, ItemType.File, rev=kid_rev,
+        sync_engine,
+        "/old/kid.txt",
+        kid_id,
+        ItemType.File,
+        rev=kid_rev,
         content_hash=_md5(data),
     )
 
@@ -1477,10 +1517,20 @@ def test_apply_remote_move_does_not_skip_when_dest_parent_is_indexed(
     # so the on-disk move to /dir/b.txt silently no-ops (missing dest parent).
     _write_local_file(sync_engine, "/a.txt", data)
     _seed_entry(
-        sync_engine, "/dir", dir_id, ItemType.Folder, rev="folder", content_hash="folder"
+        sync_engine,
+        "/dir",
+        dir_id,
+        ItemType.Folder,
+        rev="folder",
+        content_hash="folder",
     )
     _seed_entry(
-        sync_engine, "/a.txt", file_id, ItemType.File, rev="rev-1", content_hash=_md5(data)
+        sync_engine,
+        "/a.txt",
+        file_id,
+        ItemType.File,
+        rev="rev-1",
+        content_hash=_md5(data),
     )
 
     event = SyncEvent(
@@ -1540,7 +1590,14 @@ def test_local_delete_of_remotely_changed_file_redownloads(sync_engine: SyncEngi
     # remote counterpart has already been updated since last sync.
     stale_rev = "REV-STALE"
     assert stale_rev != new_rev
-    _seed_entry(sync_engine, remote_path, file_id, ItemType.File, rev=stale_rev, content_hash=_md5(b"old content"))
+    _seed_entry(
+        sync_engine,
+        remote_path,
+        file_id,
+        ItemType.File,
+        rev=stale_rev,
+        content_hash=_md5(b"old content"),
+    )
 
     # The local file is absent (user deleted it locally).
     local_path = sync_engine.to_local_path_from_cased(remote_path)
@@ -1567,14 +1624,20 @@ def test_local_delete_of_remotely_changed_file_redownloads(sync_engine: SyncEngi
     sync_engine._create_remote_entry(event)
 
     # Remote file must NOT have been trashed — rev mismatch should skip delete.
-    assert not fake.files[file_id]["trashed"], "remote file was trashed despite rev mismatch"
+    assert not fake.files[file_id][
+        "trashed"
+    ], "remote file was trashed despite rev mismatch"
 
     # No lingering Up error for the path (was the bug: DataChangedError became a SyncError).
-    up_errors = sync_engine.sync_errors_for_path(remote_path.lower(), direction=SyncDirection.Up)
+    up_errors = sync_engine.sync_errors_for_path(
+        remote_path.lower(), direction=SyncDirection.Up
+    )
     assert len(up_errors) == 0, f"unexpected Up errors: {up_errors}"
 
     # The newer remote file must have been restored locally.
-    assert osp.exists(local_path), "remote file was not re-downloaded after delete conflict"
+    assert osp.exists(
+        local_path
+    ), "remote file was not re-downloaded after delete conflict"
 
     # Index must be re-keyed to the new rev (not the stale one, not absent).
     entry = sync_engine.get_index_entry(remote_path)
@@ -1605,7 +1668,6 @@ def test_local_move_to_remotely_changed_destination_conflict_renames(
     # Set up FakeDrive: b.txt exists with a new rev; a.txt is the move source.
     fake = FakeDrive()
     b_id = fake.add_file("/b.txt", content=dst_new_content)
-    b_new_rev = fake.files[b_id]["headRevisionId"]
     a_id = fake.add_file("/a.txt", content=src_data)
     a_rev = fake.files[a_id]["headRevisionId"]
     sync_engine.client._get_service = Mock(return_value=fake.service())
@@ -1628,7 +1690,12 @@ def test_local_move_to_remotely_changed_destination_conflict_renames(
     # Index: /a.txt at its current rev; /b.txt at a STALE rev so remove() raises
     # DataChangedError (rev precondition mismatch).
     _seed_entry(
-        sync_engine, "/a.txt", a_id, ItemType.File, rev=a_rev, content_hash=_md5(src_data)
+        sync_engine,
+        "/a.txt",
+        a_id,
+        ItemType.File,
+        rev=a_rev,
+        content_hash=_md5(src_data),
     )
     _seed_entry(
         sync_engine,
@@ -1667,7 +1734,9 @@ def test_local_move_to_remotely_changed_destination_conflict_renames(
     sync_engine._create_remote_entry(event)
 
     # Remote /b.txt must NOT have been trashed.
-    assert not fake.files[b_id]["trashed"], "remote b.txt was trashed despite rev mismatch"
+    assert not fake.files[b_id][
+        "trashed"
+    ], "remote b.txt was trashed despite rev mismatch"
 
     # The move source must have arrived remotely under an autorename suffix
     # (autorename=True gives "b (1).txt" since "b.txt" is already occupied).
@@ -1756,9 +1825,7 @@ def test_mignore_matching_is_case_sensitive(sync_engine: SyncEngine) -> None:
 
 def test_mignore_matches_punctuation_in_name(sync_engine: SyncEngine) -> None:
     """Parentheses and other common punctuation must survive the mignore match."""
-    sync_engine._mignore_rules = PathSpec.from_lines(
-        "gitwildmatch", ["Report (1).txt"]
-    )
+    sync_engine._mignore_rules = PathSpec.from_lines("gitwildmatch", ["Report (1).txt"])
     encoded = encode_path("/Report (1).txt")
     folded = fold_path(encoded)
     event = SyncEvent(
@@ -1788,9 +1855,7 @@ def test_excluded_items_match_non_ascii_name(sync_engine: SyncEngine) -> None:
     sync_engine.excluded_items = ["/Ördner"]
 
     # A file inside the excluded directory must be caught.
-    assert sync_engine.is_excluded_by_user(
-        fold_path(encode_path("/Ördner/inner.txt"))
-    )
+    assert sync_engine.is_excluded_by_user(fold_path(encode_path("/Ördner/inner.txt")))
     # The directory itself must be caught.
     assert sync_engine.is_excluded_by_user(fold_path(encode_path("/Ördner")))
     # A sibling must NOT be caught.
@@ -2007,9 +2072,9 @@ def test_clean_remote_changes_folder_reuse_preserves_delete(sync_engine: SyncEng
 
     # The delete for the departing folder must survive, ahead of the create.
     types = [type(e) for e in cleaned.entries]
-    assert DeletedMetadata in types, (
-        "move-out delete for the reused folder path was dropped"
-    )
+    assert (
+        DeletedMetadata in types
+    ), "move-out delete for the reused folder path was dropped"
     del_idx = next(
         i for i, e in enumerate(cleaned.entries) if isinstance(e, DeletedMetadata)
     )
@@ -2021,7 +2086,9 @@ def test_clean_remote_changes_folder_reuse_preserves_delete(sync_engine: SyncEng
     assert cleaned.entries[fol_idx].id == "id-G"
 
 
-def test_clean_remote_changes_file_reuse_keeps_delete_then_file(sync_engine: SyncEngine):
+def test_clean_remote_changes_file_reuse_keeps_delete_then_file(
+    sync_engine: SyncEngine,
+):
     """File reuse regression guard: [DeletedMetadata(/p), FileMetadata(/p, id=G)]
     must keep the delete then the new file (file->file converged before, but the
     delete is now preserved consistently — no regression)."""
@@ -2451,9 +2518,7 @@ def test_read_only_gate_discards_activity_and_clears_sync_errors(
 
     # Seed a pre-existing sync error for the path (e.g. left over from before
     # the item became read-only, or from a prior failed attempt).
-    err = DataChangedError(
-        "Data changed", "stale error", remote_path=remote_path
-    )
+    err = DataChangedError("Data changed", "stale error", remote_path=remote_path)
     sync_engine._handle_sync_error(err, direction=SyncDirection.Up)
     assert sync_engine.has_sync_errors() is True
 
@@ -2563,9 +2628,7 @@ def test_view_only_shared_file_download_sets_read_only_and_gates_upload(
     with open(local_file, "wb") as f:
         f.write(b"local edit attempt")
 
-    event = _local_modified_event(
-        sync_engine, remote_path, _md5(b"local edit attempt")
-    )
+    event = _local_modified_event(sync_engine, remote_path, _md5(b"local edit attempt"))
 
     called = []
     sync_engine._on_local_file_modified = lambda e: called.append(e)  # type: ignore[method-assign]
@@ -2595,16 +2658,18 @@ def test_view_only_shared_folder_download_sets_read_only_dir(
     """
     import stat as _stat
 
-    os.makedirs(
-        os.path.join(sync_engine.sync_path, "Shared with me"), exist_ok=True
-    )
+    os.makedirs(os.path.join(sync_engine.sync_path, "Shared with me"), exist_ok=True)
 
     remote_path = "/Shared with me/ViewOnlyFolder"
     # Seed the parent's casing/index row so _ensure_parent and correct_case()
     # resolve "/Shared with me" locally instead of requiring a linked client.
     _seed_index_entry(
-        sync_engine, "/Shared with me", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR",
+        sync_engine,
+        "/Shared with me",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
     )
 
     md = FolderMetadata(
@@ -2653,9 +2718,7 @@ def test_symlink_download_uses_platform_writer(
         os.symlink(target, link_path)
         return link_path
 
-    monkeypatch.setattr(
-        sync_mod, "write_platform_symlink", fake_write_platform_symlink
-    )
+    monkeypatch.setattr(sync_mod, "write_platform_symlink", fake_write_platform_symlink)
 
     remote_path = "/Shared with me/link"
     local_path = sync_engine.to_local_path_from_cased(remote_path)
@@ -2731,7 +2794,9 @@ def test_unknown_local_symlink_still_errors(sync_engine: SyncEngine) -> None:
 # skipping with just a debug log.
 
 
-def _make_shortcut_metadata(remote_path: str, file_id: str, target_rel: str) -> FileMetadata:
+def _make_shortcut_metadata(
+    remote_path: str, file_id: str, target_rel: str
+) -> FileMetadata:
     return FileMetadata(
         name=osp.basename(remote_path),
         path_lower=remote_path.lower(),
@@ -2757,15 +2822,22 @@ def test_local_symlink_new_target_creates_shortcut(
     remote_path = "/Shared with me/link"
     target_remote = "/Docs/report.pdf"
     sync_engine.client._path_cache.set(
-        target_remote, "F-target", parent_id="F-docs", name="report.pdf",
+        target_remote,
+        "F-target",
+        parent_id="F-docs",
+        name="report.pdf",
         is_folder=False,
     )
     # Seed the parent's casing in the index so update_index_from_remote_metadata's
     # correct_case() resolves "/Shared with me" locally instead of hitting the
     # (unlinked, in this test) network client.
     _seed_index_entry(
-        sync_engine, "/Shared with me", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR",
+        sync_engine,
+        "/Shared with me",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
     )
 
     event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
@@ -2774,7 +2846,8 @@ def test_local_symlink_new_target_creates_shortcut(
     md_new = _make_shortcut_metadata(remote_path, "F-shortcut", "../Docs/report.pdf")
     calls = []
     monkeypatch.setattr(
-        sync_engine.client, "create_shortcut",
+        sync_engine.client,
+        "create_shortcut",
         lambda rp, trp, **kw: calls.append((rp, trp)) or md_new,
     )
 
@@ -2797,15 +2870,27 @@ def test_local_symlink_known_shortcut_retargets_on_target_change(
     remote_path = "/Shared with me/link"
     new_target_remote = "/Docs/other.pdf"
     _seed_index_entry(
-        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
-        remote_id="SL", symlink_target="../Docs/report.pdf",
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SL",
+        symlink_target="../Docs/report.pdf",
     )
     _seed_index_entry(
-        sync_engine, "/Shared with me", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR",
+        sync_engine,
+        "/Shared with me",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
     )
     sync_engine.client._path_cache.set(
-        new_target_remote, "F-other", parent_id="F-docs", name="other.pdf",
+        new_target_remote,
+        "F-other",
+        parent_id="F-docs",
+        name="other.pdf",
         is_folder=False,
     )
 
@@ -2815,12 +2900,16 @@ def test_local_symlink_known_shortcut_retargets_on_target_change(
     md_new = _make_shortcut_metadata(remote_path, "SL", "../Docs/other.pdf")
     calls = []
     monkeypatch.setattr(
-        sync_engine.client, "retarget_shortcut",
+        sync_engine.client,
+        "retarget_shortcut",
         lambda rp, trp: calls.append((rp, trp)) or md_new,
     )
     monkeypatch.setattr(
-        sync_engine.client, "create_shortcut",
-        lambda *a, **kw: pytest.fail("create_shortcut must not be called for a known shortcut"),
+        sync_engine.client,
+        "create_shortcut",
+        lambda *a, **kw: pytest.fail(
+            "create_shortcut must not be called for a known shortcut"
+        ),
     )
 
     status = sync_engine._on_local_file_modified(event)
@@ -2844,8 +2933,13 @@ def test_local_symlink_known_shortcut_unmappable_new_target_errors(
 
     remote_path = "/Shared with me/link"
     _seed_index_entry(
-        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
-        remote_id="SL", symlink_target="../Docs/report.pdf",
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SL",
+        symlink_target="../Docs/report.pdf",
     )
 
     event = _local_modified_event(sync_engine, remote_path, content_hash="unused")
@@ -2853,7 +2947,8 @@ def test_local_symlink_known_shortcut_unmappable_new_target_errors(
 
     calls = []
     monkeypatch.setattr(
-        sync_engine.client, "retarget_shortcut",
+        sync_engine.client,
+        "retarget_shortcut",
         lambda rp, trp: calls.append((rp, trp)),
     )
 
@@ -2881,15 +2976,27 @@ def test_local_symlink_known_shortcut_non_ascii_target_unchanged_is_skipped(
     # entry.symlink_target as actually stored by create_shortcut/retarget_shortcut:
     # posixpath.relpath(ENCODED target, ENCODED own dirname).
     _seed_index_entry(
-        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
-        remote_id="SL", symlink_target="../Docs/caf%C3%A9.pdf",
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SL",
+        symlink_target="../Docs/caf%C3%A9.pdf",
     )
     _seed_index_entry(
-        sync_engine, "/Shared with me", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR",
+        sync_engine,
+        "/Shared with me",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
     )
     sync_engine.client._path_cache.set(
-        encoded_target_remote, "F-target", parent_id="F-docs", name="caf%C3%A9.pdf",
+        encoded_target_remote,
+        "F-target",
+        parent_id="F-docs",
+        name="caf%C3%A9.pdf",
         is_folder=False,
     )
 
@@ -2900,12 +3007,16 @@ def test_local_symlink_known_shortcut_non_ascii_target_unchanged_is_skipped(
 
     calls = []
     monkeypatch.setattr(
-        sync_engine.client, "retarget_shortcut",
+        sync_engine.client,
+        "retarget_shortcut",
         lambda rp, trp: calls.append((rp, trp)),
     )
     monkeypatch.setattr(
-        sync_engine.client, "create_shortcut",
-        lambda *a, **kw: pytest.fail("create_shortcut must not be called for a known shortcut"),
+        sync_engine.client,
+        "create_shortcut",
+        lambda *a, **kw: pytest.fail(
+            "create_shortcut must not be called for a known shortcut"
+        ),
     )
 
     status = sync_engine._on_local_file_modified(event)
@@ -2930,15 +3041,26 @@ def test_local_symlink_replacing_existing_non_symlink_row_errors_not_duplicate(
 
     # Existing REGULAR (non-symlink) index row at this path.
     _seed_index_entry(
-        sync_engine, remote_path, rev="r1", content_hash="deadbeef", last_sync=0.0,
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash="deadbeef",
+        last_sync=0.0,
         remote_id="F-old",
     )
     _seed_index_entry(
-        sync_engine, "/Shared with me", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR",
+        sync_engine,
+        "/Shared with me",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
     )
     sync_engine.client._path_cache.set(
-        target_remote, "F-target", parent_id="F-docs", name="report.pdf",
+        target_remote,
+        "F-target",
+        parent_id="F-docs",
+        name="report.pdf",
         is_folder=False,
     )
 
@@ -2947,8 +3069,10 @@ def test_local_symlink_replacing_existing_non_symlink_row_errors_not_duplicate(
 
     calls = []
     monkeypatch.setattr(
-        sync_engine.client, "create_shortcut",
-        lambda *a, **kw: calls.append(a) or pytest.fail(
+        sync_engine.client,
+        "create_shortcut",
+        lambda *a, **kw: calls.append(a)
+        or pytest.fail(
             "create_shortcut must not be called; it would duplicate the "
             "existing non-symlink item on Drive"
         ),
@@ -3077,8 +3201,13 @@ def test_delete_local_symlink_of_real_shortcut_skips_rev_check(
 
     # Index row exactly as create_shortcut leaves it: rev="", is_symlink.
     _seed_index_entry(
-        sync_engine, remote_path, rev="", content_hash=None, last_sync=0.0,
-        remote_id=sid, symlink_target="../Docs/report.pdf",
+        sync_engine,
+        remote_path,
+        rev="",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id=sid,
+        symlink_target="../Docs/report.pdf",
     )
 
     # get_metadata drives the delete branch; the shortcut projects as a symlink
@@ -3093,9 +3222,9 @@ def test_delete_local_symlink_of_real_shortcut_skips_rev_check(
     status = sync_engine._on_local_deleted(event)
 
     assert status == SyncStatus.Done
-    assert fake.files[sid]["trashed"] is True, (
-        "shortcut delete must skip the rev-check and trash the Drive shortcut"
-    )
+    assert (
+        fake.files[sid]["trashed"] is True
+    ), "shortcut delete must skip the rev-check and trash the Drive shortcut"
 
 
 def test_moved_symlink_event_reads_target_from_destination(
@@ -3143,8 +3272,13 @@ def test_shortcut_create_skipped_in_readonly_folder(sync_engine: SyncEngine) -> 
     is skipped silently -- no create_shortcut call, no persisted sync error,
     no retry storm."""
     _seed_index_entry(
-        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR", read_only=1,
+        sync_engine,
+        "/shared with me/team",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
+        read_only=1,
     )
 
     created = []
@@ -3167,20 +3301,28 @@ def test_shortcut_retarget_skipped_in_readonly_folder(
     write access, not just brand-new creates."""
     remote_path = "/Shared with me/Team/link"
     _seed_index_entry(
-        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR", read_only=1,
+        sync_engine,
+        "/shared with me/team",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
+        read_only=1,
     )
     _seed_index_entry(
-        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
-        remote_id="SL", symlink_target="../report.pdf",
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SL",
+        symlink_target="../report.pdf",
     )
 
     retargeted = []
     sync_engine.client.retarget_shortcut = lambda *a, **k: retargeted.append(a)
 
-    event = _local_symlink_create_event(
-        sync_engine, remote_path, target="../other.pdf"
-    )
+    event = _local_symlink_create_event(sync_engine, remote_path, target="../other.pdf")
 
     status = sync_engine._on_local_file_modified(event)
 
@@ -3195,12 +3337,22 @@ def test_shortcut_delete_skipped_in_readonly_folder(sync_engine: SyncEngine) -> 
     symlink-specific guard of its own)."""
     remote_path = "/Shared with me/Team/link"
     _seed_index_entry(
-        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR", read_only=1,
+        sync_engine,
+        "/shared with me/team",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
+        read_only=1,
     )
     _seed_index_entry(
-        sync_engine, remote_path, rev="r1", content_hash=None, last_sync=0.0,
-        remote_id="SL", symlink_target="../report.pdf",
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SL",
+        symlink_target="../report.pdf",
     )
 
     removed = []
@@ -3229,11 +3381,20 @@ def test_non_symlink_delete_in_readonly_folder_not_gated_by_parent_check(
     happens to be read-only (e.g. a stale/incorrect parent flag)."""
     remote_path = "/Shared with me/Team/plain.txt"
     _seed_index_entry(
-        sync_engine, "/shared with me/team", rev="folder", content_hash=None,
-        last_sync=0.0, remote_id="SR", read_only=1,
+        sync_engine,
+        "/shared with me/team",
+        rev="folder",
+        content_hash=None,
+        last_sync=0.0,
+        remote_id="SR",
+        read_only=1,
     )
     _seed_index_entry(
-        sync_engine, remote_path, rev="r1", content_hash="deadbeef", last_sync=0.0,
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash="deadbeef",
+        last_sync=0.0,
         remote_id="F1",
     )
 
@@ -3268,7 +3429,6 @@ def test_non_symlink_delete_in_readonly_folder_not_gated_by_parent_check(
     assert calls == [remote_path]
 
 
-
 # ==== DB lock discipline for read-only gates ================================
 #
 # Regression tests for a thread-safety crash seen in CI
@@ -3286,9 +3446,9 @@ def _forbid_unlocked_db_statements(sync_engine: SyncEngine, monkeypatch) -> None
     real_execute = sync_engine._db.execute
 
     def checked_execute(sql, *args):
-        assert sync_engine._db_lock._is_owned(), (
-            f"database statement executed without _db_lock held: {sql}"
-        )
+        assert (
+            sync_engine._db_lock._is_owned()
+        ), f"database statement executed without _db_lock held: {sql}"
         return real_execute(sql, *args)
 
     monkeypatch.setattr(sync_engine._db, "execute", checked_execute)
@@ -3305,9 +3465,7 @@ def test_read_only_gates_hold_db_lock(sync_engine: SyncEngine, monkeypatch) -> N
     assert sync_engine._parent_is_read_only(event) is False
 
 
-def test_local_symlink_gate_holds_db_lock(
-    sync_engine: SyncEngine, monkeypatch
-) -> None:
+def test_local_symlink_gate_holds_db_lock(sync_engine: SyncEngine, monkeypatch) -> None:
     """The known-shortcut index lookup in _on_local_file_modified must
     serialize through _database_access()."""
     from bora.exceptions import SymlinkError
@@ -3328,9 +3486,7 @@ def test_local_deleted_symlink_gate_holds_db_lock(
 ) -> None:
     """The symlink-row index lookup in _on_local_deleted must serialize
     through _database_access()."""
-    monkeypatch.setattr(
-        sync_engine.client, "get_metadata", lambda path, **kwargs: None
-    )
+    monkeypatch.setattr(sync_engine.client, "get_metadata", lambda path, **kwargs: None)
 
     event = _local_deleted_event(sync_engine, "/nope/link")
 

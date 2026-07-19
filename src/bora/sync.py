@@ -111,12 +111,12 @@ from .models import (
     SyncEvent,
     SyncStatus,
 )
+from .path_cache import SHARED_WITH_ME_PATH
+from .path_codec import decode_path, encode_path, fold_human, fold_path
 from .utils import exc_info_tuple, removeprefix, sanitize_string
 from .utils.appdirs import get_data_path
 from .utils.caches import LRUCache
 from .utils.integration import CPU_CORE_COUNT, cpu_usage_percent
-from .path_cache import SHARED_WITH_ME_PATH
-from .path_codec import decode_path, encode_path, fold_human, fold_path
 from .utils.path import (
     content_hash,
     delete,
@@ -730,7 +730,9 @@ class SyncEngine:
 
         # Remove all children of excluded folders.
         for path in remote_paths_lower.copy():
-            remote_paths_lower = {p for p in remote_paths_lower if not is_child(p, path)}
+            remote_paths_lower = {
+                p for p in remote_paths_lower if not is_child(p, path)
+            }
 
         return remote_paths_lower
 
@@ -895,7 +897,9 @@ class SyncEngine:
             self._sync_errors_table.delete_primary_key(remote_path_lower)
 
             if recursive:
-                query = PathTreeQuery(SyncErrorEntry.remote_path_lower, remote_path_lower)
+                query = PathTreeQuery(
+                    SyncErrorEntry.remote_path_lower, remote_path_lower
+                )
                 self._sync_errors_table.delete(query)
 
     def clear_sync_errors_from_event(self, event: SyncEvent) -> None:
@@ -1255,7 +1259,7 @@ class SyncEngine:
         return self._mignore_path
 
     @property
-    def mignore_rules(self) -> PathSpec:
+    def mignore_rules(self) -> PathSpec[Any]:
         """List of mignore rules following git wildmatch syntax (read only)."""
         return self._mignore_rules
 
@@ -1558,7 +1562,7 @@ class SyncEngine:
         Checks if a file is excluded from sync. Certain file names are always excluded
         from syncing, following these guidelines:
 
-        
+
 
         This includes file system files such as 'desktop.ini' and '.DS_Store' and some
         temporary files as well as caches used by Bora. `is_excluded`
@@ -1940,7 +1944,9 @@ class SyncEngine:
         # Get deleted items.
         for entry in self.iter_index():
             local_path_indexed = self.to_local_path_from_cased(entry.remote_path_cased)
-            is_mignore = self._is_mignore_path(entry.remote_path_cased, entry.is_directory)
+            is_mignore = self._is_mignore_path(
+                entry.remote_path_cased, entry.is_directory
+            )
 
             if is_mignore or not self._exists_with_given_casing(local_path_indexed):
                 if entry.is_directory:
@@ -2351,7 +2357,9 @@ class SyncEngine:
             return False
         else:
             src_is_mignore = self._is_mignore_path(remote_src_path, event.is_directory)
-            dest_is_mignore = self._is_mignore_path(remote_dest_path, event.is_directory)
+            dest_is_mignore = self._is_mignore_path(
+                remote_dest_path, event.is_directory
+            )
 
             return src_is_mignore or dest_is_mignore
 
@@ -2381,7 +2389,9 @@ class SyncEngine:
             # of the other path, which never matched a genuine NFC/NFD pair).
             if normalize_case(event.local_path) == normalize_case(conflict_path):
                 suffix = "case conflict"
-            elif normalize_unicode(event.local_path) == normalize_unicode(conflict_path):
+            elif normalize_unicode(event.local_path) == normalize_unicode(
+                conflict_path
+            ):
                 suffix = "unicode conflict"
             else:
                 suffix = "normalization conflict"
@@ -2574,12 +2584,15 @@ class SyncEngine:
                 pass
             else:
                 self._logger.debug(
-                    'Replacing existing file "%s" by move', local_entry.remote_path_lower
+                    'Replacing existing file "%s" by move',
+                    local_entry.remote_path_lower,
                 )
 
         # Perform the move.
         try:
-            md_to_new = self.client.move(remote_path_from, event.remote_path, autorename=True)
+            md_to_new = self.client.move(
+                remote_path_from, event.remote_path, autorename=True
+            )
         except NotFoundError:
             # If not on remote, e.g., because its old name was invalid,
             # create it instead of moving it.
@@ -2722,9 +2735,7 @@ class SyncEngine:
                     error.local_path = event.local_path
                     raise error
 
-                md_new = self.client.retarget_shortcut(
-                    event.remote_path, target_remote
-                )
+                md_new = self.client.retarget_shortcut(event.remote_path, target_remote)
                 self.update_index_from_remote_metadata(md_new)
                 return SyncStatus.Done
 
@@ -2816,7 +2827,9 @@ class SyncEngine:
             if event.change_type is ChangeType.Added:
                 self._logger.debug('Created "%s" on remote', event.remote_path)
             else:
-                self._logger.debug('Uploaded modified "%s" to remote', event.remote_path)
+                self._logger.debug(
+                    'Uploaded modified "%s" to remote', event.remote_path
+                )
 
         self.update_index_from_remote_metadata(md_new)
 
@@ -2973,9 +2986,7 @@ class SyncEngine:
                 md.path_display,
             )
             # Don't delete a remote file if it was modified since last sync.
-            if md.modified.timestamp() >= self.get_last_sync(
-                event.remote_path_lower
-            ):
+            if md.modified.timestamp() >= self.get_last_sync(event.remote_path_lower):
                 self._logger.debug(
                     'Skipping deletion: remote item "%s" has been modified '
                     "since last sync",
@@ -3176,7 +3187,9 @@ class SyncEngine:
             if md is None:
                 # Create a fake deleted event.
                 index_entry = self.get_index_entry(remote_path_lower)
-                cased_path = index_entry.remote_path_cased if index_entry else remote_path
+                cased_path = (
+                    index_entry.remote_path_cased if index_entry else remote_path
+                )
 
                 md = DeletedMetadata(
                     name=osp.basename(remote_path),
@@ -3210,7 +3223,9 @@ class SyncEngine:
                 idx = 0
 
                 # Iterate over index and download results.
-                list_iter = self.client.list_folder_iterator(remote_path, recursive=True)
+                list_iter = self.client.list_folder_iterator(
+                    remote_path, recursive=True
+                )
 
                 for res in list_iter:
                     idx += len(res.entries)
@@ -3633,7 +3648,10 @@ class SyncEngine:
                 # instead. A genuine first-sync merge — where the id is not yet
                 # indexed anywhere — falls through to Identical below.
                 other = self.get_index_entry_by_remote_id(event.remote_id)
-                if other is not None and other.remote_path_lower != event.remote_path_lower:
+                if (
+                    other is not None
+                    and other.remote_path_lower != event.remote_path_lower
+                ):
                     self._logger.debug(
                         'Untracked folder occupies move target "%s" (id=%s indexed '
                         'at "%s"): conflict-copy occupant',
@@ -3720,7 +3738,9 @@ class SyncEngine:
                             if self._ctime_newer_than_last_sync(entry.path):
                                 return True
                         elif not self.is_excluded(entry.name):
-                            child_remote_path_lower = self.to_remote_path_lower(entry.path)
+                            child_remote_path_lower = self.to_remote_path_lower(
+                                entry.path
+                            )
                             ctime = entry.stat(follow_symlinks=False).st_ctime
                             if ctime > self.get_last_sync(child_remote_path_lower):
                                 return True
@@ -3914,9 +3934,7 @@ class SyncEngine:
         """Clear write bits on a view-only shared item, ignoring the
         resulting chmod so it is not echoed back as a local change."""
         mode = 0o555 if is_dir else 0o444
-        with self.fs_events.ignore(
-            FileModifiedEvent(local_path), recursive=False
-        ):
+        with self.fs_events.ignore(FileModifiedEvent(local_path), recursive=False):
             os.chmod(local_path, mode)
 
     def _restore_writable(self, local_path: str) -> None:
@@ -3939,9 +3957,7 @@ class SyncEngine:
         if os.path.isdir(local_path) and not os.path.islink(local_path):
             dir_paths = [local_path]
             for dirpath, dirnames, _filenames in os.walk(local_path):
-                dir_paths.extend(
-                    os.path.join(dirpath, name) for name in dirnames
-                )
+                dir_paths.extend(os.path.join(dirpath, name) for name in dirnames)
 
             for dir_path in dir_paths:
                 try:
@@ -3953,9 +3969,7 @@ class SyncEngine:
                 ):
                     os.chmod(dir_path, cur | 0o700)
         else:
-            with self.fs_events.ignore(
-                FileModifiedEvent(local_path), recursive=False
-            ):
+            with self.fs_events.ignore(FileModifiedEvent(local_path), recursive=False):
                 os.chmod(local_path, top_mode | 0o200)
 
     def _is_read_only_event(self, event: SyncEvent) -> bool:
@@ -4070,7 +4084,9 @@ class SyncEngine:
             # Preserve permissions of the destination file if we are only syncing an
             # update to the file content (Remote ID of the file remains the same).
             old_entry = self.get_index_entry(event.remote_path_lower)
-            preserve_metadata = bool(old_entry and event.remote_id == old_entry.remote_id)
+            preserve_metadata = bool(
+                old_entry and event.remote_id == old_entry.remote_id
+            )
 
             if isfile(event.local_path):
                 # Ignore FileDeletedEvent when replacing old file.
@@ -4136,7 +4152,9 @@ class SyncEngine:
             return SyncStatus.Skipped
 
         if conflict_check == Conflict.Conflict:
-            cc_local_path = self._local_cc_filename(event.local_path, event.change_remote_id)
+            cc_local_path = self._local_cc_filename(
+                event.local_path, event.change_remote_id
+            )
             event_cls = DirMovedEvent if isdir(event.local_path) else FileMovedEvent
             with self.fs_events.ignore(event_cls(event.local_path, cc_local_path)):
                 with convert_api_errors():
@@ -4370,10 +4388,10 @@ class SyncEngine:
                     continue
                 old_pk = row.remote_path_lower
                 row.remote_path_lower = (
-                    event.remote_path_lower + row.remote_path_lower[len(old_lower):]
+                    event.remote_path_lower + row.remote_path_lower[len(old_lower) :]
                 )
                 row.remote_path_cased = (
-                    event.remote_path + row.remote_path_cased[len(old_cased):]
+                    event.remote_path + row.remote_path_cased[len(old_cased) :]
                 )
                 self._index_table.delete_primary_key(old_pk)
                 self._index_table.update(row)
@@ -4431,7 +4449,7 @@ class SyncEngine:
                         if child.remote_path_cased.startswith(old_prefix):
                             child.remote_path_cased = (
                                 event.remote_path
-                                + child.remote_path_cased[len(old_path_cased):]
+                                + child.remote_path_cased[len(old_path_cased) :]
                             )
                             self._index_table.update(child)
                             self._case_conversion_cache.put(
@@ -4547,7 +4565,7 @@ def do_parallel(
         max_workers=NUM_THREADS, thread_name_prefix=thread_name_prefix
     ) as thread_pool_executor:
         futures = [
-            thread_pool_executor.submit(func, *args)  # type:ignore[call-arg]
+            thread_pool_executor.submit(func, *args)  # type: ignore[call-arg]
             for args in zip(*iterables)
         ]
 

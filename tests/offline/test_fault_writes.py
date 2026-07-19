@@ -24,14 +24,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
+from bora.client import _MAX_RETRY_ATTEMPTS, GoogleDriveClient
 from bora.config import remove_configuration
 from bora.core import WriteMode
-from bora.writes import _SIMPLE_UPLOAD_THRESHOLD
 from bora.database.core import Database
 from bora.exceptions import BoraApiError
 from bora.keyring import CredentialStorage
 from bora.path_cache import PathIDCache
+from bora.writes import _SIMPLE_UPLOAD_THRESHOLD
 from tests.fake_drive import (
     ROOT_ID,
     FakeDrive,
@@ -83,9 +83,7 @@ def cof():
 # ===========================================================================
 
 
-def test_resumable_fault_first_chunk_retries_to_single_correct_file(
-    cof, tmp_path
-):
+def test_resumable_fault_first_chunk_retries_to_single_correct_file(cof, tmp_path):
     """Arm a connection-reset on the first next_chunk() call for files.create.
 
     The fake's _ResumableRequest calls _maybe_fail("files.create", ...) at
@@ -111,15 +109,14 @@ def test_resumable_fault_first_chunk_retries_to_single_correct_file(
 
     # Exactly one non-ROOT file in the fake store.
     non_root = {fid: rec for fid, rec in fake.files.items() if fid != ROOT_ID}
-    assert len(non_root) == 1, (
-        f"Expected exactly 1 file; got {len(non_root)}: "
-        + str(list(non_root.keys()))
+    assert len(non_root) == 1, f"Expected exactly 1 file; got {len(non_root)}: " + str(
+        list(non_root.keys())
     )
 
     fid, rec = next(iter(non_root.items()))
-    assert rec["md5Checksum"] == expected_md5, (
-        f"md5 mismatch: got {rec['md5Checksum']!r}, expected {expected_md5!r}"
-    )
+    assert (
+        rec["md5Checksum"] == expected_md5
+    ), f"md5 mismatch: got {rec['md5Checksum']!r}, expected {expected_md5!r}"
     assert rec["size"] == size
     assert rec["trashed"] is False
     assert result.id == fid
@@ -147,13 +144,14 @@ def test_resumable_fault_first_chunk_teeth(cof, tmp_path):
     # After exhausting retries, _retry_transient re-raises the CONNECTION_ERROR;
     # convert_api_errors then wraps it as bora.exceptions.ConnectionError.
     from bora.exceptions import ConnectionError as _BoraConnError
+
     with pytest.raises(_BoraConnError):
         client._writes.upload(str(local), "/big2.bin", write_mode=WriteMode.Add)
 
     non_root = {fid: rec for fid, rec in fake.files.items() if fid != ROOT_ID}
-    assert len(non_root) == 0, (
-        "No file should have been created when all retries were exhausted"
-    )
+    assert (
+        len(non_root) == 0
+    ), "No file should have been created when all retries were exhausted"
 
 
 # ===========================================================================
@@ -203,28 +201,28 @@ def test_remove_batch_one_fault_sibling_items_trashed(cof):
     assert len(results) == 4
 
     # Target slot is an error.
-    assert isinstance(results[1], BoraApiError), (
-        f"Expected BoraApiError at slot 1; got {type(results[1]).__name__}"
-    )
+    assert isinstance(
+        results[1], BoraApiError
+    ), f"Expected BoraApiError at slot 1; got {type(results[1]).__name__}"
 
     # Non-target slots are success metadata.
     for i, (path, fid) in enumerate(pairs):
         if i == 1:
             continue
-        assert not isinstance(results[i], BoraApiError), (
-            f"Slot {i} should be success metadata; got {type(results[i]).__name__}"
-        )
+        assert not isinstance(
+            results[i], BoraApiError
+        ), f"Slot {i} should be success metadata; got {type(results[i]).__name__}"
 
     # Non-target files are trashed in the fake.
     for i, (path, fid) in enumerate(pairs):
         if i == 1:
-            assert fake.files[fid]["trashed"] is False, (
-                f"Target {fid} must NOT be trashed"
-            )
+            assert (
+                fake.files[fid]["trashed"] is False
+            ), f"Target {fid} must NOT be trashed"
         else:
-            assert fake.files[fid]["trashed"] is True, (
-                f"Non-target {fid} at path {path!r} must be trashed"
-            )
+            assert (
+                fake.files[fid]["trashed"] is True
+            ), f"Non-target {fid} at path {path!r} must be trashed"
 
 
 def test_remove_batch_one_fault_sibling_teeth(cof):
@@ -246,15 +244,15 @@ def test_remove_batch_one_fault_sibling_teeth(cof):
 
     # All four slots must be errors.
     for i, r in enumerate(results):
-        assert isinstance(r, BoraApiError), (
-            f"Expected BoraApiError at slot {i}; got {type(r).__name__}"
-        )
+        assert isinstance(
+            r, BoraApiError
+        ), f"Expected BoraApiError at slot {i}; got {type(r).__name__}"
 
     # No files trashed.
     for path, fid in pairs:
-        assert fake.files[fid]["trashed"] is False, (
-            f"File {fid} at {path!r} must not be trashed when its batch call faulted"
-        )
+        assert (
+            fake.files[fid]["trashed"] is False
+        ), f"File {fid} at {path!r} must not be trashed when its batch call faulted"
 
 
 # ===========================================================================
@@ -354,6 +352,6 @@ def test_make_dir_503_exceeds_max_retries_raises_teeth(cof):
 
     # No folder was created in the fake.
     non_root = [r for r in fake.files.values() if r["id"] != ROOT_ID]
-    assert len(non_root) == 0, (
-        f"Expected no folders created after exhausted retries; got {len(non_root)}"
-    )
+    assert (
+        len(non_root) == 0
+    ), f"Expected no folders created after exhausted retries; got {len(non_root)}"

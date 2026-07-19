@@ -33,16 +33,22 @@ def test_linked_is_false_when_keyring_empty(client):
 
 
 def test_linked_is_false_when_blob_lacks_refresh_token(client, cred_storage):
-    cred_storage.save_creds("perm-x", json.dumps({
-        "token": "access-only",
-        "scopes": ["https://www.googleapis.com/auth/drive"],
-    }))
+    cred_storage.save_creds(
+        "perm-x",
+        json.dumps(
+            {
+                "token": "access-only",
+                "scopes": ["https://www.googleapis.com/auth/drive"],
+            }
+        ),
+    )
     assert client.linked is False
 
 
 def test_linked_caches_loaded_credentials(client, cred_storage, monkeypatch):
     monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     from bora import oauth
+
     base = oauth.credentials_from_refresh_token("rt-1")
     oauth.save_credentials(cred_storage, base, account_id="perm-1")
 
@@ -67,6 +73,7 @@ def test_get_service_builds_drive_v3_with_credentials(
 ):
     monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
     from bora import oauth
+
     base = oauth.credentials_from_refresh_token("rt-1")
     oauth.save_credentials(cred_storage, base, account_id="perm-1")
 
@@ -180,6 +187,7 @@ def test_link_with_refresh_token_happy_path(client, cred_storage, monkeypatch):
     # Mock Credentials.refresh to succeed without HTTP.
     def _mark_refreshed(self, request):
         self.token = "fresh-access-token"
+
     monkeypatch.setattr(_oauth.Credentials, "refresh", _mark_refreshed)
 
     fake_service = mock.MagicMock()
@@ -201,8 +209,10 @@ def test_link_with_refresh_token_rejects_revoked_token(
     client, cred_storage, monkeypatch
 ):
     monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
+
     def _raise(self, request):
         raise RefreshError("invalid_grant")
+
     monkeypatch.setattr(_oauth.Credentials, "refresh", _raise)
 
     res = client.link(refresh_token="rt-bad")
@@ -216,9 +226,12 @@ def test_link_with_refresh_token_returns_2_on_connection_error(
     client, cred_storage, monkeypatch
 ):
     import requests as _req
+
     monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
+
     def _raise(self, request):
         raise _req.exceptions.ConnectionError("boom")
+
     monkeypatch.setattr(_oauth.Credentials, "refresh", _raise)
 
     res = client.link(refresh_token="rt-no-net")
@@ -295,9 +308,12 @@ def test_link_with_code_uses_pending_flow(client, cred_storage, monkeypatch):
     fake_creds = _oauth.credentials_from_refresh_token("rt-from-paste")
     fake_creds.token = "fresh-access-from-paste"
     # Flow.credentials is a read-only property; use PropertyMock to stub it.
-    with mock.patch.object(type(fake_flow), "credentials",
-                           new_callable=mock.PropertyMock,
-                           return_value=fake_creds):
+    with mock.patch.object(
+        type(fake_flow),
+        "credentials",
+        new_callable=mock.PropertyMock,
+        return_value=fake_creds,
+    ):
         fake_service = mock.MagicMock()
         fake_service.about().get().execute.return_value = _fake_about_response()
         with mock.patch("bora.client.build", return_value=fake_service):
@@ -358,6 +374,7 @@ def test_unlink_tolerates_revoke_failure(client, cred_storage, monkeypatch):
     assert client.linked is True
 
     import requests as _req
+
     with mock.patch(
         "bora.client.requests.post",
         side_effect=_req.exceptions.ConnectionError("offline"),

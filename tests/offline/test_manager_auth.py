@@ -7,8 +7,6 @@ from __future__ import annotations
 from threading import Event
 from unittest import mock
 
-import pytest
-
 from bora.exceptions import TokenRevokedError
 
 

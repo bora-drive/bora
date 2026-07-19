@@ -9,9 +9,9 @@ import pytest
 from Pyro5.api import Proxy
 
 from bora.daemon import (
+    BoraProxy,
     CommunicationError,
     Lock,
-    BoraProxy,
     Start,
     Stop,
     start_bora_daemon_process,

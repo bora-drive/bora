@@ -9,13 +9,13 @@ from googleapiclient.errors import HttpError
 
 from bora.client import GoogleDriveClient
 from bora.config import list_configs, remove_configuration
-from bora.core import AccountType, FullAccount
-from bora.database.core import Database
-from bora.path_cache import PathIDCache
+from bora.core import FullAccount
 from bora.daemon import Stop, stop_bora_daemon_process
+from bora.database.core import Database
 from bora.fsevents import Observer
 from bora.keyring import CredentialStorage
 from bora.main import Bora
+from bora.path_cache import PathIDCache
 from bora.sync import SyncEngine
 from bora.utils.path import delete
 from tests.fake_drive import ROOT_ID, FakeDrive
@@ -135,9 +135,7 @@ class ClientOnFake:
 def client_on_fake(fake_drive):
     cache = _make_path_cache()
     cache.root_id = ROOT_ID
-    client = GoogleDriveClient(
-        "test-config", CredentialStorage("test-config"), cache
-    )
+    client = GoogleDriveClient("test-config", CredentialStorage("test-config"), cache)
     client._get_service = lambda: fake_drive.service()
     yield ClientOnFake(client=client, fake=fake_drive)
     remove_configuration("test-config")

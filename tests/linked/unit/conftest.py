@@ -1,17 +1,12 @@
 import logging
 import os
-import sqlite3
 
 import pytest
 
 from bora.client import GoogleDriveClient
 from bora.config import remove_configuration
-from bora.database.core import Database
 from bora.exceptions import AuthError, NotFoundError
-from bora.keyring import CredentialStorage
-from bora.path_cache import PathIDCache
-
-from tests.linked.conftest import TEST_CONFIG, _make_client
+from tests.linked.conftest import _make_client
 
 fsevents_logger = logging.getLogger("fsevents")
 fsevents_logger.setLevel(logging.DEBUG)

@@ -106,37 +106,84 @@ class FakeDrive:
         self._change_log.append((self._seq, file_id))
         self._seq += 1
 
-    def fail_next(self, key: str, exc: Exception, *, count: int = 1,
-                  when: Callable[..., bool] | None = None) -> None:
+    def fail_next(
+        self,
+        key: str,
+        exc: Exception,
+        *,
+        count: int = 1,
+        when: Callable[..., bool] | None = None,
+    ) -> None:
         """Raise *exc* BEFORE each of the next *count* ``.execute()`` calls of
         *key* (optionally only when ``when(**call_kwargs)`` is true)."""
         self._fail_rules.append(
-            {"key": key, "exc": exc, "skip": 0, "remaining": count,
-             "when": when, "after": False})
+            {
+                "key": key,
+                "exc": exc,
+                "skip": 0,
+                "remaining": count,
+                "when": when,
+                "after": False,
+            }
+        )
 
-    def fail_after(self, key: str, exc: Exception, *, count: int = 1,
-                   when: Callable[..., bool] | None = None) -> None:
+    def fail_after(
+        self,
+        key: str,
+        exc: Exception,
+        *,
+        count: int = 1,
+        when: Callable[..., bool] | None = None,
+    ) -> None:
         """Raise *exc* AFTER each of the next *count* ``.execute()`` calls of
         *key* commit (finalize runs first). Models "committed but response lost"."""
         self._fail_rules.append(
-            {"key": key, "exc": exc, "skip": 0, "remaining": count,
-             "when": when, "after": True})
+            {
+                "key": key,
+                "exc": exc,
+                "skip": 0,
+                "remaining": count,
+                "when": when,
+                "after": True,
+            }
+        )
 
-    def fail_on_call(self, key: str, n: int, exc: Exception, *,
-                     when: Callable[..., bool] | None = None) -> None:
+    def fail_on_call(
+        self,
+        key: str,
+        n: int,
+        exc: Exception,
+        *,
+        when: Callable[..., bool] | None = None,
+    ) -> None:
         """Raise *exc* on the *n*-th (1-based) matching ``.execute()`` of *key*,
         letting the first n-1 pass."""
         self._fail_rules.append(
-            {"key": key, "exc": exc, "skip": n - 1, "remaining": 1,
-             "when": when, "after": False})
+            {
+                "key": key,
+                "exc": exc,
+                "skip": n - 1,
+                "remaining": 1,
+                "when": when,
+                "after": False,
+            }
+        )
 
-    def fail_when(self, key: str, predicate: Callable[..., bool],
-                  exc: Exception) -> None:
+    def fail_when(
+        self, key: str, predicate: Callable[..., bool], exc: Exception
+    ) -> None:
         """Raise *exc* on the next ``.execute()`` of *key* whose call kwargs
         satisfy ``predicate(**call_kwargs)``."""
         self._fail_rules.append(
-            {"key": key, "exc": exc, "skip": 0, "remaining": 1,
-             "when": predicate, "after": False})
+            {
+                "key": key,
+                "exc": exc,
+                "skip": 0,
+                "remaining": 1,
+                "when": predicate,
+                "after": False,
+            }
+        )
 
     def fail_every(self, key: str, n: int, exc: Exception) -> dict:
         """Raise *exc* on every *n*-th matching ``.execute()`` of *key*,
@@ -148,8 +195,13 @@ class FakeDrive:
         if n < 1:
             raise ValueError("fail_every requires n >= 1")
         rule = {
-            "key": key, "exc": exc, "every": n, "seen": 0, "fires": 0,
-            "when": None, "after": False,
+            "key": key,
+            "exc": exc,
+            "every": n,
+            "seen": 0,
+            "fires": 0,
+            "when": None,
+            "after": False,
         }
         self._fail_rules.append(rule)
         return rule
@@ -233,7 +285,11 @@ class FakeDrive:
 
     def _child_by_name(self, parent_id: str, name: str) -> str:
         for fid, rec in self.files.items():
-            if parent_id in rec["parents"] and rec["name"] == name and not rec["trashed"]:
+            if (
+                parent_id in rec["parents"]
+                and rec["name"] == name
+                and not rec["trashed"]
+            ):
                 return fid
         raise KeyError(f"no child {name!r} under {parent_id}")
 
@@ -524,12 +580,12 @@ def _match_query(rec: dict, query: str) -> bool:
                 return False
         elif frag.startswith("name = '") and frag.endswith("'"):
             # Unescape Drive-style escapes: \' -> '  \\ -> \
-            raw = frag[len("name = '"):-1]
+            raw = frag[len("name = '") : -1]
             unescaped = raw.replace("\\'", "'").replace("\\\\", "\\")
             if rec["name"] != unescaped:
                 return False
         elif frag.startswith("mimeType = '") and frag.endswith("'"):
-            value = frag[len("mimeType = '"):-1]
+            value = frag[len("mimeType = '") : -1]
             if rec["mimeType"] != value:
                 return False
         else:
@@ -547,19 +603,25 @@ class _FilesResource:
             if rec is None:
                 raise make_http_error(404, "notFound", "File not found")
             return _project(rec, fields)
-        return _Request("files.get", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"fileId": fileId, "fields": fields})
+
+        return _Request(
+            "files.get",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"fileId": fileId, "fields": fields},
+        )
 
     def list(self, q="", fields="", pageSize=100, pageToken=None, **_):
         def run():
             matched = [
-                r for r in self._d.files.values()
+                r
+                for r in self._d.files.values()
                 if r["id"] != ROOT_ID and _match_query(r, q)
             ]
             matched.sort(key=lambda r: r["id"])
             start = int(pageToken) if pageToken else 0
-            page = matched[start:start + pageSize]
+            page = matched[start : start + pageSize]
             inner = (
                 fields[fields.index("files(") + len("files(") : fields.rindex(")")]
                 if "files(" in fields
@@ -569,36 +631,52 @@ class _FilesResource:
             if start + pageSize < len(matched):
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
-        return _Request("files.list", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"q": q, "pageToken": pageToken,
-                                     "pageSize": pageSize, "fields": fields})
+
+        return _Request(
+            "files.list",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={
+                "q": q,
+                "pageToken": pageToken,
+                "pageSize": pageSize,
+                "fields": fields,
+            },
+        )
 
     def create(self, body=None, media_body=None, fields="", **_):
         def finalize():
             body_ = body or {}
             content = _read_media(media_body) if media_body is not None else b""
-            mime = body_.get("mimeType", "text/plain" if media_body is not None else FOLDER_MIME)
+            mime = body_.get(
+                "mimeType", "text/plain" if media_body is not None else FOLDER_MIME
+            )
             # Honor a pre-generated id supplied in the body (Task 6 idempotency).
             # If the id already exists, raise 409 — a previous attempt committed.
             if body_.get("id"):
                 fid = body_["id"]
                 if fid in self._d.files:
-                    raise make_http_error(409, "conflict",
-                                          "A file already exists with the provided ID.")
+                    raise make_http_error(
+                        409, "conflict", "A file already exists with the provided ID."
+                    )
             else:
                 fid = self._d._new_id()
             is_folder = mime == FOLDER_MIME
             rec = {
-                "id": fid, "name": body_["name"],
+                "id": fid,
+                "name": body_["name"],
                 "parents": list(body_.get("parents", [ROOT_ID])),
                 "mimeType": mime,
                 "modifiedTime": body_.get("modifiedTime", _now_rfc3339()),
-                "createdTime": _now_rfc3339(), "trashed": False, "shared": False,
+                "createdTime": _now_rfc3339(),
+                "trashed": False,
+                "shared": False,
                 "md5Checksum": None if is_folder else hashlib.md5(content).hexdigest(),
                 "size": None if is_folder else len(content),
                 "headRevisionId": None if is_folder else self._d._new_rev(),
-                "content": content, "revisions": [],
+                "content": content,
+                "revisions": [],
                 "lastModifyingUser": {"permissionId": "perm-1"},
             }
             if "shortcutDetails" in body_:
@@ -609,16 +687,23 @@ class _FilesResource:
             self._d._record_change(fid)
             return _project(rec, fields)
 
-        _resumable = callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        _resumable = (
+            callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        )
         _create_kwargs = {"body": body, "media_body": media_body}
         if media_body is not None and _resumable:
             return _ResumableRequest(
-                "files.create", self._d._maybe_fail, _read_media(media_body), finalize,
+                "files.create",
+                self._d._maybe_fail,
+                _read_media(media_body),
+                finalize,
                 fail_after_check=self._d._maybe_fail_after,
                 fail_kwargs=_create_kwargs,
             )
         return _Request(
-            "files.create", self._d._maybe_fail, finalize,
+            "files.create",
+            self._d._maybe_fail,
+            finalize,
             fail_after_check=self._d._maybe_fail_after,
             fail_kwargs=_create_kwargs,
         )
@@ -628,16 +713,26 @@ class _FilesResource:
             self._d.files.pop(fileId, None)
             self._d._record_change(fileId)
             return None
-        return _Request("files.delete", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"fileId": fileId})
+
+        return _Request(
+            "files.delete",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"fileId": fileId},
+        )
 
     def generateIds(self, count=1, **_):
         def run():
             return {"ids": [self._d._new_id() for _ in range(count)]}
-        return _Request("files.generateIds", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"count": count})
+
+        return _Request(
+            "files.generateIds",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"count": count},
+        )
 
     def get_media(self, fileId, **_):
         rec = self._d.files[fileId]
@@ -660,8 +755,16 @@ class _FilesResource:
             fail_kwargs={"fileId": fileId},
         )
 
-    def update(self, fileId, body=None, media_body=None, addParents=None,
-               removeParents=None, fields="", **_):
+    def update(
+        self,
+        fileId,
+        body=None,
+        media_body=None,
+        addParents=None,
+        removeParents=None,
+        fields="",
+        **_,
+    ):
         def finalize():
             hook = self._d.on_next_update
             if hook is not None:
@@ -691,20 +794,31 @@ class _FilesResource:
             self._d._record_change(fileId)
             return _project(rec, fields)
 
-        _resumable = callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        _resumable = (
+            callable(getattr(media_body, "resumable", None)) and media_body.resumable()
+        )
         _update_kwargs = {
-            "fileId": fileId, "body": body,
-            "addParents": addParents, "removeParents": removeParents,
+            "fileId": fileId,
+            "body": body,
+            "addParents": addParents,
+            "removeParents": removeParents,
         }
         if media_body is not None and _resumable:
             return _ResumableRequest(
-                "files.update", self._d._maybe_fail, _read_media(media_body), finalize,
+                "files.update",
+                self._d._maybe_fail,
+                _read_media(media_body),
+                finalize,
                 fail_after_check=self._d._maybe_fail_after,
                 fail_kwargs=_update_kwargs,
             )
-        return _Request("files.update", self._d._maybe_fail, finalize,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs=_update_kwargs)
+        return _Request(
+            "files.update",
+            self._d._maybe_fail,
+            finalize,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs=_update_kwargs,
+        )
 
 
 class _ChangesResource:
@@ -714,9 +828,14 @@ class _ChangesResource:
     def getStartPageToken(self, **_):
         def run():
             return {"startPageToken": str(self._d._seq)}
-        return _Request("changes.getStartPageToken", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={})
+
+        return _Request(
+            "changes.getStartPageToken",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={},
+        )
 
     def list(self, pageToken, pageSize=100, fields="", includeRemoved=True, **_):
         def run():
@@ -730,11 +849,13 @@ class _ChangesResource:
             rest = ordered[pageSize:]
             inner = (
                 fields.split("changes(", 1)[1].rsplit(")", 1)[0]
-                if "changes(" in fields else "*"
+                if "changes(" in fields
+                else "*"
             )
             file_inner = (
                 inner.split("file(", 1)[1].rsplit(")", 1)[0]
-                if "file(" in inner else "*"
+                if "file(" in inner
+                else "*"
             )
             changes = []
             for fid, _seq in page:
@@ -742,21 +863,31 @@ class _ChangesResource:
                 if rec is None:
                     changes.append({"removed": True, "fileId": fid})
                 else:
-                    changes.append({
-                        "removed": False,
-                        "fileId": fid,
-                        "file": _project(rec, file_inner),
-                    })
+                    changes.append(
+                        {
+                            "removed": False,
+                            "fileId": fid,
+                            "file": _project(rec, file_inner),
+                        }
+                    )
             resp: dict = {"changes": changes}
             if rest:
                 resp["nextPageToken"] = str(rest[0][1])
             else:
                 resp["newStartPageToken"] = str(self._d._seq)
             return resp
-        return _Request("changes.list", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"pageToken": pageToken, "pageSize": pageSize,
-                                     "includeRemoved": includeRemoved})
+
+        return _Request(
+            "changes.list",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={
+                "pageToken": pageToken,
+                "pageSize": pageSize,
+                "includeRemoved": includeRemoved,
+            },
+        )
 
 
 class _AboutResource:
@@ -765,10 +896,18 @@ class _AboutResource:
 
     def get(self, fields="", **_):
         def run():
-            return {"user": dict(self._d.user), "storageQuota": dict(self._d.storage_quota)}
-        return _Request("about.get", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={})
+            return {
+                "user": dict(self._d.user),
+                "storageQuota": dict(self._d.storage_quota),
+            }
+
+        return _Request(
+            "about.get",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={},
+        )
 
 
 class _RevisionsResource:
@@ -783,15 +922,20 @@ class _RevisionsResource:
             # content snapshot from the wire response.
             page = [
                 {k: v for k, v in r.items() if k != "content"}
-                for r in revs[start:start + pageSize]
+                for r in revs[start : start + pageSize]
             ]
             resp = {"revisions": page}
             if start + pageSize < len(revs):
                 resp["nextPageToken"] = str(start + pageSize)
             return resp
-        return _Request("revisions.list", self._d._maybe_fail, run,
-                        fail_after_check=self._d._maybe_fail_after,
-                        fail_kwargs={"fileId": fileId})
+
+        return _Request(
+            "revisions.list",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"fileId": fileId},
+        )
 
     def get_media(self, fileId, revisionId, **_):
         rec = self._d.files[fileId]

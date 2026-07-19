@@ -97,13 +97,9 @@ def sync_engine():
     local_dir = osp.join(get_home_dir(), "fault_cursor_dir")
     os.mkdir(local_dir)
 
-    cache = PathIDCache(
-        Database(sqlite3.connect(":memory:", check_same_thread=False))
-    )
+    cache = PathIDCache(Database(sqlite3.connect(":memory:", check_same_thread=False)))
     cache.root_id = ROOT_ID
-    sync = SyncEngine(
-        GoogleDriveClient(_CONFIG, CredentialStorage(_CONFIG), cache)
-    )
+    sync = SyncEngine(GoogleDriveClient(_CONFIG, CredentialStorage(_CONFIG), cache))
     sync.sync_path = local_dir
     sync.local_cursor = 0.0
 
@@ -121,9 +117,7 @@ def _wire_fake(sync: SyncEngine, fake: FakeDrive) -> None:
 
 def _start(fake: FakeDrive) -> str:
     """Return the current startPageToken from the fake."""
-    return (
-        fake.service().changes().getStartPageToken().execute()["startPageToken"]
-    )
+    return fake.service().changes().getStartPageToken().execute()["startPageToken"]
 
 
 def _seed_entry(
@@ -175,12 +169,12 @@ def test_scenario_a1_unit_400_raises_cursor_reset_error():
     Test level: client (below the engine), confirming the client wiring is live.
     """
     fake = FakeDrive()
-    cache = PathIDCache(
-        Database(sqlite3.connect(":memory:"))
-    )
+    cache = PathIDCache(Database(sqlite3.connect(":memory:")))
     cache.root_id = ROOT_ID
 
-    client = GoogleDriveClient(_CONFIG + "-unit", CredentialStorage(_CONFIG + "-unit"), cache)
+    client = GoogleDriveClient(
+        _CONFIG + "-unit", CredentialStorage(_CONFIG + "-unit"), cache
+    )
     client._get_service = Mock(return_value=fake.service())
     client._cached_account_info = _STUB_ACCOUNT
     client._ensure_root_id = Mock()
@@ -227,9 +221,7 @@ def test_scenario_a1_no_fault_no_spurious_cursor_reset():
     try:
         client.list_remote_changes(start)
     except CursorResetError:
-        pytest.fail(
-            "CursorResetError raised without a 400 — mapping fires spuriously"
-        )
+        pytest.fail("CursorResetError raised without a 400 — mapping fires spuriously")
 
     remove_configuration(_CONFIG + "-teeth-a1")
 
@@ -260,9 +252,9 @@ def test_scenario_a2_engine_400_raises_cursor_reset_stop_before_reset(
 
     # Give the engine a non-empty cursor → incremental path.
     sync_engine.remote_cursor = start_cursor
-    assert sync_engine.remote_cursor == start_cursor, (
-        "Precondition: cursor must be non-empty to take incremental path"
-    )
+    assert (
+        sync_engine.remote_cursor == start_cursor
+    ), "Precondition: cursor must be non-empty to take incremental path"
 
     # Seed a matching index entry so the engine looks consistent.
     _seed_entry(
@@ -285,9 +277,9 @@ def test_scenario_a2_engine_400_raises_cursor_reset_stop_before_reset(
     # The engine must NOT have advanced the cursor past start_cursor.
     # A torn state would be: cursor advanced to some mid-batch value while
     # changes were only partially applied.
-    assert sync_engine.remote_cursor == start_cursor, (
-        "Stop-before-reset violated: cursor was advanced despite 400 abort"
-    )
+    assert (
+        sync_engine.remote_cursor == start_cursor
+    ), "Stop-before-reset violated: cursor was advanced despite 400 abort"
 
 
 def test_scenario_a2_teeth_cursor_not_reset_by_engine(sync_engine: SyncEngine):
@@ -319,9 +311,9 @@ def test_scenario_a2_teeth_cursor_not_reset_by_engine(sync_engine: SyncEngine):
         "the fault did not fire or the exception was swallowed"
     )
     # Cursor must still be the sentinel — the engine does NOT reset it.
-    assert sync_engine.remote_cursor == sentinel_cursor, (
-        "Teeth: engine must NOT reset the cursor — that is the manager's job"
-    )
+    assert (
+        sync_engine.remote_cursor == sentinel_cursor
+    ), "Teeth: engine must NOT reset the cursor — that is the manager's job"
 
 
 def test_scenario_a3_reindex_post_condition_after_manager_reset(
@@ -351,24 +343,24 @@ def test_scenario_a3_reindex_post_condition_after_manager_reset(
     # Simulate manager reset: reset all sync state (cursor → "", index cleared).
     sync_engine.reset_sync_state()
 
-    assert sync_engine.remote_cursor == "", (
-        "Precondition: reset_sync_state must clear cursor to ''"
-    )
-    assert sync_engine._state.get("sync", "did_finish_indexing") is False, (
-        "Precondition: did_finish_indexing must be False after reset"
-    )
+    assert (
+        sync_engine.remote_cursor == ""
+    ), "Precondition: reset_sync_state must clear cursor to ''"
+    assert (
+        sync_engine._state.get("sync", "did_finish_indexing") is False
+    ), "Precondition: did_finish_indexing must be False after reset"
 
     # Now run the bootstrap cycle — must NOT raise.
     sync_engine.download_sync_cycle()
 
     # Post-condition: cursor is a non-empty token (fresh from getStartPageToken).
-    assert sync_engine.remote_cursor != "", (
-        "Bootstrap must store a fresh non-empty cursor"
-    )
+    assert (
+        sync_engine.remote_cursor != ""
+    ), "Bootstrap must store a fresh non-empty cursor"
     # did_finish_indexing must be True after a complete bootstrap.
-    assert sync_engine._state.get("sync", "did_finish_indexing") is True, (
-        "Bootstrap must set did_finish_indexing=True on completion"
-    )
+    assert (
+        sync_engine._state.get("sync", "did_finish_indexing") is True
+    ), "Bootstrap must set did_finish_indexing=True on completion"
 
 
 def test_scenario_a3_teeth_bootstrap_requires_empty_cursor(sync_engine: SyncEngine):
@@ -402,15 +394,13 @@ def test_scenario_a3_teeth_bootstrap_requires_empty_cursor(sync_engine: SyncEngi
 
     # Incremental path: list_folder_iterator must NOT be called, and the
     # post-conditions (non-empty cursor + did_finish_indexing=True) must hold.
-    assert lfi_calls == [], (
-        "Incremental path must not call list_folder_iterator"
-    )
-    assert sync_engine.remote_cursor != "", (
-        "Non-empty cursor must produce a non-empty post-cursor"
-    )
-    assert sync_engine._state.get("sync", "did_finish_indexing") is True, (
-        "Incremental path must not reset did_finish_indexing"
-    )
+    assert lfi_calls == [], "Incremental path must not call list_folder_iterator"
+    assert (
+        sync_engine.remote_cursor != ""
+    ), "Non-empty cursor must produce a non-empty post-cursor"
+    assert (
+        sync_engine._state.get("sync", "did_finish_indexing") is True
+    ), "Incremental path must not reset did_finish_indexing"
 
 
 # ===========================================================================

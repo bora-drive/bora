@@ -77,7 +77,7 @@ class TestDecodeName:
             "foo ",
             "foo.",
             "café",
-            "weird*?\"<>|",
+            'weird*?"<>|',
             "with\x00nul",
             "",
             "已编码",
@@ -149,15 +149,11 @@ class TestComposePath:
         assert compose_path("/", "report.pdf") == "/report.pdf"
 
     def test_nested_parent(self) -> None:
-        assert (
-            compose_path("/Documents", "report.pdf") == "/Documents/report.pdf"
-        )
+        assert compose_path("/Documents", "report.pdf") == "/Documents/report.pdf"
 
     def test_parent_ending_in_slash_normalized(self) -> None:
         # Caller may pass "/" or "/Documents"; both yield correct output.
-        assert (
-            compose_path("/Documents/", "report.pdf") == "/Documents/report.pdf"
-        )
+        assert compose_path("/Documents/", "report.pdf") == "/Documents/report.pdf"
 
     def test_raw_name_with_slash_encoded(self) -> None:
         # The Q4 spike case.
@@ -176,8 +172,7 @@ class TestComposePath:
     def test_parent_already_encoded_passes_through(self) -> None:
         # Parent path is already encoded; compose_path doesn't re-encode it.
         assert (
-            compose_path("/2024%2F05 reports", "Q1.pdf")
-            == "/2024%2F05 reports/Q1.pdf"
+            compose_path("/2024%2F05 reports", "Q1.pdf") == "/2024%2F05 reports/Q1.pdf"
         )
 
 
