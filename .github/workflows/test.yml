@@ -44,7 +44,7 @@ jobs:
 
       - name: Test with pytest
         run: |
-          python -m pytest --cov=maestral --cov-report=xml tests/offline
+          python -m pytest --cov=bora --cov-report=xml tests/offline
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -111,7 +111,7 @@ jobs:
 
       - name: Test with pytest
         run: |
-          pytest -v --cov=maestral --cov-report=xml tests/linked/unit
+          pytest -v --cov=bora --cov-report=xml tests/linked/unit
 
       - name: Upload Code Coverage
         uses: codecov/codecov-action@v5
@@ -185,7 +185,7 @@ jobs:
 
       - name: Test with pytest
         run: |
-          pytest --verbose --cov=maestral --cov-report=xml tests/linked/integration --fs-observer ${{ matrix.observer }}
+          pytest --verbose --cov=bora --cov-report=xml tests/linked/integration --fs-observer ${{ matrix.observer }}
 
       - name: Upload Code Coverage
         uses: codecov/codecov-action@v5
