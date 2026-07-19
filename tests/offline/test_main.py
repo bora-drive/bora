@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from unittest.mock import PropertyMock, patch
 
 import pytest
@@ -77,6 +78,34 @@ def test_shutdown_daemon_calls_client_close(m: Bora) -> None:
     assert "stop_sync" in call_order, "stop_sync() was not called"
     assert call_order.index("close") < call_order.index("stop_sync"), (
         "client.close() must be called before stop_sync()"
+    )
+
+
+def test_shutdown_daemon_closes_sync_db(m: Bora) -> None:
+    """shutdown_daemon must close the SyncEngine's index DB connection --
+    otherwise it is only ever closed by GC at an arbitrary later time
+    (ResourceWarning: unclosed database)."""
+    with patch.object(m, "stop_sync"):
+        m.shutdown_daemon()
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        m.sync._db.execute("SELECT 1")
+
+
+def test_shutdown_daemon_closes_sync_db_after_stop_sync(m: Bora) -> None:
+    """The sync DB must only be closed AFTER stop_sync() has joined the sync
+    workers -- they read and write the index while running."""
+    call_order: list[str] = []
+
+    with (
+        patch.object(m, "stop_sync", side_effect=lambda: call_order.append("stop_sync")),
+        patch.object(m.sync, "close", side_effect=lambda: call_order.append("sync_close")),
+    ):
+        m.shutdown_daemon()
+
+    assert "sync_close" in call_order, "sync.close() was not called"
+    assert call_order.index("stop_sync") < call_order.index("sync_close"), (
+        "sync.close() must be called after stop_sync()"
     )
 
 

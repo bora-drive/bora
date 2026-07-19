@@ -603,6 +603,12 @@ class SyncEngine:
         self._case_conversion_cache = LRUCache(capacity=5000)
         self.clean_cache_dir(raise_error=False)
 
+    def close(self) -> None:
+        """Closes the index DB connection. Call only after all sync activity
+        has stopped -- workers read and write the index while running."""
+        with self._database_access():
+            self._db.close()
+
     def _create_or_load_db(self) -> None:
         with self._database_access():
             self._index_table = Manager(self._db, IndexEntry)

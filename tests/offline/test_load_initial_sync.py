@@ -116,7 +116,7 @@ def sync_engine():
     # hot journal) can corrupt the NEXT test's fresh connection at the same
     # path, surfacing as sqlite3 "disk I/O error" / "attempt to write a
     # readonly database" / "bad parameter or other API misuse" flakes.
-    sync._db.close()
+    sync.close()
     _purge_load_state(local_dir)
 
 
