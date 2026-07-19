@@ -203,6 +203,42 @@ def test_notify_snooze(config_name: str) -> None:
     assert m.notification_snooze == 0
 
 
+def test_export_docs(m: Bora) -> None:
+    runner = CliRunner()
+    result = runner.invoke(main, ["export", "docs", "off", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert m.export_google_docs is False
+
+    result = runner.invoke(main, ["export", "docs", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert "off" in result.output.lower()
+
+    result = runner.invoke(main, ["export", "docs", "on", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert m.export_google_docs is True
+
+
+def test_export_markdown(m: Bora) -> None:
+    runner = CliRunner()
+    result = runner.invoke(main, ["export", "markdown", "off", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert m.export_google_docs_markdown is False
+
+    result = runner.invoke(main, ["export", "markdown", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert "off" in result.output.lower()
+
+    result = runner.invoke(main, ["export", "markdown", "on", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert m.export_google_docs_markdown is True
+
+
 def test_log_level(m: Bora) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["log", "level", "-c", m.config_name])

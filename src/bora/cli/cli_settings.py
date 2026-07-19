@@ -188,3 +188,44 @@ def bandwidth_limit_down(m: Bora, mb_per_second: float | None) -> None:
     else:
         mb_per_second = m.bandwidth_limit_down / 10**6
         echo(f"{mb_per_second} MB/sec" if mb_per_second > 0 else "unlimited")
+
+
+@click.group(help="View and manage exporting native Google Docs, Sheets and Slides.")
+def export() -> None:
+    pass
+
+
+@export.command(
+    name="docs",
+    help="Get / set whether to export native Google Docs, Sheets and Slides.",
+)
+@click.argument(
+    "state",
+    required=False,
+    type=click.Choice(["on", "off"], case_sensitive=False),
+)
+@inject_proxy(fallback=True, existing_config=True)
+def export_docs(m: Bora, state: str | None) -> None:
+    if state is not None:
+        m.export_google_docs = state.lower() == "on"
+        ok(f"Exporting native Google Docs: {state.lower()}.")
+    else:
+        echo("on" if m.export_google_docs else "off")
+
+
+@export.command(
+    name="markdown",
+    help="Get / set whether to export Google Docs to Markdown (instead of .docx).",
+)
+@click.argument(
+    "state",
+    required=False,
+    type=click.Choice(["on", "off"], case_sensitive=False),
+)
+@inject_proxy(fallback=True, existing_config=True)
+def export_markdown(m: Bora, state: str | None) -> None:
+    if state is not None:
+        m.export_google_docs_markdown = state.lower() == "on"
+        ok(f"Exporting Google Docs to Markdown: {state.lower()}.")
+    else:
+        echo("on" if m.export_google_docs_markdown else "off")

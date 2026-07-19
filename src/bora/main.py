@@ -531,6 +531,26 @@ class Bora:
         self.client.bandwidth_limit_up = value
         self._conf.set("app", "bandwidth_limit_up", value)
 
+    @property
+    def export_google_docs(self) -> bool:
+        """Whether to export native Google Docs, Sheets and Slides on download."""
+        return bool(self._conf.get("sync", "export_google_docs"))
+
+    @export_google_docs.setter
+    def export_google_docs(self, value: bool) -> None:
+        """Setter: export_google_docs."""
+        self._conf.set("sync", "export_google_docs", bool(value))
+
+    @property
+    def export_google_docs_markdown(self) -> bool:
+        """Whether to export Google Docs to Markdown instead of .docx."""
+        return bool(self._conf.get("sync", "export_google_docs_markdown"))
+
+    @export_google_docs_markdown.setter
+    def export_google_docs_markdown(self, value: bool) -> None:
+        """Setter: export_google_docs_markdown."""
+        self._conf.set("sync", "export_google_docs_markdown", bool(value))
+
     # ==== State information  ==========================================================
 
     def status_change_longpoll(self, timeout: float | None = 60) -> bool:
