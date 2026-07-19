@@ -5,6 +5,18 @@ new generic names. The transitional backward-compat aliases (DropboxClient,
 Dropbox*Error, dbx_path) were removed in Stage 8.
 """
 
+def _load_pyproject():
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11
+        import tomli as tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        return tomllib.load(f)
+
+
 def test_server_error_exists():
     from bora.exceptions import ServerError
     assert issubclass(ServerError, Exception)
@@ -104,12 +116,7 @@ def test_core_metadata_has_remote_fields():
 
 def test_pyproject_has_no_dropbox_dependency():
     """pyproject.toml should not list dropbox as a dependency."""
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).parents[2] / "pyproject.toml"
-    with open(pyproject, "rb") as f:
-        data = tomllib.load(f)
+    data = _load_pyproject()
 
     deps = data["project"]["dependencies"]
     for dep in deps:
@@ -118,12 +125,7 @@ def test_pyproject_has_no_dropbox_dependency():
 
 def test_pyproject_has_google_dependencies():
     """pyproject.toml should list google API dependencies."""
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).parents[2] / "pyproject.toml"
-    with open(pyproject, "rb") as f:
-        data = tomllib.load(f)
+    data = _load_pyproject()
 
     deps = " ".join(data["project"]["dependencies"])
     assert "google-api-python-client" in deps
@@ -133,12 +135,7 @@ def test_pyproject_has_google_dependencies():
 
 def test_pyproject_description_not_dropbox():
     """Project description should not mention Dropbox."""
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).parents[2] / "pyproject.toml"
-    with open(pyproject, "rb") as f:
-        data = tomllib.load(f)
+    data = _load_pyproject()
 
     desc = data["project"]["description"]
     assert "Dropbox" not in desc
@@ -169,12 +166,7 @@ def test_package_importable_as_bora():
 
 def test_bora_cli_entry_point():
     """The CLI entry point should be 'bora'."""
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).parents[2] / "pyproject.toml"
-    with open(pyproject, "rb") as f:
-        data = tomllib.load(f)
+    data = _load_pyproject()
 
     scripts = data["project"]["scripts"]
     assert "bora" in scripts

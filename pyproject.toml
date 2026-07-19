@@ -70,6 +70,7 @@ test = [
     "pytest-benchmark",
     "pytest-cov",
     "pytest-rerunfailures",
+    "tomli;python_version<'3.11'",
 ]
 docs = [
     "furo==2025.9.25",
