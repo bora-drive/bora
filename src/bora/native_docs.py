@@ -31,16 +31,43 @@ __all__ = [
     "GOOGLE_NATIVE_PREFIX",
     "GOOGLE_FOLDER_MIME_TYPE",
     "GOOGLE_SHORTCUT_MIME_TYPE",
+    "EXPORT_MIME_MAP",
+    "MARKDOWN_MIME",
+    "MARKDOWN_EXT",
     "is_google_native",
     "is_google_folder",
     "is_shortcut",
     "filter_native_docs",
+    "is_exportable",
+    "is_unsupported_native",
+    "export_target",
+    "export_display_name",
 ]
 
 # https://developers.google.com/drive/api/guides/mime-types
 GOOGLE_NATIVE_PREFIX = "application/vnd.google-apps."
 GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 GOOGLE_SHORTCUT_MIME_TYPE = "application/vnd.google-apps.shortcut"
+
+MARKDOWN_MIME = "text/markdown"
+MARKDOWN_EXT = "md"
+
+# native mime -> (office export mime, extension without dot)
+EXPORT_MIME_MAP: dict[str, tuple[str, str]] = {
+    "application/vnd.google-apps.document": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docx",
+    ),
+    "application/vnd.google-apps.spreadsheet": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    ),
+    "application/vnd.google-apps.presentation": (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pptx",
+    ),
+}
+_DOCUMENT_MIME = "application/vnd.google-apps.document"
 
 
 def is_google_native(mime_type: str | None) -> bool:
@@ -90,3 +117,29 @@ def filter_native_docs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for item in items
         if not is_google_native(item.get("mimeType"))
     ]
+
+
+def is_exportable(mime_type: str | None) -> bool:
+    """True for the native types Bora can export (Docs, Sheets, Slides)."""
+    return mime_type in EXPORT_MIME_MAP
+
+
+def is_unsupported_native(mime_type: str | None) -> bool:
+    """True for native types that are neither folders nor exportable
+    (Forms, Sites, Drawings, shortcuts, ...): still skipped entirely."""
+    return is_google_native(mime_type) and not is_exportable(mime_type)
+
+
+def export_target(mime_type: str, markdown: bool) -> tuple[str, str]:
+    """Return (export_mime, extension) for an exportable *mime_type*.
+    Markdown is offered only for Google Docs; Sheets/Slides ignore it."""
+    if markdown and mime_type == _DOCUMENT_MIME:
+        return (MARKDOWN_MIME, MARKDOWN_EXT)
+    return EXPORT_MIME_MAP[mime_type]
+
+
+def export_display_name(raw_name: str, mime_type: str, markdown: bool) -> str:
+    """Project the on-disk / canonical remote leaf name for an export,
+    e.g. 'Report' -> 'Report.docx' (or '.md' for a Doc with markdown on)."""
+    _, ext = export_target(mime_type, markdown)
+    return f"{raw_name}.{ext}"
