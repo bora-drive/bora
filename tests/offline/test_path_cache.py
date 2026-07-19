@@ -857,3 +857,24 @@ class TestExportLeafProjection:
         # resolve_path must return the stored projected path, not a path
         # rebuilt from the raw name column ("/Report").
         assert cache.resolve_path("d1") == "/Report.docx"
+
+    def test_projected_name_collision_is_deduped(self) -> None:
+        # A native Doc raw-named "Report" projects to "/Report.docx"; a binary
+        # literally named "Report.docx" stays "/Report.docx". Under export they
+        # collide at the same folded path. Duplicate detection must key on the
+        # PROJECTED leaf (like set()/move() case-conflict guards) so exactly
+        # one wins (first by file-id order) — no silent cross-wire where two
+        # file-ids share one remote_path_fold.
+        cache = make_cache()
+        items = [
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
+             "parents": ["ROOT"]},
+            {"id": "f2", "name": "Report.docx", "mimeType": "application/pdf",
+             "parents": ["ROOT"]},
+        ]
+        cache.populate_from_listing(items, export_opts=ExportOptions(True, False))
+        # id-order winner ("d1" < "f2") keeps the path; the loser is skipped.
+        assert cache.path_to_id("/Report.docx") == "d1"
+        assert cache.get_entry("f2") is None
+        # Exactly one entry occupies the projected path (no cross-wire).
+        assert cache.count() == 1
