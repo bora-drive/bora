@@ -82,3 +82,63 @@ def test_filter_native_docs_keeps_items_without_mimetype():
     ]
     kept = filter_native_docs(items)
     assert [it["id"] for it in kept] == ["1"]
+
+
+from bora.native_docs import (
+    EXPORT_MIME_MAP,
+    export_display_name,
+    export_target,
+    is_exportable,
+    is_unsupported_native,
+)
+
+DOC = "application/vnd.google-apps.document"
+SHEET = "application/vnd.google-apps.spreadsheet"
+SLIDES = "application/vnd.google-apps.presentation"
+
+
+@pytest.mark.parametrize("mime", [DOC, SHEET, SLIDES])
+def test_exportable_types(mime):
+    assert is_exportable(mime) is True
+    assert is_unsupported_native(mime) is False
+
+
+@pytest.mark.parametrize(
+    "mime",
+    [
+        "application/vnd.google-apps.drawing",
+        "application/vnd.google-apps.form",
+        "application/vnd.google-apps.site",
+        GOOGLE_SHORTCUT_MIME_TYPE,
+    ],
+)
+def test_unsupported_natives(mime):
+    assert is_exportable(mime) is False
+    assert is_unsupported_native(mime) is True
+
+
+def test_folder_and_regular_are_neither():
+    for mime in (GOOGLE_FOLDER_MIME_TYPE, "image/png", None):
+        assert is_exportable(mime) is False
+        assert is_unsupported_native(mime) is False
+
+
+def test_export_target_office():
+    assert export_target(SHEET, markdown=True) == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    )
+    assert export_target(SLIDES, markdown=False)[1] == "pptx"
+
+
+def test_export_target_markdown_only_for_docs():
+    assert export_target(DOC, markdown=True) == ("text/markdown", "md")
+    assert export_target(DOC, markdown=False)[1] == "docx"
+    # markdown flag never affects sheets/slides
+    assert export_target(SHEET, markdown=True)[1] == "xlsx"
+
+
+def test_export_display_name():
+    assert export_display_name("Report", DOC, markdown=False) == "Report.docx"
+    assert export_display_name("Report", DOC, markdown=True) == "Report.md"
+    assert export_display_name("Q3 Budget", SHEET, markdown=True) == "Q3 Budget.xlsx"
