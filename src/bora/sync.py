@@ -2677,7 +2677,7 @@ class SyncEngine:
             if self._parent_is_read_only(event):
                 return SyncStatus.Skipped  # cannot write into a view-only folder
 
-            entry = self._index_table.get(event.remote_path_lower)
+            entry = self.get_index_entry(event.remote_path_lower)
 
             if entry is not None and entry.is_symlink:
                 # event.symlink_target is the raw (decoded) os.readlink() text;
@@ -2933,7 +2933,7 @@ class SyncEngine:
         # symlink rows: a non-symlink item's own read_only flag (populated
         # from its real Drive metadata) already gates it via
         # _is_read_only_event in _create_remote_entry.
-        deleted_entry = self._index_table.get(event.remote_path_lower)
+        deleted_entry = self.get_index_entry(event.remote_path_lower)
         if deleted_entry is not None and deleted_entry.is_symlink:
             if self._parent_is_read_only(event):
                 self._logger.debug(
@@ -3955,7 +3955,7 @@ class SyncEngine:
     def _is_read_only_event(self, event: SyncEvent) -> bool:
         """Returns whether the index entry for ``event`` is marked
         read-only (i.e. a view-only shared item, Drive canEdit == false)."""
-        entry = self._index_table.get(event.remote_path_lower)
+        entry = self.get_index_entry(event.remote_path_lower)
         return entry is not None and entry.is_read_only
 
     def _parent_is_read_only(self, event: SyncEvent) -> bool:
@@ -3966,7 +3966,7 @@ class SyncEngine:
         so they cannot rely on the item's own (possibly nonexistent)
         read_only flag the way :meth:`_is_read_only_event` does."""
         parent_lower = fold_path(posixpath.dirname(event.remote_path_lower))
-        parent_entry = self._index_table.get(parent_lower)
+        parent_entry = self.get_index_entry(parent_lower)
         return parent_entry is not None and parent_entry.is_read_only
 
     def _on_remote_file(self, event: SyncEvent) -> SyncStatus:
