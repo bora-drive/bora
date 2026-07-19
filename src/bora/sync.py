@@ -3779,6 +3779,15 @@ class SyncEngine:
             # the server's re-export is newer. A genuinely edited mirror (local
             # hash != indexed hash) falls through to the conflict logic below
             # and is preserved, never silently overwritten.
+            #
+            # KNOWN LIMITATION: this "untouched mirror" verdict depends on the
+            # download_only index row (with its content_hash) surviving. After
+            # a rebuild-index / reset_sync_state / re-link with mirrors already
+            # on disk, that row is gone, so this branch cannot fire: an
+            # untouched mirror instead hits the ctime heuristic below and is
+            # conflict-copied (and, being writable, re-uploaded to Drive as a
+            # new binary). See TODO.md's Google Docs Export "known limitation"
+            # note; the suggested future fix is a byte-compare adoption path.
             self._logger.debug(
                 'Untouched download_only mirror "%s": remote re-export is newer',
                 event.remote_path,
@@ -4080,16 +4089,23 @@ class SyncEngine:
         are not the Doc's own content, so an upload would clobber the live
         document. If the content genuinely differs from the last export, the
         user's edit is preserved as a normal, writable conflicted copy and the
-        canonical path is dropped from the index so the next download pass
-        re-exports the untouched server version to the original read-only
-        name.
+        canonical path is dropped from the index.
+
+        Dropping the index entry does NOT itself re-export the server version:
+        there is no periodic full reconcile in production. The mirror is only
+        re-exported to its original read-only name the next time the change
+        feed emits an edit for that Doc (which then re-applies as a create,
+        since the index row is gone) or on a manual ``rebuild-index``. Until
+        one of those happens the canonical path stays vacant.
         """
         if event.is_deleted or event.is_moved:
             # The mirror was removed from its canonical path (deleted or
             # renamed/moved). Don't propagate to Drive; forget the index entry
-            # so a subsequent download pass re-exports the server version. A
-            # moved mirror leaves the user's copy in place at the destination
-            # (a new, unindexed path), untouched.
+            # so the server version can be re-exported later. Note there is no
+            # periodic reconcile, so the re-export only happens on the next
+            # server-side edit of that Doc or a manual rebuild-index -- not
+            # eagerly. A moved mirror leaves the user's copy in place at the
+            # destination (a new, unindexed path), untouched.
             self.remove_node_from_index(entry.remote_path_lower)
             return
 
@@ -4101,9 +4117,10 @@ class SyncEngine:
             return
 
         # Content genuinely diverged. Preserve the user's edit as a normal,
-        # writable conflicted copy and drop the mirror's index entry so the
-        # server version is re-exported to the original name on the next
-        # download pass.
+        # writable conflicted copy and drop the mirror's index entry. The
+        # server version is re-exported to the original name only on the next
+        # server-side edit of that Doc or a manual rebuild-index (no periodic
+        # reconcile runs), not eagerly on the next download pass.
         cc_path = self._local_cc_filename(event.local_path, None)
         with self.fs_events.ignore(FileMovedEvent(event.local_path, cc_path)):
             with convert_api_errors():
