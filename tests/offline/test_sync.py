@@ -238,6 +238,7 @@ def _seed_index_entry(
     read_only: int = 0,
     remote_id: str = "id:seed",
     symlink_target: str | None = None,
+    download_only: int | None = None,
 ) -> None:
     """Insert an IndexEntry for ``remote_path`` directly via the engine's index API."""
     remote_path_lower = remote_path.lower()
@@ -251,6 +252,7 @@ def _seed_index_entry(
         content_hash=content_hash,
         symlink_target=symlink_target,
         read_only=read_only,
+        download_only=download_only,
     )
     with sync._database_access():
         sync._index_table.update(entry)
@@ -440,6 +442,63 @@ def test_conflict_first_download_with_no_remote_hash_is_not_identical(
     )
 
     assert sync_engine._check_download_conflict(event) is not Conflict.Identical
+
+
+def test_conflict_untouched_download_only_mirror_is_remote_newer(
+    sync_engine: SyncEngine,
+):
+    """A server-side re-export of an UNTOUCHED exported mirror must be treated
+    as RemoteNewer (re-export in place), NOT a conflict.
+
+    An exported native-doc mirror has no server-side content hash, so a
+    re-export event carries ``content_hash is None`` and cannot take the
+    content-equality short-circuit. The mirror's ctime was also bumped by the
+    read-only chmod after ``last_sync`` was recorded, so the ctime heuristic
+    (last_sync=0.0 here) would misread the untouched file as locally modified
+    and spawn a spurious conflicted copy. The download_only special-case must
+    instead compare the actual local bytes to the indexed export hash: equal
+    bytes -> no local edit -> RemoteNewer."""
+    remote_path = "/mirror.md"
+    data = b"# exported v1\n"
+    _write_local_file(sync_engine, remote_path, data)
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="VERSION-1",
+        content_hash=_md5(data),
+        last_sync=0.0,  # ctime > last_sync -> ctime heuristic sees "modified"
+        download_only=1,
+    )
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+
+    assert sync_engine._check_download_conflict(event) is Conflict.RemoteNewer
+
+
+def test_conflict_edited_download_only_mirror_is_conflict(
+    sync_engine: SyncEngine,
+):
+    """A GENUINELY edited exported mirror reaching the download conflict path
+    must still be a Conflict -- the download_only special-case only suppresses
+    the false positive for byte-identical mirrors, never a real local edit."""
+    remote_path = "/mirror.md"
+    _write_local_file(sync_engine, remote_path, b"# locally edited\n")
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="VERSION-1",
+        content_hash=_md5(b"# exported v1\n"),
+        last_sync=0.0,
+        download_only=1,
+    )
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+
+    assert sync_engine._check_download_conflict(event) is Conflict.Conflict
 
 
 def test_requires_upload_skips_when_remote_hash_matches(
@@ -3757,18 +3816,19 @@ def test_export_toggle_on_to_off_does_not_reindex(sync_engine: SyncEngine) -> No
 #        Report.docx, keyed by the same remote_id, old .md removed;
 #   5.   the Form still never lands on disk.
 #
-# KNOWN DEFECT surfaced by this test (see .superpowers/sdd/task-12-report.md):
-# an exported mirror has NO server-side content hash (Drive provides no md5 for
+# An exported mirror has NO server-side content hash (Drive provides no md5 for
 # exports, so SyncEvent.content_hash is None), and _on_remote_file records the
 # index `last_sync` from the mirror's ctime BEFORE applying the read-only chmod
-# -- which bumps the ctime. So on any subsequent server-side re-export,
-# _check_download_conflict cannot take its content-equality short-circuit and
-# falls through to the ctime heuristic, which reads the untouched mirror as
-# "locally modified" -> Conflict -> a spurious writable conflicted copy of the
-# prior mirror. The re-export itself still succeeds (content updated, read-only),
-# so the brief's positive assertions hold; the conflicted-copy litter is
-# asserted below as characterization so the defect is visible and regression-
-# locked until it is fixed.
+# -- which bumps the ctime. Without special handling, a subsequent server-side
+# re-export would fall through _check_download_conflict's content-equality
+# short-circuit to the ctime heuristic, misread the untouched mirror as "locally
+# modified", and spawn a spurious writable conflicted copy of the prior mirror on
+# EVERY server-side edit (Concern A in task-12-report.md). The fix special-cases
+# download_only mirrors in _check_download_conflict: it compares the actual local
+# bytes against the indexed export hash instead of trusting ctime, so an untouched
+# mirror is correctly treated as RemoteNewer and re-exported in place with no
+# litter. This test asserts that no conflicted copies accumulate across the
+# re-export (leg 3) and markdown-toggle re-projection (leg 4).
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _PPTX_MIME = (
@@ -3871,13 +3931,9 @@ def test_export_full_cycle_integration(sync_engine: SyncEngine) -> None:
     # The mirror is still keyed by the Doc's remote_id (an in-place re-export).
     assert md_entry.remote_id == doc
 
-    # KNOWN DEFECT (characterization): the server-side re-export spawns exactly
-    # one spurious conflicted copy of the PRIOR (v1) mirror. Remove this block
-    # once the ctime/last_sync ordering defect is fixed.
-    ccs = _conflicted_copies(local_dir)
-    assert len(ccs) == 1 and ccs[0].endswith(".md"), ccs
-    with open(osp.join(local_dir, ccs[0]), "rb") as fh:
-        assert fh.read() == b"# Report v1\n"
+    # The server-side re-export of an UNTOUCHED mirror must not litter: no
+    # conflicted copy is spawned (Concern A fix).
+    assert _conflicted_copies(local_dir) == []
 
     # ---- Leg 4: flip markdown OFF; a subsequent server edit re-projects ----
     # The markdown toggle alone re-emits nothing (it does not reset sync state
@@ -3907,11 +3963,9 @@ def test_export_full_cycle_integration(sync_engine: SyncEngine) -> None:
     assert not osp.isfile(L("/Report.md")), "old .md mirror was not removed"
     assert sync_engine.get_index_entry("/report.md") is None
 
-    # KNOWN DEFECT (characterization): the .md -> .docx re-export adds one more
-    # spurious conflicted copy (of the v2 mirror), for two in total. Remove
-    # once the ctime/last_sync ordering defect is fixed.
-    ccs = _conflicted_copies(local_dir)
-    assert len(ccs) == 2, ccs
+    # The .md -> .docx re-projection of an untouched mirror must not litter
+    # either: still no conflicted copies (Concern A fix).
+    assert _conflicted_copies(local_dir) == []
 
     # ---- Leg 5 (part 2): the Form STILL never lands on disk ----------------
     assert not any("Survey" in n for n in os.listdir(local_dir)), os.listdir(local_dir)

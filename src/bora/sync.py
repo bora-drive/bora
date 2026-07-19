@@ -3708,6 +3708,30 @@ class SyncEngine:
             )
             return Conflict.Identical
         elif (
+            (dl_entry := self.get_index_entry(event.remote_path_lower)) is not None
+            and dl_entry.is_download_only
+            and self.get_local_hash(event.local_path) == dl_entry.content_hash
+        ):
+            # Exported read-only mirror of a native doc (Docs/Sheets/Slides).
+            # Drive provides no server-side md5 for exports, so the
+            # content-equality short-circuit above can never fire
+            # (event.content_hash is None). The ctime heuristic below is also
+            # unreliable here: _on_remote_file records last_sync from the
+            # mirror's ctime BEFORE the read-only chmod, and that chmod bumps
+            # ctime -- so an untouched mirror looks "locally modified" and would
+            # spuriously conflict-copy on every server-side re-export. Decide
+            # local modification the robust way instead (as
+            # _handle_download_only_local_change does): the local bytes are
+            # byte-identical to the last export, so there is no local edit and
+            # the server's re-export is newer. A genuinely edited mirror (local
+            # hash != indexed hash) falls through to the conflict logic below
+            # and is preserved, never silently overwritten.
+            self._logger.debug(
+                'Untouched download_only mirror "%s": remote re-export is newer',
+                event.remote_path,
+            )
+            return Conflict.RemoteNewer
+        elif (
             len(
                 self.sync_errors_for_path(
                     event.remote_path_lower, direction=SyncDirection.Up
