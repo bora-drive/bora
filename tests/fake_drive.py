@@ -19,6 +19,25 @@ from googleapiclient.errors import HttpError
 ROOT_ID = "ROOT"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
+# application/vnd.google-apps.* prefix shared by every native Workspace
+# type (Docs, Sheets, Slides, Forms, ...) and the folder type. Kept as a
+# plain string check here (rather than importing bora.native_docs) so the
+# fake stays a pure API-shape double with no dependency on app code.
+_NATIVE_PREFIX = "application/vnd.google-apps."
+
+# add_native's kind -> Drive mimeType map (Task 8).
+_NATIVE_KIND_MIME = {
+    "document": "application/vnd.google-apps.document",
+    "spreadsheet": "application/vnd.google-apps.spreadsheet",
+    "presentation": "application/vnd.google-apps.presentation",
+    "form": "application/vnd.google-apps.form",
+}
+
+
+def _is_native_doc_mime(mime: str | None) -> bool:
+    """True for a non-folder application/vnd.google-apps.* mimeType."""
+    return bool(mime) and mime.startswith(_NATIVE_PREFIX) and mime != FOLDER_MIME
+
 
 def make_http_error(status: int, reason: str = "", message: str = "error") -> HttpError:
     """Build a googleapiclient HttpError the same way the real API surfaces one."""
@@ -63,6 +82,9 @@ class FakeDrive:
         # Maps file_id -> mode, where mode in {"truncate", "flip", "wrong_md5"}.
         # Consumed by get_media when building the _MediaRequest.
         self._corruption: dict[str, str] = {}
+        # Bytes served by files().export_media, keyed by (file_id, export_mime).
+        # Populated via set_export_bytes (Task 8).
+        self._export_bytes: dict[tuple[str, str], bytes] = {}
         # One-shot hook fired at the start of the next files.update finalize,
         # before the update is applied. Used to deterministically interleave a
         # "collaborator" write inside the check-then-write race window
@@ -102,9 +124,29 @@ class FakeDrive:
         self._rev_counter += 1
         return f"rev-{self._rev_counter}"
 
-    def _record_change(self, file_id: str) -> None:
+    def _record_change(self, file_id: str, *, is_edit: bool = False) -> None:
+        """Append a change-log entry for *file_id*.
+
+        ``is_edit=True`` marks a server-side edit (files.update) rather than
+        a creation/deletion; for a native Google-Workspace doc this bumps the
+        Drive ``version`` counter (string int increment), letting change-feed
+        tests simulate a collaborator editing a Doc/Sheet/Slide out-of-band
+        (Task 8). Creation/deletion never bump: ``add_native`` seeds the
+        starting ``version`` itself."""
         self._change_log.append((self._seq, file_id))
         self._seq += 1
+        if is_edit:
+            rec = self.files.get(file_id)
+            # "version" in rec scopes the bump to records that opted in via
+            # add_native — shortcuts and other google-apps.* mimeTypes match
+            # _is_native_doc_mime but are created via _insert/create, which
+            # never set "version", so they must not be touched here.
+            if (
+                rec is not None
+                and "version" in rec
+                and _is_native_doc_mime(rec.get("mimeType"))
+            ):
+                rec["version"] = str(int(rec["version"]) + 1)
 
     def fail_next(
         self,
@@ -324,6 +366,60 @@ class FakeDrive:
     ) -> str:
         parent_id, name = self._resolve_path_to_parent_and_name(path)
         return self._insert(literal_name or name, parent_id, "text/plain", content)
+
+    def _resolve_folder(self, path: str) -> str:
+        """Return the file id of the folder at *path* (``"/"`` is the root)."""
+        parts = [p for p in path.strip("/").split("/") if p]
+        parent_id = ROOT_ID
+        for seg in parts:
+            parent_id = self._child_by_name(parent_id, seg)
+        return parent_id
+
+    def add_native(
+        self, name: str, kind: str, parent: str = "/", version: str = "1"
+    ) -> str:
+        """Insert a native Google Workspace file (Doc/Sheet/Slides/Form).
+
+        ``kind`` is one of ``"document"``, ``"spreadsheet"``,
+        ``"presentation"``, ``"form"`` and is mapped to the matching
+        ``application/vnd.google-apps.*`` mimeType. Native docs have no
+        downloadable bytes in real Drive: ``md5Checksum`` and
+        ``headRevisionId`` are ``None``, and ``content`` is empty — export
+        bytes are registered separately via :meth:`set_export_bytes` and
+        served through ``files().export_media``. ``version`` seeds the
+        Drive version counter used as the export identity's ``rev`` (see
+        ``changes.to_file_metadata``); :meth:`_record_change` bumps it on
+        a subsequent ``files.update`` (Task 8)."""
+        mime = _NATIVE_KIND_MIME.get(kind)
+        if mime is None:
+            raise ValueError(f"Unknown native kind: {kind!r}")
+        parent_id = self._resolve_folder(parent)
+        fid = self._new_id()
+        rec = {
+            "id": fid,
+            "name": name,
+            "parents": [parent_id],
+            "mimeType": mime,
+            "modifiedTime": _now_rfc3339(),
+            "createdTime": _now_rfc3339(),
+            "trashed": False,
+            "shared": False,
+            "md5Checksum": None,
+            "size": None,
+            "headRevisionId": None,
+            "version": version,
+            "content": b"",
+            "revisions": [],
+            "lastModifyingUser": {"permissionId": "perm-1"},
+        }
+        self.files[fid] = rec
+        self._record_change(fid)
+        return fid
+
+    def set_export_bytes(self, file_id: str, export_mime: str, content: bytes) -> None:
+        """Register the bytes *content* served by
+        ``files().export_media(fileId=file_id, mimeType=export_mime)``."""
+        self._export_bytes[(file_id, export_mime)] = content
 
     def _insert(self, name: str, parent_id: str, mime: str, content: bytes) -> str:
         fid = self._new_id()
@@ -755,6 +851,22 @@ class _FilesResource:
             fail_kwargs={"fileId": fileId},
         )
 
+    def export_media(self, fileId, mimeType, **_):
+        """Mirror get_media, but serves bytes registered via
+        set_export_bytes for a native doc's (fileId, mimeType) pair."""
+        content = self._d._export_bytes.get((fileId, mimeType))
+        if content is None:
+            raise make_http_error(
+                404, "notFound",
+                f"No export bytes registered for {fileId!r} at {mimeType!r}",
+            )
+        return _MediaRequest(
+            content,
+            fail_check=self._d._maybe_fail,
+            fail_key="files.export_media",
+            fail_kwargs={"fileId": fileId, "mimeType": mimeType},
+        )
+
     def update(
         self,
         fileId,
@@ -791,7 +903,7 @@ class _FilesResource:
                 rec["size"] = len(content)
                 rec["headRevisionId"] = self._d._new_rev()
                 rec["revisions"].append(self._d._revision_dict(rec))
-            self._d._record_change(fileId)
+            self._d._record_change(fileId, is_edit=True)
             return _project(rec, fields)
 
         _resumable = (
