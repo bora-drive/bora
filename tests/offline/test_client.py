@@ -1613,3 +1613,24 @@ def test_download_exportable_doc_raises_when_export_disabled(client_on_fake, tmp
     dest = tmp_path / "Report"
     with pytest.raises(UnsupportedFileError):
         cof.client.download("/Report", str(dest), file_id=file_id)
+
+
+def test_download_unsupported_native_raises_even_when_export_enabled(
+    client_on_fake, tmp_path
+):
+    """A genuinely non-exportable native (Form) must still raise
+    UnsupportedFileError via the is_unsupported_native branch, even with
+    export enabled — pins that branch separately from the
+    exportable-but-disabled branch (which a Docs mime would otherwise hit
+    first, masking a swapped condition)."""
+    from bora.exceptions import UnsupportedFileError
+
+    cof = client_on_fake
+    fake = cof.fake
+    cof.client.export_opts = ExportOptions(True, False)
+    file_id = fake.add_native(name="Survey", kind="form")
+    cof.client._path_cache.set("/Survey", file_id, ROOT_ID, "Survey", False)
+
+    dest = tmp_path / "Survey"
+    with pytest.raises(UnsupportedFileError):
+        cof.client.download("/Survey", str(dest), file_id=file_id)
