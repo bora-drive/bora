@@ -22,11 +22,15 @@ from bora.client import GoogleDriveClient, _MAX_RETRY_ATTEMPTS
 from bora.config import remove_configuration
 from bora.core import FileMetadata, FolderMetadata, WriteMode
 from bora.database.core import Database
+from bora.export import ExportOptions
 from bora.keyring import CredentialStorage
 from bora.path_cache import PathIDCache
 from tests.fake_drive import ROOT_ID
 
 _CONFIG = "test-config-client-offline"
+_DOCX_MIME = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
 
 
 @pytest.fixture
@@ -1447,3 +1451,106 @@ def test_list_shared_roots_returns_shared_items(client_on_fake) -> None:
     fake.add_shared_root("Team Docs", shared_with_me=True)
     roots = client.list_shared_roots()
     assert any(r["name"] == "Team Docs" and r.get("sharedWithMe") for r in roots)
+
+
+# ==== Task 4c: export projection through listing / metadata ===============
+
+
+def test_export_opts_defaults_disabled(client):
+    assert client.export_opts == ExportOptions.disabled()
+    assert client.export_opts.enabled is False
+
+
+def test_get_metadata_exportable_doc_when_export_enabled(client_on_fake):
+    """With export enabled a native Doc resolves at its projected path and
+    get_metadata returns FileMetadata carrying the export identity."""
+    cof = client_on_fake
+    fake = cof.fake
+    cof.client.export_opts = ExportOptions(True, False)
+    fid = fake.add_native("Report", "document", parent="/")
+    fake.set_export_bytes(fid, _DOCX_MIME, b"docx-bytes")
+    # Bootstrap populates the cache with the projected leaf name.
+    list(cof.client.list_folder_iterator("/", recursive=True))
+
+    meta = cof.client.get_metadata("/Report.docx")
+    assert meta is not None
+    assert isinstance(meta, FileMetadata)
+    assert meta.id == fid
+    assert meta.path_display == "/Report.docx"
+    assert meta.export_mime == _DOCX_MIME
+    assert meta.name == "Report"  # raw Drive name preserved
+
+
+def test_get_metadata_exportable_doc_none_when_disabled(client_on_fake):
+    """Export disabled -> a native Doc still returns None (unchanged)."""
+    cof = client_on_fake
+    fake = cof.fake
+    fid = fake.add_native("Report", "document", parent="/")
+    cof.client._path_cache.set("/Report", fid, ROOT_ID, "Report", False)
+    assert cof.client.get_metadata("/Report") is None
+
+
+def test_list_folder_projects_exportable_when_enabled(client_on_fake):
+    """list_folder lists a native Doc as Report.docx when export is on."""
+    cof = client_on_fake
+    fake = cof.fake
+    cof.client.export_opts = ExportOptions(True, False)
+    folder = fake.add_folder("/docs")
+    cof.client._path_cache.set("/docs", folder, ROOT_ID, "docs", True)
+    fid = fake.add_native("Report", "document", parent="/docs")
+
+    result = cof.client.list_folder("/docs")
+    by_path = {e.path_display: e for e in result.entries}
+    assert "/docs/Report.docx" in by_path
+    md = by_path["/docs/Report.docx"]
+    assert md.id == fid
+    assert md.export_mime == _DOCX_MIME
+    assert md.name == "Report"
+
+
+def test_list_folder_drops_form_when_export_enabled(client_on_fake):
+    """A Form is unsupported-native: dropped whether or not export is on."""
+    cof = client_on_fake
+    fake = cof.fake
+    cof.client.export_opts = ExportOptions(True, False)
+    folder = fake.add_folder("/docs")
+    cof.client._path_cache.set("/docs", folder, ROOT_ID, "docs", True)
+    fake.add_native("Survey", "form", parent="/docs")
+    fake.add_file("/docs/a.txt", content=b"x")
+
+    paths = {e.path_display for e in cof.client.list_folder("/docs").entries}
+    assert "/docs/a.txt" in paths
+    assert not any("Survey" in p for p in paths)
+
+
+def test_list_folder_drops_exportable_when_disabled(client_on_fake):
+    """Export disabled -> native Docs are filtered out, byte-identical to
+    today's behavior."""
+    cof = client_on_fake
+    fake = cof.fake
+    folder = fake.add_folder("/docs")
+    cof.client._path_cache.set("/docs", folder, ROOT_ID, "docs", True)
+    fake.add_native("Report", "document", parent="/docs")
+    fake.add_file("/docs/a.txt", content=b"x")
+
+    paths = {e.path_display for e in cof.client.list_folder("/docs").entries}
+    assert "/docs/a.txt" in paths
+    assert not any("Report" in p for p in paths)
+
+
+def test_bootstrap_projects_exportable_and_keeps_shortcut(client_on_fake):
+    """Recursive bootstrap projects exportables (export on) while leaving the
+    shortcut->symlink flow untouched (shortcuts still cached/listed)."""
+    cof = client_on_fake
+    fake = cof.fake
+    cof.client.export_opts = ExportOptions(True, False)
+    target = fake.add_file("/target.txt", content=b"x")
+    fake._insert("Link", ROOT_ID, "application/vnd.google-apps.shortcut", b"")
+    fake.add_native("Report", "document", parent="/")
+
+    list(cof.client.list_folder_iterator("/", recursive=True))
+    cache = cof.client._path_cache
+    assert cache.path_to_id("/Report.docx") is not None
+    # Shortcut is still indexed by the bootstrap (symlink flow unaffected).
+    assert cache.path_to_id("/Link") is not None
+    assert target is not None
