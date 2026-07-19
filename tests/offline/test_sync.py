@@ -3653,3 +3653,86 @@ def test_download_only_edit_makes_conflict_copy(sync_engine: SyncEngine) -> None
     reexported = sync_engine.get_index_entry(remote_path.lower())
     assert reexported is not None and reexported.is_download_only is True
 
+
+# ==== Task 10 (export): config toggles wired into client.export_opts ========
+#
+# sync.export_google_docs / sync.export_google_docs_markdown (config/main.py,
+# default True/True) drive client.export_opts via ExportOptions.from_config.
+# reload_cached_config is the existing "config changed underneath us, refresh
+# cached values" hook (see test_excluded_items_cleaned_at_config_load above);
+# it now also refreshes client.export_opts and, on an off -> on transition,
+# reuses the sanctioned drop-and-rebuild mechanism (reset_sync_state, the
+# same one the Task 6 schema-drift guard relies on) to schedule a reindex so
+# previously-skipped native docs are picked up.
+
+
+def test_export_opts_enabled_by_default_from_config(sync_engine: SyncEngine) -> None:
+    """A freshly constructed SyncEngine wires client.export_opts from the
+    default config, which is on for both keys."""
+    assert sync_engine.client.export_opts.enabled is True
+    assert sync_engine.client.export_opts.markdown is True
+
+
+def test_reload_cached_config_picks_up_export_toggle(sync_engine: SyncEngine) -> None:
+    """Editing the config directly (bypassing any setter) and calling
+    reload_cached_config -- the established pattern for picking up an
+    external config change -- must update client.export_opts, mirroring how
+    excluded_items is re-read from a raw config edit."""
+    sync_engine._conf.set("sync", "export_google_docs", False)
+    sync_engine._conf.set("sync", "export_google_docs_markdown", False)
+    sync_engine.reload_cached_config()
+
+    assert sync_engine.client.export_opts.enabled is False
+    assert sync_engine.client.export_opts.markdown is False
+
+    sync_engine._conf.set("sync", "export_google_docs", True)
+    sync_engine.reload_cached_config()
+
+    assert sync_engine.client.export_opts.enabled is True
+
+
+def test_export_toggle_off_to_on_schedules_reindex(sync_engine: SyncEngine) -> None:
+    """Turning export on from off must schedule a full reindex (the same
+    drop-and-rebuild mechanism reset_sync_state / the schema-drift guard
+    use) so previously-skipped native docs are pulled in on the next sync
+    cycle, rather than being permanently stuck as "already seen"."""
+    # Start from export disabled, with some existing sync state/index data
+    # that a reindex must clear.
+    sync_engine._conf.set("sync", "export_google_docs", False)
+    sync_engine.reload_cached_config()
+    assert sync_engine.client.export_opts.enabled is False
+
+    _seed_index_entry(
+        sync_engine, "/Report", rev="0", content_hash="deadbeef", last_sync=1.0
+    )
+    sync_engine.remote_cursor = "SOME-CURSOR"
+    assert sync_engine.index_count() == 1
+
+    # Flip the toggle on.
+    sync_engine._conf.set("sync", "export_google_docs", True)
+    sync_engine.reload_cached_config()
+
+    assert sync_engine.client.export_opts.enabled is True
+    # reset_sync_state ran: index cleared and remote cursor reset, forcing a
+    # full reindex on the next sync cycle.
+    assert sync_engine.index_count() == 0
+    assert sync_engine.remote_cursor == ""
+
+
+def test_export_toggle_on_to_off_does_not_reindex(sync_engine: SyncEngine) -> None:
+    """Turning export off must not clear the index / reset the cursor --
+    only enabling export needs to pick up previously-skipped items."""
+    assert sync_engine.client.export_opts.enabled is True  # default: on
+
+    _seed_index_entry(
+        sync_engine, "/Report", rev="0", content_hash="deadbeef", last_sync=1.0
+    )
+    sync_engine.remote_cursor = "SOME-CURSOR"
+
+    sync_engine._conf.set("sync", "export_google_docs", False)
+    sync_engine.reload_cached_config()
+
+    assert sync_engine.client.export_opts.enabled is False
+    assert sync_engine.index_count() == 1
+    assert sync_engine.remote_cursor == "SOME-CURSOR"
+

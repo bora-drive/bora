@@ -919,6 +919,30 @@ def test_list_remote_changes_iterator_delegates(client, cache):
     assert cache.path_to_id("/a.pdf") == "F1"
 
 
+def test_list_remote_changes_iterator_threads_export_opts(client, cache):
+    """The change-cycle call site must thread client.export_opts through to
+    changes.iter_remote_changes: with export enabled, a change for an
+    exportable native Doc is kept and projected (``Report`` ->
+    ``Report.docx``) instead of being dropped as a native doc."""
+    client.export_opts = ExportOptions(True, False)
+    service = fake_service()
+    service.changes.return_value.list.return_value.execute.return_value = {
+        "newStartPageToken": "NEXT",
+        "changes": [
+            {"removed": False, "fileId": "F1",
+             "file": {"id": "F1", "name": "Report", "parents": ["ROOT"],
+                      "mimeType": "application/vnd.google-apps.document",
+                      "trashed": False, "version": 3}},
+        ],
+    }
+    client._get_service = Mock(return_value=service)
+
+    pages = list(client.list_remote_changes_iterator("CURSOR"))
+    paths = {e.path_display for e in pages[0].entries}
+    assert "/Report.docx" in paths
+    assert cache.path_to_id("/Report.docx") == "F1"
+
+
 def test_list_remote_changes_iterator_converts_http_error(client, make_http_error):
     service = fake_service()
     service.changes.return_value.list.return_value.execute.side_effect = (
