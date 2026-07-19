@@ -1,322 +1,143 @@
-# TODO: Maestral → Google Drive Fork
+# TODO: Bora (Maestral → Google Drive Fork)
 
-All known tasks, roughly in dependency order. Check off as completed.
-
----
-
-## Phase 1: Project Setup & Renaming
-
-- [x] Fork the repo and create a new branch
-- [x] Choose a project name: keeping "maestral" with Google Drive backend
-- [x] Update `pyproject.toml`:
-  - [x] Change project name and description
-  - [x] Remove `dropbox` dependency
-  - [x] Add `google-api-python-client`, `google-auth`, `google-auth-oauthlib`, `google-auth-httplib2`
-  - [x] Update classifiers and URLs
-- [x] Update `README.md` with new project description
-- [x] Update `constants.py` — branding strings
-- [x] Update `config/main.py` — default config values and section names
-- [x] Rename `DropboxAuthError` → `AuthError` in `exceptions.py`
-- [x] Rename `DropboxConnectionError` → `ConnectionError` in `exceptions.py`
-- [x] Rename `DropboxServerError` → `ServerError` in `exceptions.py`
-- [x] Rename `NoDropboxDirError` → `NoSyncDirError` in `exceptions.py`
-- [x] Update all imports of renamed exceptions across the codebase
-- [x] Rename `dropbox_path` → `sync_path` in `sync.py`, `main.py`, `manager.py`
-- [x] Rename `dbx_path` → `remote_path` in `models.py` (fields: `dbx_path`, `dbx_path_lower`, `dbx_path_from`, `dbx_path_from_lower`)
-- [x] Rename `dbx_id` → `remote_id` in `models.py`
-- [x] Propagate field renames through `sync.py` (~365 references)
-- [x] Propagate field renames through `main.py` (~213 references)
-- [x] Propagate field renames through `manager.py` (~46 references)
-- [x] Propagate field renames through `cli/*.py`
-- [x] Update `autostart.py` — service/application names
-- [x] Update `keyring.py` — keyring service name
-- [x] Update `notify.py` — notification text
-- [x] Rename project from "maestral" to "cumulus" throughout (package name, imports, CLI entry point, config names, constants, docs, tests)
-
-> **Note:** Phase 1 naming cleanup covers `models.py`, `exceptions.py`, config, and
-> branding. Residual Dropbox naming in `sync.py` (~230 `dbx_path`/`dbx_id` refs),
-> `utils/hashing.py` (`DropboxContentHasher`), and `DropboxClient` type annotations
-> will be cleaned up in their respective later phases (7, 8, etc.).
-
-## Phase 2: Google Cloud Project
-
-- [ ] Create a Google Cloud project
-- [ ] Enable the Google Drive API
-- [ ] Configure the OAuth consent screen
-  - [ ] Add `https://www.googleapis.com/auth/drive` scope
-  - [ ] Set application name and branding
-- [ ] Create OAuth 2.0 Client ID (Desktop application type)
-- [ ] Download `client_secret.json`
-- [ ] Commit `client_secret.json` to `src/cumulus/resources/` (Desktop app type — secret is considered public by Google for installed apps)
-- [ ] Document the Google Cloud setup for contributors
-
-## Phase 3: Authentication
-
-- [ ] Implement OAuth2 flow in new `client.py` using `google-auth-oauthlib`
-  - [ ] `get_auth_url()` — generate authorization URL
-  - [ ] `link(code)` — exchange auth code for tokens
-  - [ ] `unlink()` — revoke token and clear credentials
-- [ ] Store refresh token in keyring (adapt existing `keyring.py` storage)
-- [ ] Implement token refresh logic (auto-refresh on 401)
-- [ ] Implement `linked` property (check for valid stored credentials)
-- [ ] Test auth flow end-to-end
-
-## Phase 4: Path↔ID Cache (NEW MODULE)
-
-- [ ] Create `path_cache.py` module
-- [ ] Design SQLite schema for path↔ID mapping:
-  - [ ] `file_id` (primary key)
-  - [ ] `remote_path` (indexed)
-  - [ ] `remote_path_lower` (indexed)
-  - [ ] `parent_id`
-  - [ ] `name`
-  - [ ] `is_folder`
-- [ ] Implement `path_to_id(remote_path) -> str | None`
-- [ ] Implement `id_to_path(file_id) -> str | None`
-- [ ] Implement `resolve_path(file_id) -> str` (walk parent chain)
-- [ ] Implement `set(remote_path, file_id, parent_id, name, is_folder)`
-- [ ] Implement `remove(remote_path)` with cascade for children
-- [ ] Implement `move(old_path, new_path)` with child path updates
-- [ ] Implement `populate_from_listing(items)` for initial full sync
-- [ ] Handle duplicate name detection and resolution
-- [ ] Handle files with multiple parents (pick canonical)
-- [ ] Write unit tests for path cache (red/green TDD — tests written before or alongside implementation)
-
-## Phase 5: Google Drive Client (CORE REWRITE)
-
-### 5a: Client scaffolding
-
-- [ ] Create new `client.py` with `GoogleDriveClient` class
-- [ ] Initialize `googleapiclient.discovery.build('drive', 'v3', ...)` service
-- [ ] Wire up `PathIDCache` instance
-- [ ] Implement retry/backoff decorator (adapt existing `_retry_on_error`)
-- [ ] Implement bandwidth throttling (adapt existing upload/download throttle)
-- [ ] Implement `close()` / context manager
-
-### 5b: Account operations
-
-- [ ] `get_account_info()` → call `about.get(fields='user,storageQuota')`
-- [ ] Convert Google `User` response to `core.FullAccount`
-- [ ] `get_space_usage()` → extract from `about.get` `storageQuota`
-- [ ] Convert to `core.PersonalSpaceUsage`
-- [ ] Implement `account_info` property (cached)
-
-### 5c: Metadata operations
-
-- [ ] `get_metadata(remote_path)` → resolve path to ID via cache, call `files.get`
-- [ ] Convert Google `File` resource to `core.FileMetadata` or `core.FolderMetadata`
-- [ ] Handle `include_deleted` parameter (check `trashed` field)
-- [ ] Handle `DeletedMetadata` for trashed files
-- [ ] `list_revisions(remote_path)` → `revisions.list`
-- [ ] `restore(remote_path, rev)` → copy old revision as current (Drive doesn't have direct restore)
-
-### 5d: Download
-
-- [ ] `download(remote_path, dst_path)` → resolve ID, use `MediaIoBaseDownload`
-- [ ] Stream to temp file, verify MD5 checksum, then move to destination
-- [ ] Handle bandwidth throttling during download (sleep between `MediaIoBaseDownload.next_chunk()` calls to enforce `bandwidth_limit_down` bytes/sec)
-- [ ] Handle Google Docs/Sheets/Slides (skip or export)
-- [ ] Return `FileMetadata` with correct fields
-
-### 5e: Upload
-
-- [ ] `upload(remote_path, data/path, write_mode)` → resolve parent ID
-- [ ] Simple upload for small files (≤5MB)
-- [ ] Resumable upload for large files (>5MB) via `MediaFileUpload(resumable=True)`
-- [ ] Handle `WriteMode.Add` → `files.create`
-- [ ] Handle `WriteMode.Update` → `files.update` with `fileId`
-- [ ] Handle `WriteMode.Overwrite` → `files.update` without revision check
-- [ ] Verify content hash (MD5) after upload
-- [ ] Update path cache after successful upload
-- [ ] Handle bandwidth throttling during upload (sleep between `MediaFileUpload.next_chunk()` calls to enforce `bandwidth_limit_up` bytes/sec)
-
-### 5f: File/folder operations
-
-- [ ] `remove(remote_path)` → resolve ID, call `files.delete` or `files.update(trashed=True)`
-- [ ] `move(from_path, to_path)` → resolve IDs, call `files.update` with new `name` and/or `parents`
-- [ ] `make_dir(remote_path)` → resolve parent ID, call `files.create` with `mimeType=folder`
-- [ ] `make_dir_batch(paths)` → batch API call or sequential
-- [ ] `remove_batch(paths)` → batch API call or sequential
-- [ ] Handle `autorename` parameter (check for conflicts, append suffix)
-- [ ] Update path cache after each mutation
-
-### 5g: Change detection (sync feed)
-
-- [ ] `get_latest_cursor(path)` → call `changes.getStartPageToken`
-- [ ] `list_folder(path, recursive)` → call `files.list` with `q` parameter for folder contents
-- [ ] `list_folder_iterator(path, recursive)` → paginated `files.list` yielding `ListFolderResult`
-- [ ] Convert Google `File` resources to `core.Metadata` subclasses in results
-- [ ] Populate path cache from listing results
-- [ ] `wait_for_remote_changes(cursor, timeout)` → **poll** `changes.list` with `pageToken`, sleep loop
-- [ ] `list_remote_changes(cursor)` → call `changes.list`, translate file IDs to paths via cache
-- [ ] `list_remote_changes_iterator(cursor)` → paginated version, yield `ListFolderResult` pages
-- [ ] Handle `removed` flag in change entries (file deleted/moved out of scope)
-- [ ] Handle changes to files outside sync scope (filter by root folder)
-
-### 5h: Sharing
-
-- [ ] `share_dir(remote_path)` → create permission (role=writer, type=anyone) on folder
-- [ ] `create_shared_link(remote_path, ...)` → create viewer permission + return `webViewLink`
-- [ ] `revoke_shared_link(url)` → remove permission
-- [ ] `list_shared_links(remote_path)` → list permissions, build `SharedLinkMetadata`
-- [ ] Convert Google permission/link data to `core.SharedLinkMetadata`
-- [ ] Implement `is_team_space` property (Shared Drives — False for MVP)
-
-## Phase 6: Error Handling (REWRITE)
-
-- [ ] Rewrite `errorhandling.py` for Google API errors
-- [ ] Map `googleapiclient.errors.HttpError` status codes:
-  - [ ] 400 → `BadInputError`
-  - [ ] 401 → `AuthError` (token expired)
-  - [ ] 403 (reason: `userRateLimitExceeded`) → rate limit retry
-  - [ ] 403 (reason: `insufficientPermissions`) → `InsufficientPermissionsError`
-  - [ ] 403 (reason: `storageQuotaExceeded`) → `InsufficientSpaceError`
-  - [ ] 404 → `NotFoundError`
-  - [ ] 409 → `ConflictError`
-  - [ ] 429 → rate limit retry with backoff
-  - [ ] 500, 502, 503 → `ServerError`
-- [ ] Map `google.auth.exceptions.RefreshError` → `AuthError`
-- [ ] Map network/connection errors → `ConnectionError`
-- [ ] Keep `convert_api_errors` context manager pattern
-- [ ] Keep `os_to_maestral_error` (OS errors are backend-agnostic)
-
-## Phase 7: Content Hashing
-
-- [ ] Replace `DropboxContentHasher` with `ContentHasher` using `hashlib.md5`
-- [ ] Simplify implementation (no block-based hashing needed for MD5)
-- [ ] Update `StreamHasher` to work with new hasher (likely no changes needed)
-- [ ] Update `get_hash()` function in `client.py`
-- [ ] Update all references from `DropboxContentHasher` to `ContentHasher`
-- [ ] Update `content_hash` comparison logic in `sync.py` (compare MD5 strings)
-- [ ] Verify Google Drive's `md5Checksum` field matches locally computed MD5
-- [ ] Handle files without `md5Checksum` (Google Docs/Sheets/Slides have none)
-
-## Phase 8: Sync Engine Adaptations
-
-- [ ] Update `SyncEngine.__init__` to accept `GoogleDriveClient` instead of `DropboxClient`
-- [ ] Update `wait_for_remote_changes` to work with polling (no long-poll)
-- [ ] Update `download_sync_cycle` for Google Drive change feed format
-- [ ] Update `list_remote_changes_iterator` call site for new response format
-- [ ] Update `_clean_remote_changes` for Google Drive change semantics
-- [ ] Update `_on_remote_file` — verify MD5 instead of Dropbox content hash
-- [ ] Replace `f"rev:{event.rev}"` download call (~line 3542) with `event.change_remote_id` (file-ID-based download)
-- [ ] Update `upload_local_changes_while_inactive` — hash comparison logic
-- [ ] Handle Google Docs/Sheets/Slides in remote changes (skip or export)
-- [ ] Handle Google Drive's "file removed from folder" vs "file trashed" distinction
-- [ ] Update `reset_sync_state` for new cursor format
-- [ ] Selective sync: when a folder rename arrives via change feed, check if old path is in the exclusion list and update it to the new path
-- [ ] Selective sync: test that excluded folders remain excluded after rename (online and offline scenarios)
-- [ ] Verify case-sensitivity handling (Google Drive is case-insensitive in search, case-preserving in names)
-- [ ] Skip symlinks during local-to-remote upload; log a warning instead of syncing
-- [ ] Remove symlink recreation code path in `_apply_remote_file_change` (~line 3526); Google Drive never provides `symlink_target`
-- [ ] Keep `symlink_target` field in `IndexEntry` schema (always `None`)
-
-## Phase 9: CLI Updates
-
-- [ ] Update `cli/cli_main.py` — help text and branding
-- [ ] Update `cli/cli_core.py` — `ls`, `mkdir`, `mv`, etc. with new path terminology
-- [ ] Update `cli/cli_info.py` — account info display
-- [ ] Update `cli/cli_maintenance.py` — rebuild index, etc.
-- [ ] Update `cli/cli_settings.py` — configuration options
-- [ ] Update `cli/dialogs.py` — setup prompts and link flow
-- [ ] Update `cli/common.py` — shared CLI utilities
-- [ ] Update `cli/core.py` — CLI command definitions
-- [ ] Test all CLI commands end-to-end
-
-## Phase 10: Manager Updates
-
-- [ ] Update `SyncManager` for new client type
-- [ ] Update `_startup` to handle Google Drive-specific folder setup
-- [ ] Update `_check_and_update_path_root` for Shared Drives (or remove for MVP)
-- [x] Update `_connection_helper` to check Google Drive connectivity (done: pings `https://www.googleapis.com` via `GOOGLE_API_HOSTNAME`)
-- [ ] Update `_download_worker` loop for polling-based change detection
-- [ ] Remove Dropbox Team Space migration logic (or adapt for Shared Drives)
-- [ ] Update `ensure_dropbox_folder_present` → `ensure_drive_folder_present`
-
-## Phase 11: Database Migration
-
-- [ ] Add path cache table to SQLite schema
-- [ ] Update `IndexEntry` model for renamed fields
-- [ ] Update `SyncEvent` model for renamed fields
-- [ ] Update `SyncErrorEntry` model for renamed fields
-- [ ] Fresh database on first run — no migration from Dropbox schema (Dropbox content hashes, revision strings, and file IDs are not transferable)
-- [ ] Update `HashCacheEntry` to store MD5 instead of Dropbox hash
-
-## Phase 12: Testing
-
-> **Approach:** Red/green TDD for all new code. Use `google-api-python-client`'s
-> built-in `HttpMock` for mocking Google API responses (canned HTTP replay).
-> A dedicated test Google account will be set up for integration tests.
-
-### Unit tests (offline)
-
-- [ ] Port `tests/offline/test_client.py` for `GoogleDriveClient` (mock Google API)
-- [ ] Port `tests/offline/test_sync.py` for renamed fields
-- [ ] Port `tests/offline/test_event_handler.py`
-- [ ] Port `tests/offline/test_clean_local_events.py`
-- [ ] Port `tests/offline/test_errorhandling.py` for new error mappings
-- [ ] Port `tests/offline/test_main.py`
-- [ ] Port `tests/offline/test_manager.py`
-- [ ] Port `tests/offline/test_keyring.py`
-- [ ] Port `tests/offline/test_cli.py`
-- [ ] Port `tests/offline/test_daemon.py`
-- [ ] Port `tests/offline/config/` tests
-- [ ] Port `tests/offline/utils/` tests
-- [ ] Write new tests for `PathIDCache`
-- [ ] Write new tests for Google Drive error mapping
-
-### Integration tests (linked)
-
-- [ ] Set up dedicated test Google account with Drive API access
-- [ ] Document test account setup in `tests/README.md` (credentials, project config)
-- [ ] Port `tests/linked/unit/test_client.py`
-- [ ] Port `tests/linked/integration/test_sync.py`
-- [ ] Port `tests/linked/integration/test_main.py`
-- [ ] Test initial full sync (empty remote → local)
-- [ ] Test initial full sync (populated remote → local)
-- [ ] Test upload of new file
-- [ ] Test upload of modified file
-- [ ] Test upload of deleted file
-- [ ] Test download of new file
-- [ ] Test download of modified file
-- [ ] Test download of deleted file
-- [ ] Test conflict resolution (local and remote change same file)
-- [ ] Test move/rename operations
-- [ ] Test large file upload (resumable)
-- [ ] Test selective sync (exclude/include folders)
-- [ ] Test special characters in filenames
-- [ ] Test rate limit handling
-- [ ] Test token refresh
-- [ ] Test network disconnection and reconnection
-
-## Phase 13: Documentation
-
-- [ ] Update `docs/` Sphinx configuration for new project name
-- [ ] Update all docstrings referencing Dropbox
-- [ ] Write setup guide (Google Cloud project creation, OAuth setup)
-- [ ] Write user guide (linking account, choosing sync folder)
-- [ ] Document differences from Dropbox behavior
-- [ ] Document known limitations (Google Docs, multiple parents, etc.)
-
-## Phase 14: Packaging & Distribution
-
-- [ ] Update `pyproject.toml` scripts entry point
-- [ ] Update systemd service template (if applicable)
-- [ ] Update desktop entry / icons
-- [ ] Test `pip install` from source
-- [ ] Test on macOS
-- [ ] Test on Linux
-- [ ] Publish to PyPI (if public)
-- [ ] Submit Google OAuth app for verification (if public)
+Status as of 2026-07-19, verified against the codebase. The original phase plan
+(Maestral → Google Drive port) is complete except for the items under
+**Remaining work** below. The project name ended up as **bora** (not "cumulus";
+that name survives only as the Google Cloud project id `cumulus-496101` in
+`client_secret.json`).
 
 ---
 
-## Known Limitations / Out of Scope for MVP
+## Completed
 
-- [ ] Shared Drives (team spaces) — support "My Drive" only initially
-- [ ] Google Docs/Sheets/Slides export — skip native Google files initially
-- [ ] Webhook-based change notifications — use polling initially
-- [ ] Batch API calls — use sequential calls initially, optimize later
-- [ ] Files with multiple parents — pick first parent, log warning
-- [ ] GUI packages (`maestral-qt`, `maestral-cocoa`) — update separately
-- [ ] Symlinks — skip with warning; Google Drive has no symlink concept
+- [x] **Phase 1 — Setup & renaming.** Package renamed to `bora`, all
+  `dbx_*`/Dropbox naming removed from `src/` (zero `dbx_` occurrences; the only
+  remaining "dropbox"/"maestral" strings are explanatory comments and the
+  `.dropbox` ignore-list entries in `constants.py`).
+- [x] **Phase 2 — Google Cloud project.** Desktop-app OAuth client committed at
+  `src/bora/resources/client_secret.json`; contributor setup documented in
+  `docs/setup.md`. Consent screen is still in Testing mode (see release
+  checklist).
+- [x] **Phase 3 — Authentication.** OAuth flow (`get_auth_url`/`link`/`unlink`)
+  via `google-auth-oauthlib`; refresh token in keyring; auto-refresh via
+  `PersistingCredentials`; `linked` property. Covered by
+  `tests/offline/test_oauth.py` and `test_client_auth.py`.
+- [x] **Phase 4 — Path↔ID cache.** `path_cache.py` with SQLite-backed
+  `PathCacheEntry`, path/id lookups, cascade remove, subtree move,
+  `populate_from_listing`, duplicate-name resolution. ~40 unit tests.
+- [x] **Phase 5 — Google Drive client** (except sharing and upload throttling,
+  see below). `GoogleDriveClient` with retry/backoff, account ops, metadata,
+  revisions/restore, MD5-verified download with throttling, simple + resumable
+  upload with MD5 verify, file ops with autorename and batch variants, cursor
+  and change-feed (polling), cache write-through.
+- [x] **Phase 6 — Error handling** (except 409 mapping, see below). HttpError
+  status/reason mapping, `RefreshError`→`AuthError`, network→`ConnectionError`,
+  `convert_api_errors` kept, `os_to_bora_error`.
+- [x] **Phase 7 — Content hashing.** `ContentHasher` (MD5) replaces
+  `DropboxContentHasher`; post-download/upload verification against Drive's
+  `md5Checksum`; hashless native-doc files handled.
+- [x] **Phase 8 — Sync engine** (except selective-sync rename, see below).
+  Polling change detection, id-keyed change feed, MD5 comparisons,
+  download-by-file-id, removed-vs-trashed distinction, Drive cursor format,
+  case-sensitivity handling.
+- [x] **Phase 9 — CLI.** All `cli/` modules rebranded and ported; end-to-end
+  command coverage in `tests/offline/test_cli.py`.
+- [x] **Phase 10 — Manager.** New client type, polling download worker,
+  Team-Space migration removed, `ensure_sync_folder_present`.
+- [x] **Phase 11 — Database.** Path cache table; `remote_path`/`remote_id`
+  fields throughout; fresh DB on first run (no migrations); MD5 in
+  `HashCacheEntry`.
+- [x] **Phase 12 — Testing.** All offline suites ported to the Drive backend
+  with a stateful `FakeDrive`; linked unit + integration suites run against a
+  real test account (`tests/README.md`); fault-injection suites for rate
+  limits, auth, cursor, feed, downloads, writes.
+- [x] **Phase 13 — Documentation** (with staleness fixes pending, see below).
+  Sphinx config, `docs/setup.md`, `docs/differences.md`.
+- [x] **Phase 14 — Packaging** (partial). `bora` entry point, desktop entry,
+  icons, clean-venv `pip install .` verified.
+
+### Beyond the original plan
+
+- [x] **Shared with me** — virtual `/Shared with me` root, `read_only` index
+  column, upload gating, view-only files read-only on disk.
+- [x] **Symlinks ↔ Drive shortcuts** — bidirectional mapping (local symlinks
+  create/retarget Drive shortcuts; remote shortcuts materialize as platform
+  symlinks / `.lnk`). Supersedes the old "skip symlinks with warning" plan;
+  those TODO items are obsolete and removed.
+- [x] **Batch API calls** — `remove_batch`/`make_dir_batch` use real batch HTTP
+  requests (originally deferred as out of scope).
+
+---
+
+## Remaining work
+
+### Code
+
+- [ ] **Enforce upload bandwidth throttling.** `bandwidth_limit_up` is stored
+  and config-plumbed (`client.py`, `main.py`) but never applied — no throttle
+  call in any `writes.py` upload path. Mirror `_throttle_down`
+  (`client.py:795`) between resumable-upload chunks.
+- [ ] **Sharing (Phase 5h).** `share_dir` is a `NotImplementedError` stub
+  (`client.py:909`); `create_shared_link`, `revoke_shared_link`, and
+  `list_shared_links` do not exist; nothing produces `SharedLinkMetadata`
+  (`core.py:227`). Implement via Drive permissions + `webViewLink`, or
+  explicitly descope and remove the stub.
+- [ ] **Map HTTP 409 → `ConflictError`.** `http_error_to_bora` has no 409
+  branch; conflicts fall through to generic `BoraApiError`
+  (`errorhandling.py:197`).
+- [ ] **Remove or implement `google_api_to_bora_error`.** Residual stub raising
+  `NotImplementedError` (`errorhandling.py:333`); the real path goes through
+  `http_error_to_bora`/`convert_api_errors`.
+- [ ] **Selective sync: update exclusion list on remote folder rename.** A
+  rename arriving via the change feed does not rewrite the old path in
+  `excluded_items`, so a renamed excluded folder silently starts syncing.
+  Only deletion-pruning exists (`sync.py:3393`); excluded folders are not
+  indexed, so `_apply_remote_move` cannot catch them.
+- [ ] **Test selective-sync exclusion across renames** (online and offline
+  scenarios) once the above is implemented.
+- [ ] **Log a warning when a file has multiple parents.** The cache
+  canonicalizes to `parents[0]` (`path_cache.py:393`) but the planned warning
+  was never added.
+
+### Tests
+
+- [ ] **Real resumable-upload linked test.** The fixture (`large-file.pdf`,
+  ~1.8 MB) is below the 5 MB resumable threshold, so the resumable branch is
+  never exercised against real Drive. Add a >5 MB fixture (or generate one in
+  the test).
+- [ ] **Linked tests for rate limiting, token refresh, and network
+  disconnect/reconnect.** Currently covered only by offline fault injection.
+
+### Docs
+
+- [ ] **Fix stale symlink section in `docs/differences.md`** (~line 99): it
+  says symlinks are not synced, but they now map to Drive shortcuts
+  bidirectionally.
+- [ ] **User guide.** `docs/setup.md` covers linking; `docs/index.rst` defers
+  the user manual to a placeholder external site. Write a real guide (choosing
+  the sync folder, selective sync, CLI tour).
+- [ ] **Update `docs/conf.py` leftovers** — author still "Sam Schott",
+  version 1.9.6.
+
+### Packaging & release (tracked in `docs/release-checklist.md`)
+
+- [ ] systemd service template (none exists; desktop entry and icons are done)
+- [ ] Windows smoke test
+- [ ] Real-account end-to-end smoke test
+- [ ] Google OAuth app verification (consent screen still in Testing mode —
+  refresh tokens expire after 7 days)
+- [ ] Publish to PyPI (optional)
+- [ ] Create a Homebrew formula, modeled on the formula for `maestral`
+
+---
+
+## Known limitations / deferred
+
+- **Shared Drives (Team Drives)** — My Drive only; `is_team_space` hardcoded
+  `False`; no `driveId`/`supportsAllDrives` usage.
+- **Google Docs/Sheets/Slides export** — native docs are detected and skipped
+  (`native_docs.py`); export as one-way read-only mirrors is spec'd
+  (`docs/` design docs, commits `dc7588a`, `54292db`) but not implemented.
+- **Webhook change notifications** — polling only (~180 s), by design.
+- **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
+  desktop entry references `bora gui` but there is no GUI.

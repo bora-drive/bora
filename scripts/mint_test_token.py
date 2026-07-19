@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mint a Google Drive refresh token for the cumulus linked-test account.
+"""Mint a Google Drive refresh token for the bora linked-test account.
 
 Headless-friendly paste flow (Shape C): prints an authorization URL, you
 approve it in a browser signed into the DEDICATED TEST ACCOUNT, then paste
@@ -10,11 +10,11 @@ account.
 
 Run from the repo root:
 
-    python /tmp/mint_test_token.py
+    python scripts/mint_test_token.py
 
 Then:
 
-    export CUMULUS_TEST_REFRESH_TOKEN='<the printed value>'
+    export BORA_TEST_REFRESH_TOKEN='<the printed value>'
     python -m pytest tests/linked -q
 
 The token expires after ~7 days (the OAuth client is in Testing mode) — re-run
@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, urlparse
 # explicitly allow insecure (http) transport. Same flag the daemon sets.
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
-from cumulus import oauth  # noqa: E402
+from bora import oauth  # noqa: E402
 
 
 def parse_code(value: str) -> str:
@@ -96,7 +96,7 @@ def main() -> int:
         print("\n!! WARNING: this is the SMOKE account, not a dedicated test")
         print("   account. Do NOT use this token for the linked test suite.")
     print("\nRefresh token (export this):\n")
-    print(f"  export CUMULUS_TEST_REFRESH_TOKEN='{refresh_token}'")
+    print(f"  export BORA_TEST_REFRESH_TOKEN='{refresh_token}'")
     print("=" * 70 + "\n")
     return 0
 
