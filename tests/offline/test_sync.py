@@ -414,6 +414,33 @@ def test_conflict_both_changed_is_conflict(sync_engine: SyncEngine):
     assert sync_engine._check_download_conflict(event) is Conflict.Conflict
 
 
+def test_conflict_first_download_with_no_remote_hash_is_not_identical(
+    sync_engine: SyncEngine,
+):
+    """A brand-new exportable native doc (Google Doc/Sheet/Slide) has no
+    server-side content_hash -- Drive provides no MD5 for exports -- and, on
+    its very first download, no local file exists yet either. Both being
+    None must NOT be read as "content hashes match, so items are identical":
+    that misclassification would skip the download outright and the file
+    would never be created.
+
+    No index entry is seeded, so ``local_rev`` is None and the top ``event.rev
+    == local_rev`` branch does not short-circuit (event.rev is a real Drive
+    version string, not None) -- this exercises the hash-comparison branch
+    directly. Regression test for a bug found while implementing Task 7
+    (read-only export mirrors)."""
+    remote_path = "/new_doc.docx"
+    event = _download_event(
+        sync_engine,
+        remote_path,
+        rev="VERSION-1",
+        content_hash=None,
+        change_type=ChangeType.Added,
+    )
+
+    assert sync_engine._check_download_conflict(event) is not Conflict.Identical
+
+
 def test_requires_upload_skips_when_remote_hash_matches(
     sync_engine: SyncEngine, monkeypatch
 ):

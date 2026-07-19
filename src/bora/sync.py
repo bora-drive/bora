@@ -3630,11 +3630,19 @@ class SyncEngine:
             return Conflict.LocalNewerOrIdentical
 
         elif (
-            event.content_hash == self.get_local_hash(event.local_path)
+            (event.content_hash is not None or event.is_deleted)
+            and event.content_hash == self.get_local_hash(event.local_path)
             and event.symlink_target == local_symlink_target
         ):
             # Content hashes are equal, therefore items are identical. Folders will
-            # have a content hash of 'folder'.
+            # have a content hash of 'folder'. A None content_hash is only
+            # meaningful here for deletions (nothing local matches nothing
+            # remote); for an exportable native doc's pre-download event,
+            # None means "Drive has no server hash for exports" (see
+            # to_file_metadata), not "no content". Without this guard, a
+            # None-vs-None match against a not-yet-downloaded local path
+            # (also None) misreads the very first download of a native doc
+            # as Identical and skips it outright.
             if event.content_hash == "folder" and local_rev is None and event.remote_id:
                 # An untracked local folder occupies this path. A folder's
                 # content hash is the constant sentinel "folder", so "equal
