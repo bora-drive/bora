@@ -263,8 +263,7 @@ def ls(m: Bora, long: bool, sync_path: str, include_deleted: bool) -> None:
         console.print(table)
 
     elif not sys.stdout.isatty():
-        names = [entry.name for entries in entries_iter for entry in entries]
-        console.print("\n".join(names))
+        console.print("\n".join(entry.name for entry in entries))
 
     else:
         fields: list[Text] = []
