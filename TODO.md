@@ -235,8 +235,17 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   re-export of an already-unchanged mirror is still not automatic (an
   unchanged Doc produces no change entry), so the mirror converts on the
   Doc's next real edit, or immediately via `bora rebuild-index` — the CLI
-  now prints a hint to that effect. Live spot-check (plan Task 13) is still
-  pending before release.
+  now prints a hint to that effect. Live spot-check (plan Task 13) — DONE
+  2026-07-20 against `bora-test@arko.net`, `smoke-test` config: with the
+  daemon running, `task13-doc.md` appeared after an API media-import
+  create; `bora export markdown off -c smoke-test` was run with NO daemon
+  restart, then a remote media-import edit converted the mirror
+  `task13-doc.md` → `task13-doc.docx` (valid docx, read-only, no
+  conflicted copy) within ~3 minutes (one poll interval) — proving the
+  reload reaches the running engine, exactly the behaviour that needed a
+  restart pre-fix. Flipping markdown back on plus one more remote edit
+  symmetrically converted it back to `.md`, confirming the reload works in
+  both directions.
 - [x] FIXED (f15d19c, with tests): a server-side re-export of an exported
   mirror used to spawn a spurious writable conflicted copy of the prior mirror
   (exports have no server hash, so `_check_download_conflict` fell through to
@@ -258,8 +267,40 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   change makes the recovery explicit and independent of hash-cache/index
   incidentals, rather than "fixing" a break that fully existed. The residual,
   still-unverified risk is byte-UNSTABLE re-exports (`.xlsx`/`.pptx` are zip
-  containers that may embed timestamps) — that is exactly what the live
-  spot-check (plan Task 13) is meant to measure, and it has not run yet.
+  containers that may embed timestamps) — live spot-check (plan Task 13) —
+  DONE 2026-07-20, and this residual risk is CONFIRMED REAL, split by mirror
+  type:
+  - **`.md` (byte-stable): clean.** With a `task13-doc.md` mirror on disk,
+    `bora stop -c smoke-test && bora rebuild-index -c smoke-test` (no remote
+    edit in between) reproduced byte-identical export bytes (md5 unchanged
+    across the rebuild); `_adopt_untouched_mirror` adopted it silently — no
+    conflicted copy, nothing re-uploaded, mirror stayed read-only.
+  - **`.xlsx` (byte-UNSTABLE): FINDING, reproduced live.** The same rebuild
+    on an untouched `task13-sheet.xlsx` mirror produced a **different** md5
+    than the pre-rebuild export, so `_adopt_untouched_mirror`'s byte compare
+    correctly did NOT match (it isn't wrong — the bytes genuinely differ) and
+    the rebuild fell through to `Conflict.Conflict`: a writable
+    `task13-sheet (Bora Test's conflicted copy 2026-07-20).xlsx` was created
+    locally, **and then uploaded to Drive** (confirmed via a remote
+    `files.list` — the conflicted-copy binary showed up server-side with its
+    own `fileId`/`version`). Diffing the two xlsx zips: every inner XML
+    member is byte-identical (same CRC-32 for every entry — content,
+    styles, shared strings, etc. all match); only the per-entry zip
+    timestamps differ by one minute (`04:26` vs `04:27`), matching the export
+    calls a minute apart. So the instability is exactly what Task 2's review
+    flagged: Drive's xlsx exporter stamps the zip container with the export
+    time even when spreadsheet content is unchanged, which defeats any
+    byte/hash-based "untouched mirror" check — old and new alike — because
+    neither has access to anything but raw bytes. Net effect for a user: a
+    `bora rebuild-index` on a sync folder with unedited Sheet/Slides mirrors
+    will spawn conflicted copies and re-upload them, one pair per untouched
+    `.xlsx`/`.pptx` mirror, even though nothing actually changed. **Not a
+    regression from 255bf37** (the pre-fix code would conflict here too) and
+    not data loss, but real litter + wasted upload quota; worth a follow-up
+    fix (e.g. compare a canonicalized/re-zipped form, or ignore zip entry
+    timestamps, before falling back to a full byte compare) before framing
+    `bora rebuild-index` as safe to run routinely on export-heavy sync
+    folders.
 - [x] RESOLVED: `Manager.did_drop_table` for the path cache now has a reader.
   Verified the path cache has no lazy repopulation on a lookup miss (Drive's
   API is ID-based — no path-lookup endpoint to fall back to — so a miss
@@ -279,10 +320,14 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   `False`; no `driveId`/`supportsAllDrives` usage.
 - **Google Docs/Sheets/Slides export** — LANDED and live-verified (see
   "Google Docs Export" above); Forms/Sites/Drawings remain skipped. The
-  export-toggle-flip gap and the rebuild-with-mirrors limitation are both
-  resolved in code (c036c17, 255bf37); a live spot-check of the fixes,
-  including byte-unstable `.xlsx`/`.pptx` re-exports, is still pending
-  (plan Task 13).
+  export-toggle-flip gap (c036c17) and the rebuild-with-mirrors limitation
+  (255bf37) are both resolved in code and live spot-checked (plan Task 13,
+  DONE 2026-07-20): the toggle-reload fix holds live and the byte-stable
+  `.md` rebuild case is clean, but the live check also confirmed a real,
+  unresolved gap for byte-UNSTABLE exports — `bora rebuild-index` spawns and
+  **uploads** a conflicted copy for every untouched `.xlsx`/`.pptx` mirror,
+  because Drive's zip-based exports embed the export timestamp even when
+  content is unchanged, defeating any byte-compare adoption check.
 - **Webhook change notifications** — polling only (~180 s), by design.
 - **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
   desktop entry references `bora gui` but there is no GUI.
