@@ -1,0 +1,43 @@
+# systemd user service template for the Bora sync daemon.
+#
+# This is a template unit: the instance name after "@" selects the Bora
+# configuration to run (passed to `bora start --config-name`). The default
+# configuration is named "bora", so a typical setup is:
+#
+#   1. Copy this file to ~/.config/systemd/user/ (per-user install) or let
+#      your distribution package install it to /usr/lib/systemd/user/.
+#   2. systemctl --user daemon-reload
+#   3. systemctl --user enable --now bora-daemon@bora.service
+#
+# If bora is not installed at /usr/bin/bora (e.g. pip install --user or a
+# virtualenv), override ExecStart/ExecStop with the absolute path to the
+# entry point: systemctl --user edit bora-daemon@bora.service
+#
+# Note: `bora autostart -Y` writes an equivalent generated unit to
+# ~/.local/share/systemd/user/bora-daemon@.service (see src/bora/autostart.py);
+# this file is the static packaged variant of that unit and uses the same
+# name so `systemctl --user enable bora-daemon@<config>.service` resolves to
+# whichever copy is installed.
+#
+# The daemon implements the sd_notify protocol (src/bora/daemon.py): it sends
+# READY=1 on startup, periodic WATCHDOG=1 keep-alives when WATCHDOG_USEC is
+# set, and STOPPING=1 on shutdown, so Type=notify and WatchdogSec are fully
+# supported.
+
+[Unit]
+Description=Bora daemon for the config %i
+Documentation=https://bora.tools
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/bora start --foreground --config-name=%i
+ExecStop=/usr/bin/bora stop --config-name=%i
+ExecStopPost=/usr/bin/env bash -c "if [ ${SERVICE_RESULT} != success ]; then notify-send Bora 'Daemon failed: ${SERVICE_RESULT}'; fi"
+WatchdogSec=30s
+Environment=PYTHONOPTIMIZE=2
+Environment=LC_CTYPE=UTF-8
+
+[Install]
+WantedBy=default.target
