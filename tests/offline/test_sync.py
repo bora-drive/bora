@@ -532,6 +532,91 @@ def test_conflict_edited_download_only_mirror_is_conflict(
     assert sync_engine._check_download_conflict(event) is Conflict.Conflict
 
 
+# ==== Task 2 (v0.1.0 close-out): _adopt_untouched_mirror unit coverage ======
+#
+# _check_download_conflict's download_only branch above depends on the
+# download_only index row surviving (its content_hash is the baseline it
+# compares against). After rebuild-index / reset_sync_state / re-link with
+# mirrors already on disk, that row is gone, and the branch cannot fire.
+# _adopt_untouched_mirror is the post-download fallback used from
+# _on_remote_file: it byte-compares the freshly downloaded bytes (already on
+# disk at tmp_fname by that point) directly against the local mirror, with no
+# index row required at all.
+
+
+def test_adopt_untouched_mirror_true_on_byte_match(sync_engine: SyncEngine) -> None:
+    """A byte-identical freshly downloaded export is adopted even with no
+    surviving index row (the rebuild-with-mirrors scenario)."""
+    remote_path = "/mirror.md"
+    data = b"# exported v1\n"
+    local_path = _write_local_file(sync_engine, remote_path, data)
+    os.chmod(local_path, 0o444)  # exported mirrors are read-only on disk
+
+    tmp_fname = osp.join(sync_engine.sync_path, ".tmp-download")
+    with open(tmp_fname, "wb") as fh:
+        fh.write(data)
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+    event.download_only = 1
+
+    # No index entry survives the rebuild.
+    assert sync_engine.get_index_entry(remote_path.lower()) is None
+    assert sync_engine._adopt_untouched_mirror(event, tmp_fname) is True
+
+
+def test_adopt_untouched_mirror_false_on_byte_mismatch(sync_engine: SyncEngine) -> None:
+    """A genuinely different local file (a real edit) is never adopted, even
+    with no surviving index row -- it must fall through to a real conflict."""
+    remote_path = "/mirror.md"
+    local_path = _write_local_file(sync_engine, remote_path, b"# my local edit\n")
+    os.chmod(local_path, 0o644)
+
+    tmp_fname = osp.join(sync_engine.sync_path, ".tmp-download")
+    with open(tmp_fname, "wb") as fh:
+        fh.write(b"# exported v1\n")
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+    event.download_only = 1
+
+    assert sync_engine.get_index_entry(remote_path.lower()) is None
+    assert sync_engine._adopt_untouched_mirror(event, tmp_fname) is False
+
+
+def test_adopt_untouched_mirror_false_when_index_row_survives(
+    sync_engine: SyncEngine,
+) -> None:
+    """When the download_only index row DOES survive, _adopt_untouched_mirror
+    defers entirely to _check_download_conflict's own robust comparison (it
+    only exists to cover the row-is-gone case) -- even on a byte match."""
+    remote_path = "/mirror.md"
+    data = b"# exported v1\n"
+    local_path = _write_local_file(sync_engine, remote_path, data)
+    os.chmod(local_path, 0o444)
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="VERSION-1",
+        content_hash=_md5(data),
+        last_sync=0.0,
+        download_only=1,
+    )
+
+    tmp_fname = osp.join(sync_engine.sync_path, ".tmp-download")
+    with open(tmp_fname, "wb") as fh:
+        fh.write(data)
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+    event.download_only = 1
+
+    assert sync_engine._adopt_untouched_mirror(event, tmp_fname) is False
+
+
 def test_requires_upload_skips_when_remote_hash_matches(
     sync_engine: SyncEngine, monkeypatch
 ):
@@ -4260,6 +4345,74 @@ def test_export_full_cycle_integration(sync_engine: SyncEngine) -> None:
 
     # The other mirrors are untouched by the Doc-only edits.
     assert osp.isfile(L("/Book.xlsx")) and osp.isfile(L("/Deck.pptx"))
+
+
+# ==== Task 2 (v0.1.0 close-out): rebuild-with-mirrors adoption ==============
+#
+# After rebuild-index / reset_sync_state / re-link with exported mirrors
+# already on disk, the download_only index row (and its content_hash) is
+# gone, so _check_download_conflict's untouched-mirror short-circuit can't
+# fire. Exports have no server-side hash, so the fallback ctime heuristic
+# misreads the untouched mirror as "locally modified" and conflict-copies it
+# (re-uploading it to Drive as a binary in the process). _adopt_untouched_mirror
+# recognises this the robust way on the post-download re-check: the freshly
+# exported bytes are already on disk at ``tmp_fname``, so a byte-compare
+# against the local file tells adoption apart from a genuine local edit.
+
+
+def test_rebuild_with_mirrors_adopts_untouched(sync_engine: SyncEngine) -> None:
+    """After reset_sync_state with exported mirrors on disk, an untouched
+    mirror is adopted silently: no conflicted copy, no upload, index row
+    re-seeded (TODO 'rebuild-with-mirrors' limitation)."""
+    L = sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+
+    doc = fake.add_native(name="Report", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Report v1\n")
+    sync_engine.download_sync_cycle()
+    assert osp.isfile(L("/Report.md"))
+
+    remote_before = sorted(r["name"] for r in fake.files.values() if not r["trashed"])
+
+    # Simulate rebuild-index / re-link: index + cursor wiped, mirror on disk.
+    sync_engine.reset_sync_state()
+    sync_engine.download_sync_cycle()
+
+    assert _conflicted_copies(sync_engine.sync_path) == []
+    assert _is_read_only(L("/Report.md"))
+
+    entry = sync_engine.get_index_entry("/report.md")
+    assert entry is not None and entry.is_download_only is True
+    assert entry.content_hash == _md5(b"# Report v1\n")
+
+    # Nothing was uploaded back to Drive as a binary.
+    remote_after = sorted(r["name"] for r in fake.files.values() if not r["trashed"])
+    assert remote_after == remote_before
+
+
+def test_rebuild_with_edited_mirror_still_conflicts(sync_engine: SyncEngine) -> None:
+    """A mirror genuinely edited while the index was gone must still be
+    preserved as a conflicted copy — adoption only fires on a byte match."""
+    L = sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+
+    doc = fake.add_native(name="Report", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Report v1\n")
+    sync_engine.download_sync_cycle()
+
+    path = L("/Report.md")
+    os.chmod(path, 0o644)
+    with open(path, "w") as fh:
+        fh.write("# my local edit\n")
+
+    sync_engine.reset_sync_state()
+    sync_engine.download_sync_cycle()
+
+    names = sorted(os.listdir(sync_engine.sync_path))
+    assert "Report.md" in names
+    assert any("conflicted copy" in n for n in names), names
 
 
 # ==== Selective sync: exclusion list must follow remote renames / moves ==============

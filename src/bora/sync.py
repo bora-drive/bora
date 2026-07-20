@@ -6,6 +6,7 @@ import enum
 
 # system imports
 import errno
+import filecmp
 import gc
 import os
 import os.path as osp
@@ -3923,14 +3924,15 @@ class SyncEngine:
             # hash != indexed hash) falls through to the conflict logic below
             # and is preserved, never silently overwritten.
             #
-            # KNOWN LIMITATION: this "untouched mirror" verdict depends on the
-            # download_only index row (with its content_hash) surviving. After
-            # a rebuild-index / reset_sync_state / re-link with mirrors already
-            # on disk, that row is gone, so this branch cannot fire: an
-            # untouched mirror instead hits the ctime heuristic below and is
-            # conflict-copied (and, being writable, re-uploaded to Drive as a
-            # new binary). See TODO.md's Google Docs Export "known limitation"
-            # note; the suggested future fix is a byte-compare adoption path.
+            # This "untouched mirror" verdict depends on the download_only
+            # index row (with its content_hash) surviving. After a
+            # rebuild-index / reset_sync_state / re-link with mirrors already
+            # on disk, that row is gone, so this branch cannot fire on its
+            # own -- but it is no longer a gap: the post-download re-check in
+            # _on_remote_file falls back to _adopt_untouched_mirror, which
+            # byte-compares the freshly downloaded bytes against the local
+            # mirror directly (no index row needed) and adopts silently on a
+            # match. See TODO.md's Google Docs Export "known limitation" note.
             self._logger.debug(
                 'Untouched download_only mirror "%s": remote re-export is newer',
                 event.remote_path,
@@ -4202,6 +4204,30 @@ class SyncEngine:
             suffix = f"conflicted copy {date}"
         return generate_cc_name(local_path, suffix)
 
+    def _adopt_untouched_mirror(self, event: SyncEvent, tmp_fname: str) -> bool:
+        """Whether a conflicting download target is an untouched exported
+        mirror that lost its index row (rebuild-index / reset_sync_state /
+        re-link with mirrors on disk -- see the KNOWN LIMITATION note in
+        _check_download_conflict). Exports have no server hash, so recognise
+        the mirror the robust way: the freshly exported bytes are already on
+        disk at ``tmp_fname`` -- a byte match means there is no local edit and
+        the mirror can be overwritten in place with no conflict copy. The
+        subsequent update_index_from_sync_event re-seeds the download_only
+        row, so later re-exports take the normal fast path again.
+        """
+        if not event.download_only:
+            return False
+        if self.get_index_entry(event.remote_path_lower) is not None:
+            # A row exists, so _check_download_conflict already made the
+            # robust hash comparison; a Conflict verdict is a real edit.
+            return False
+        if not isfile(event.local_path) or osp.islink(event.local_path):
+            return False
+        try:
+            return filecmp.cmp(tmp_fname, event.local_path, shallow=False)
+        except OSError:
+            return False
+
     def _download_only_entry_for(self, event: SyncEvent) -> IndexEntry | None:
         """Return the ``download_only`` index entry a *local* change targets,
         or ``None``.
@@ -4396,7 +4422,17 @@ class SyncEngine:
 
             # Re-check for conflict and move the conflict
             # out of the way if anything has changed.
-            if self._check_download_conflict(event) == Conflict.Conflict:
+            conflict = self._check_download_conflict(event)
+            if conflict == Conflict.Conflict and self._adopt_untouched_mirror(
+                event, tmp_fname
+            ):
+                self._logger.debug(
+                    'Adopting untouched mirror "%s" after index rebuild',
+                    event.remote_path,
+                )
+                conflict = Conflict.RemoteNewer
+
+            if conflict == Conflict.Conflict:
                 cc_local_path = self._local_cc_filename(
                     event.local_path, event.change_remote_id
                 )
