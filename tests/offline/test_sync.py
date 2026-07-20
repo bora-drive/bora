@@ -2,6 +2,7 @@ import hashlib
 import os
 import os.path as osp
 import sqlite3
+import zipfile
 from datetime import datetime, timezone
 from queue import Queue
 from unittest.mock import Mock
@@ -653,6 +654,119 @@ def test_adopt_untouched_mirror_false_when_index_row_survives(
     )
     event.download_only = 1
 
+    assert sync_engine._adopt_untouched_mirror(event, tmp_fname) is False
+
+
+def _write_zip(path: str, members: list[tuple[str, bytes, tuple[int, ...]]]) -> None:
+    """Write a zip archive at ``path`` with the given (name, content, date_time)
+    members -- used to simulate Drive's Office-format (docx/xlsx/pptx) exports,
+    which stamp each entry with the export wall-clock time."""
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, content, date_time in members:
+            info = zipfile.ZipInfo(name, date_time=date_time)
+            zf.writestr(info, content)
+
+
+def test_adopt_untouched_mirror_true_on_zip_member_match_different_timestamps(
+    sync_engine: SyncEngine,
+) -> None:
+    """Office-format (xlsx/docx/pptx) mirrors are zip archives whose per-entry
+    timestamps Drive stamps with export wall-clock time, even when the
+    document itself is unchanged (observed live 2026-07-20 on .xlsx). The
+    byte compare therefore fails, but the zip members (name, CRC, size) are
+    identical -- _adopt_untouched_mirror must fall back to that and adopt."""
+    remote_path = "/mirror.xlsx"
+    local_path = sync_engine.to_local_path_from_cased(remote_path)
+    os.makedirs(osp.dirname(local_path), exist_ok=True)
+    members = [
+        ("[Content_Types].xml", b"<Types/>", (2026, 7, 20, 4, 26, 0)),
+        ("xl/worksheets/sheet1.xml", b"<sheetData/>", (2026, 7, 20, 4, 26, 0)),
+    ]
+    _write_zip(local_path, members)
+    os.chmod(local_path, 0o444)
+
+    tmp_fname = osp.join(sync_engine.sync_path, ".tmp-download")
+    # Same member names/content, one minute later per-entry timestamp -- the
+    # re-export Drive produces for an untouched document.
+    members_reexport = [
+        ("[Content_Types].xml", b"<Types/>", (2026, 7, 20, 4, 27, 0)),
+        ("xl/worksheets/sheet1.xml", b"<sheetData/>", (2026, 7, 20, 4, 27, 0)),
+    ]
+    _write_zip(tmp_fname, members_reexport)
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+    event.download_only = 1
+
+    assert sync_engine.get_index_entry(remote_path.lower()) is None
+    assert sync_engine._adopt_untouched_mirror(event, tmp_fname) is True
+
+
+def test_adopt_untouched_mirror_false_on_zip_member_content_mismatch(
+    sync_engine: SyncEngine,
+) -> None:
+    """A real edit to an Office-format mirror changes a member's content (and
+    so its CRC) -- the zip-aware fallback must not paper over that."""
+    remote_path = "/mirror.xlsx"
+    local_path = sync_engine.to_local_path_from_cased(remote_path)
+    os.makedirs(osp.dirname(local_path), exist_ok=True)
+    _write_zip(
+        local_path,
+        [
+            (
+                "xl/worksheets/sheet1.xml",
+                b"<sheetData>old</sheetData>",
+                (2026, 7, 20, 4, 26, 0),
+            )
+        ],
+    )
+    os.chmod(local_path, 0o644)
+
+    tmp_fname = osp.join(sync_engine.sync_path, ".tmp-download")
+    _write_zip(
+        tmp_fname,
+        [
+            (
+                "xl/worksheets/sheet1.xml",
+                b"<sheetData>new</sheetData>",
+                (2026, 7, 20, 4, 27, 0),
+            )
+        ],
+    )
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+    event.download_only = 1
+
+    assert sync_engine.get_index_entry(remote_path.lower()) is None
+    assert sync_engine._adopt_untouched_mirror(event, tmp_fname) is False
+
+
+def test_adopt_untouched_mirror_false_when_one_side_not_a_zip(
+    sync_engine: SyncEngine,
+) -> None:
+    """The zip-aware fallback only applies when BOTH files are valid zip
+    archives; a byte mismatch against a non-zip local file (or a non-zip
+    download) must fall through to the existing byte-mismatch behavior, not
+    raise or spuriously adopt."""
+    remote_path = "/mirror.md"
+    local_path = _write_local_file(sync_engine, remote_path, b"# my local edit\n")
+    os.chmod(local_path, 0o644)
+
+    tmp_fname = osp.join(sync_engine.sync_path, ".tmp-download")
+    _write_zip(
+        tmp_fname,
+        [("xl/worksheets/sheet1.xml", b"<sheetData/>", (2026, 7, 20, 4, 27, 0))],
+    )
+
+    event = _download_event(
+        sync_engine, remote_path, rev="VERSION-2", content_hash=None
+    )
+    event.download_only = 1
+
+    assert sync_engine.get_index_entry(remote_path.lower()) is None
     assert sync_engine._adopt_untouched_mirror(event, tmp_fname) is False
 
 

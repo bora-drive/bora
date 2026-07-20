@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -4231,6 +4232,16 @@ class SyncEngine:
         the mirror can be overwritten in place with no conflict copy. The
         subsequent update_index_from_sync_event re-seeds the download_only
         row, so later re-exports take the normal fast path again.
+
+        The raw byte compare alone is not enough for Office-format mirrors
+        (.docx/.xlsx/.pptx): confirmed live 2026-07-20, Drive's exporter
+        re-zips these on every export and stamps each zip member with the
+        export's wall-clock time even when the document itself is unchanged,
+        so two exports of the same untouched Sheet/Doc/Slide differ byte-for-
+        byte in their zip container despite having identical content. When
+        the byte compare fails we fall back to _zip_contents_equal, which
+        ignores those timestamps and compares only what each zip member
+        actually contains.
         """
         if not event.download_only:
             return False
@@ -4241,9 +4252,11 @@ class SyncEngine:
         if not isfile(event.local_path) or osp.islink(event.local_path):
             return False
         try:
-            return filecmp.cmp(tmp_fname, event.local_path, shallow=False)
+            if filecmp.cmp(tmp_fname, event.local_path, shallow=False):
+                return True
         except OSError:
             return False
+        return _zip_contents_equal(tmp_fname, event.local_path)
 
     def _download_only_entry_for(self, event: SyncEvent) -> IndexEntry | None:
         """Return the ``download_only`` index entry a *local* change targets,
@@ -4961,6 +4974,36 @@ class SyncEngine:
 # ======================================================================================
 # Helper functions
 # ======================================================================================
+
+
+def _zip_contents_equal(path_a: str, path_b: str) -> bool:
+    """Whether ``path_a`` and ``path_b`` are both zip archives whose members
+    have identical (filename, CRC-32, file_size) tuples, ignoring each
+    member's ``date_time`` and any other zip-container metadata.
+
+    Timestamps must be ignored because Drive's own exporter is not
+    byte-stable for Office formats: re-exporting an *unchanged* Doc/Sheet/
+    Slide as .docx/.xlsx/.pptx produces a fresh zip where every inner member
+    is stamped with the export's wall-clock time, even though the member
+    content itself did not change. This was observed live 2026-07-20 while
+    verifying ``rebuild-index`` adoption of untouched .xlsx mirrors: the raw
+    bytes differed only in per-entry timestamps, while every member's CRC-32
+    matched exactly. Comparing (name, CRC, size) tuples instead of raw bytes
+    recognises that case as equivalent content.
+    """
+    if not (zipfile.is_zipfile(path_a) and zipfile.is_zipfile(path_b)):
+        return False
+    try:
+        with zipfile.ZipFile(path_a) as zf_a, zipfile.ZipFile(path_b) as zf_b:
+            members_a = sorted(
+                (info.filename, info.CRC, info.file_size) for info in zf_a.infolist()
+            )
+            members_b = sorted(
+                (info.filename, info.CRC, info.file_size) for info in zf_b.infolist()
+            )
+    except (zipfile.BadZipFile, OSError):
+        return False
+    return members_a == members_b
 
 
 def do_parallel(
