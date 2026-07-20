@@ -71,63 +71,89 @@ that name survives only as the Google Cloud project id `cumulus-496101` in
 
 ## Remaining work
 
-### Code
+Everything automatable in this section was completed in the 2026-07-20 sweep
+(details below). What's left needs a live Google login, another OS, or a
+release-time decision — see the consolidated lists at the end of this section.
 
-- [ ] **Enforce upload bandwidth throttling.** `bandwidth_limit_up` is stored
-  and config-plumbed (`client.py`, `main.py`) but never applied — no throttle
-  call in any `writes.py` upload path. Mirror `_throttle_down`
-  (`client.py:795`) between resumable-upload chunks.
-- [ ] **Sharing (Phase 5h).** `share_dir` is a `NotImplementedError` stub
-  (`client.py:909`); `create_shared_link`, `revoke_shared_link`, and
-  `list_shared_links` do not exist; nothing produces `SharedLinkMetadata`
-  (`core.py:227`). Implement via Drive permissions + `webViewLink`, or
-  explicitly descope and remove the stub.
-- [ ] **Map HTTP 409 → `ConflictError`.** `http_error_to_bora` has no 409
-  branch; conflicts fall through to generic `BoraApiError`
-  (`errorhandling.py:197`).
-- [ ] **Remove or implement `google_api_to_bora_error`.** Residual stub raising
-  `NotImplementedError` (`errorhandling.py:333`); the real path goes through
-  `http_error_to_bora`/`convert_api_errors`.
-- [ ] **Selective sync: update exclusion list on remote folder rename.** A
-  rename arriving via the change feed does not rewrite the old path in
-  `excluded_items`, so a renamed excluded folder silently starts syncing.
-  Only deletion-pruning exists (`sync.py:3393`); excluded folders are not
-  indexed, so `_apply_remote_move` cannot catch them.
-- [ ] **Test selective-sync exclusion across renames** (online and offline
-  scenarios) once the above is implemented.
-- [ ] **Log a warning when a file has multiple parents.** The cache
-  canonicalizes to `parents[0]` (`path_cache.py:393`) but the planned warning
-  was never added.
+### Completed 2026-07-20
 
-### Tests
+- [x] **Upload bandwidth throttling.** `_throttle_up` mirrors `_throttle_down`
+  between resumable-upload chunks (invoked from `writes.py`); simple ≤5 MB
+  uploads are single-request and stay unthrottled by design, matching the
+  download side. Offline tests for both paths.
+- [x] **Sharing (Phase 5h).** Implemented via Drive permissions +
+  `webViewLink`: `create_shared_link` (idempotent `anyone`-reader permission),
+  `revoke_shared_link` (accepts the link URL like upstream, or a remote path),
+  `list_shared_links` (`visibility='anyoneWithLink'` query), and a real
+  `share_dir` (ensure folder + optional per-email role grant). Drive has no
+  expiry/password on basic links — those fields are `None`/`False` (documented
+  in docstrings). FakeDrive grew a permissions resource; ~20 offline tests.
+- [x] **Map HTTP 409 → `ConflictError`** in `http_error_to_bora`, matching the
+  404/412 branch style.
+- [x] **`google_api_to_bora_error` removed** (was an unused stub).
+- [x] **Selective sync: exclusion list follows remote renames/moves.** The
+  engine snapshots excluded-item ids from the path cache before each change
+  batch and prefix-rewrites `excluded_items` (item + children) at
+  classification time; renamed/moved excluded folders stay excluded. 4 offline
+  end-to-end tests (rename, reparent, non-excluded rename no-op, synced parent
+  holding excluded children). Known gap: a rename processed right after a
+  cursor reset or in a crash-replay window can't recover the old path (ids
+  aren't persisted in config) and would start syncing — confirm acceptable in
+  the live check.
+- [x] **Multi-parent warning** — logged wherever multiple parents collapse to
+  `parents[0]`: `path_cache.populate_from_listing` and
+  `changes._emit_apply`/`_emit_shortcut`.
+- [x] **Linked tests WRITTEN** (cannot run here — no account; see live list):
+  >5 MB resumable upload generated at test time (proves the resumable branch),
+  and `tests/linked/unit/test_resilience.py` — rate-limit retry convergence
+  against the real API (+ a `slow`-marked 30-write burst), forced token expiry
+  → auto-refresh → keyring persistence, network disconnect/reconnect.
+- [x] **Docs.** `differences.md` symlink section rewritten from the shortcut
+  code (and the adjacent native-docs section un-contradicted); real user guide
+  at `docs/userguide.md` wired into `index.rst` (all CLI commands verified);
+  `conf.py` author/version now read from package metadata; `bora config
+  --help` key list updated (bandwidth, parallelism, export toggles).
+- [x] **systemd user unit** `packaging/bora-daemon@.service` — Type=notify +
+  watchdog, verified against the daemon's sd_notify support and
+  `autostart.py`'s template naming; parses clean under `systemd-analyze
+  verify`.
+- [x] **Homebrew formula template** `packaging/homebrew/bora.rb`. Note: the
+  upstream `maestral` formula no longer exists in homebrew-core (maestral is
+  now cask-only), so it's modeled on the current
+  `virtualenv_install_with_resources` pattern. url/sha256/resource hashes are
+  clearly-marked placeholders to fill at release
+  (`brew update-python-resources`); run `ruby -c` on a machine with Ruby.
 
-- [ ] **Real resumable-upload linked test.** The fixture (`large-file.pdf`,
-  ~1.8 MB) is below the 5 MB resumable threshold, so the resumable branch is
-  never exercised against real Drive. Add a >5 MB fixture (or generate one in
-  the test).
-- [ ] **Linked tests for rate limiting, token refresh, and network
-  disconnect/reconnect.** Currently covered only by offline fault injection.
+### Needs a live Google login (consolidated — do together)
 
-### Docs
+1. **Run the linked suites** (`tests/README.md`: link the dedicated test
+   account, set `BORA_TEST_REFRESH_TOKEN`, then `pytest tests/linked` plus
+   `pytest tests/linked -m slow` for the write burst). Covers the new
+   resumable-upload, rate-limit, token-refresh, and disconnect tests, and the
+   selective-sync integration tests.
+2. **Google Docs export live spot-check** (pre-release gate): mirrors open
+   correctly; a web-UI Doc edit re-exports within a poll interval; nothing is
+   ever re-uploaded; `bora export markdown off` re-exports as `.docx`; verify
+   the Drive `version` field is present and monotonically increments on
+   native-doc edits (`modifiedTime` fallback exists but is unverified live).
+3. **Sharing live verification:** real `webViewLink` URL shapes for all item
+   types (esp. native docs on docs.google.com) against `_URL_ID_PATTERNS`;
+   whether the `anyoneWithLink` listing returns the `permissions` field for
+   all items; `permissions.create` on an unshareable item maps 403 →
+   `InsufficientPermissionsError`.
+4. **Selective-sync rename live check:** confirm a real `changes.list` rename
+   entry arrives as modeled (single entry, new `parents`+`name`, not
+   removed/trashed), and exercise a rename of an excluded folder end to end.
+5. **Real-account end-to-end smoke test** (release checklist).
+6. **Google OAuth app verification** — consent screen is still in Testing
+   mode, so refresh tokens expire after 7 days.
 
-- [ ] **Fix stale symlink section in `docs/differences.md`** (~line 99): it
-  says symlinks are not synced, but they now map to Drive shortcuts
-  bidirectionally.
-- [ ] **User guide.** `docs/setup.md` covers linking; `docs/index.rst` defers
-  the user manual to a placeholder external site. Write a real guide (choosing
-  the sync folder, selective sync, CLI tour).
-- [ ] **Update `docs/conf.py` leftovers** — author still "Sam Schott",
-  version 1.9.6.
+### Needs another environment or a release decision
 
-### Packaging & release (tracked in `docs/release-checklist.md`)
-
-- [ ] systemd service template (none exists; desktop entry and icons are done)
-- [ ] Windows smoke test
-- [ ] Real-account end-to-end smoke test
-- [ ] Google OAuth app verification (consent screen still in Testing mode —
-  refresh tokens expire after 7 days)
-- [ ] Publish to PyPI (optional)
-- [ ] Create a Homebrew formula, modeled on the formula for `maestral
+- [ ] Windows smoke test (needs a Windows machine).
+- [ ] Publish to PyPI (optional).
+- [ ] Finalize the Homebrew formula at release time (real url/sha256,
+  regenerate resources, `ruby -c`).
 
 ---
 
