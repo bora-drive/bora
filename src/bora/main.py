@@ -538,6 +538,7 @@ class Bora:
     def export_google_docs(self, value: bool) -> None:
         """Setter: export_google_docs."""
         self._conf.set("sync", "export_google_docs", bool(value))
+        self.sync.reload_cached_config()
 
     @property
     def export_google_docs_markdown(self) -> bool:
@@ -548,6 +549,7 @@ class Bora:
     def export_google_docs_markdown(self, value: bool) -> None:
         """Setter: export_google_docs_markdown."""
         self._conf.set("sync", "export_google_docs_markdown", bool(value))
+        self.sync.reload_cached_config()
 
     # ==== State information  ==========================================================
 

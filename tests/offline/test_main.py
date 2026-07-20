@@ -88,6 +88,35 @@ def test_export_google_docs_markdown_property_reflects_conf(m: Bora) -> None:
     assert m._conf.get("sync", "export_google_docs_markdown") is True
 
 
+def test_export_toggle_reaches_running_engine(m: Bora) -> None:
+    # The setter must push the new options into the live SyncEngine, not
+    # just the config file (TODO gap: flip only took effect on restart).
+    assert m.sync.client.export_opts.markdown is True
+
+    m.export_google_docs_markdown = False
+
+    assert m.sync.client.export_opts.markdown is False
+
+    m.export_google_docs_markdown = True
+
+    assert m.sync.client.export_opts.markdown is True
+
+
+def test_export_enable_schedules_reindex(m: Bora, monkeypatch) -> None:
+    # reload_cached_config schedules a reindex on off -> on; the setter
+    # must trigger that path.
+    m.export_google_docs = False
+
+    assert m.sync.client.export_opts.enabled is False
+
+    calls = []
+    monkeypatch.setattr(m.sync, "reset_sync_state", lambda: calls.append(1))
+
+    m.export_google_docs = True
+
+    assert calls, "off -> on flip did not schedule a reindex"
+
+
 def test_shutdown_daemon_calls_client_close(m: Bora) -> None:
     """Stage 5: shutdown_daemon must call client.close() before stop_sync()
     so that any in-flight change-feed poll is aborted before workers are joined."""
