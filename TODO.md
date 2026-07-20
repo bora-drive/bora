@@ -173,10 +173,12 @@ consolidated lists at the end of this section.
    mode, so refresh tokens expire after 7 days.
 
 Minor observation from the live runs (display-level, not a sync defect):
-`bora ls` shows native docs by their raw Drive `name` (`live-doc`) while the
+`bora ls` showed native docs by their raw Drive `name` (`live-doc`) while the
 canonical `path_display` and the on-disk mirror carry the projected leaf
 (`live-doc.md`) — `to_file_metadata` intentionally leaves `name` unprojected.
-Decide at some point whether `ls` should display the projected leaf.
+Decision taken: `ls` should display the projected leaf. Implemented via
+`_display_leaf()` in `src/bora/cli/cli_info.py`, covering the long-format
+table, piped output, and the tty grid.
 
 ### Needs another environment or a release decision
 

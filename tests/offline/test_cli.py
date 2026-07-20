@@ -2,11 +2,13 @@ import logging
 from types import SimpleNamespace
 from unittest import mock
 
+import click.testing
 from click.testing import CliRunner
 
 from bora.autostart import AutoStart
 from bora.cli import main
 from bora.daemon import BoraProxy, Start, start_bora_daemon_process
+from bora.export import ExportOptions
 from bora.logging import scoped_logger
 from bora.main import Bora
 from bora.notify import level_name_to_number, level_number_to_name
@@ -114,7 +116,10 @@ def test_ls_non_tty_prints_names(m: Bora, monkeypatch) -> None:
     Regression test: the non-tty branch used to re-iterate the already
     exhausted `list_folder_iterator` result and printed nothing.
     """
-    entries = [SimpleNamespace(name="b.txt"), SimpleNamespace(name="a.txt")]
+    entries = [
+        SimpleNamespace(name="b.txt", path_display="/b.txt"),
+        SimpleNamespace(name="a.txt", path_display="/a.txt"),
+    ]
 
     m_proxy = _make_proxy_mock(pending_link=False, config_name=m.config_name)
     m_proxy.list_folder_iterator = mock.Mock(return_value=iter([entries]))
@@ -129,6 +134,62 @@ def test_ls_non_tty_prints_names(m: Bora, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "a.txt" in result.output
     assert "b.txt" in result.output
+
+
+def _native_doc_entries(client_on_fake, *, markdown: bool) -> list:
+    """Seed a native Google Doc named "live-doc" via FakeDrive and list it
+    through the real GoogleDriveClient export-projection path, returning the
+    resulting Metadata entries (one FileMetadata with the projected leaf in
+    ``path_display``, raw name preserved in ``name``)."""
+    cof = client_on_fake
+    cof.client.export_opts = ExportOptions(True, markdown)
+    cof.fake.add_native("live-doc", "document")
+    return cof.client.list_folder("/").entries
+
+
+def test_ls_shows_projected_leaf_for_native_docs_piped(
+    m: Bora, client_on_fake, monkeypatch
+) -> None:
+    """A native Google Doc named "live-doc" projects to "live-doc.md" on
+    disk and in path_display; piped (non-tty) `ls` must show the projected
+    leaf, not the raw Drive name."""
+    entries = _native_doc_entries(client_on_fake, markdown=True)
+
+    m_proxy = _make_proxy_mock(pending_link=False, config_name=m.config_name)
+    m_proxy.list_folder_iterator = mock.Mock(return_value=iter([entries]))
+    monkeypatch.setattr(
+        "bora.daemon.BoraProxy",
+        lambda config_name, fallback: m_proxy,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["ls", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert "live-doc.md" in result.output
+    assert "live-doc\n" not in result.output
+
+
+def test_ls_shows_projected_leaf_for_native_docs_tty(
+    m: Bora, client_on_fake, monkeypatch
+) -> None:
+    """Same as above, but for the tty grid branch."""
+    entries = _native_doc_entries(client_on_fake, markdown=True)
+
+    m_proxy = _make_proxy_mock(pending_link=False, config_name=m.config_name)
+    m_proxy.list_folder_iterator = mock.Mock(return_value=iter([entries]))
+    monkeypatch.setattr(
+        "bora.daemon.BoraProxy",
+        lambda config_name, fallback: m_proxy,
+    )
+    monkeypatch.setattr(click.testing._NamedTextIOWrapper, "isatty", lambda self: True)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["ls", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert "live-doc.md" in result.output
+    assert "live-doc\n" not in result.output
 
 
 def test_autostart(m: Bora) -> None:

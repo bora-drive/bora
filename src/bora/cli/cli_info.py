@@ -14,7 +14,7 @@ from rich.progress import BarColumn, DownloadColumn, Progress, TaskID, TextColum
 from rich.table import Column
 from rich.text import Text
 
-from ..core import DeletedMetadata, FileMetadata, FolderMetadata
+from ..core import DeletedMetadata, FileMetadata, FolderMetadata, Metadata
 from ..models import SyncDirection, SyncEvent, SyncStatus
 from .common import check_for_fatal_errors, convert_api_errors, inject_proxy
 from .core import RemotePath
@@ -180,6 +180,17 @@ def history(m: Bora, sync_path: str) -> None:
     console.print(table)
 
 
+def _display_leaf(entry: Metadata) -> str:
+    """Return the leaf name to display for *entry*.
+
+    Native docs (Google Docs/Sheets/Slides) keep their raw Drive name in
+    ``entry.name``, but their canonical path (and the on-disk mirror) carry
+    the projected export leaf (e.g. ``"live-doc.md"``). Show the projected
+    leaf so ``ls`` matches the disk.
+    """
+    return entry.path_display.rsplit("/", 1)[-1] or entry.name
+
+
 @click.command(help="List contents of a sync directory.")
 @click.argument("sync_path", type=RemotePath(), default="/")
 @click.option(
@@ -208,7 +219,7 @@ def ls(m: Bora, long: bool, sync_path: str, include_deleted: bool) -> None:
     )
 
     entries = [entry for entries in entries_iter for entry in entries]
-    entries.sort(key=lambda e: e.name)
+    entries.sort(key=_display_leaf)
 
     console = Console()
 
@@ -252,7 +263,7 @@ def ls(m: Bora, long: bool, sync_path: str, include_deleted: bool) -> None:
                 item_type = "deleted"
 
             table.add_row(
-                Text(entry.name, overflow="ellipsis", no_wrap=True),
+                Text(_display_leaf(entry), overflow="ellipsis", no_wrap=True),
                 item_type,
                 size,
                 shared_field,
@@ -263,14 +274,14 @@ def ls(m: Bora, long: bool, sync_path: str, include_deleted: bool) -> None:
         console.print(table)
 
     elif not sys.stdout.isatty():
-        console.print("\n".join(entry.name for entry in entries))
+        console.print("\n".join(_display_leaf(entry) for entry in entries))
 
     else:
         fields: list[Text] = []
 
         for entry in entries:
             color = "blue" if isinstance(entry, DeletedMetadata) else ""
-            fields.append(Text(entry.name, style=color))
+            fields.append(Text(_display_leaf(entry), style=color))
 
         max_len = max(len(f) for f in fields)
         console.print(Columns(fields, width=max_len, column_first=True))
