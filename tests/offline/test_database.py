@@ -159,8 +159,7 @@ class TestManagerSchemaDriftGuard:
         # The table was dropped and recreated with the model's schema.
         assert mgr.count() == 0
         columns = {
-            row["name"]
-            for row in db.execute("PRAGMA table_info(widget);").fetchall()
+            row["name"] for row in db.execute("PRAGMA table_info(widget);").fetchall()
         }
         assert columns == {"id", "label"}
 

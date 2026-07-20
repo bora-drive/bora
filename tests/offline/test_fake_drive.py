@@ -814,7 +814,9 @@ def test_add_native_under_subfolder():
 def test_export_media_round_trip_via_real_downloader():
     fake = FakeDrive()
     fid = fake.add_native("Report", "document")
-    export_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    export_mime = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
     content = b"PK\x03\x04fake-docx-bytes"
     fake.set_export_bytes(fid, export_mime, content)
 
@@ -846,9 +848,7 @@ def test_version_is_projected_by_files_get_and_list():
     got = svc.files().get(fileId=fid, fields="id, version").execute()
     assert got["version"] == "3"
 
-    listed = svc.files().list(
-        q="trashed=false", fields="files(id, version)"
-    ).execute()
+    listed = svc.files().list(q="trashed=false", fields="files(id, version)").execute()
     versions = {f["id"]: f["version"] for f in listed["files"]}
     assert versions[fid] == "3"
 

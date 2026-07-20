@@ -36,9 +36,9 @@ language = "en"
 
 html_theme = "furo"
 html_logo = "bora.png"
-html_static_path = ['_static']
+html_static_path = ["_static"]
 html_css_files = [
-    'css/custom.css',
+    "css/custom.css",
 ]
 
 # -- Options for LaTeX output ----------------------------------------------------------

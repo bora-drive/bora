@@ -28,9 +28,7 @@ from bora.path_cache import PathIDCache
 from tests.fake_drive import ROOT_ID
 
 _CONFIG = "test-config-client-offline"
-_DOCX_MIME = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-)
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 @pytest.fixture
@@ -1124,10 +1122,18 @@ def test_list_remote_changes_iterator_threads_export_opts(client, cache):
     service.changes.return_value.list.return_value.execute.return_value = {
         "newStartPageToken": "NEXT",
         "changes": [
-            {"removed": False, "fileId": "F1",
-             "file": {"id": "F1", "name": "Report", "parents": ["ROOT"],
-                      "mimeType": "application/vnd.google-apps.document",
-                      "trashed": False, "version": 3}},
+            {
+                "removed": False,
+                "fileId": "F1",
+                "file": {
+                    "id": "F1",
+                    "name": "Report",
+                    "parents": ["ROOT"],
+                    "mimeType": "application/vnd.google-apps.document",
+                    "trashed": False,
+                    "version": 3,
+                },
+            },
         ],
     }
     client._get_service = Mock(return_value=service)
