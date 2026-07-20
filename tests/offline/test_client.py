@@ -936,6 +936,22 @@ def test_throttle_down_noop_when_no_limit(client, monkeypatch):
     assert slept == []
 
 
+def test_throttle_up_sleeps_when_limit_set(client, monkeypatch):
+    slept = []
+    monkeypatch.setattr("bora.client.time.sleep", lambda s: slept.append(s))
+    client.bandwidth_limit_up = 1000  # bytes/sec
+    client._throttle_up(2000)
+    assert slept == [2.0]
+
+
+def test_throttle_up_noop_when_no_limit(client, monkeypatch):
+    slept = []
+    monkeypatch.setattr("bora.client.time.sleep", lambda s: slept.append(s))
+    client.bandwidth_limit_up = 0
+    client._throttle_up(2000)
+    assert slept == []
+
+
 # ==== get_latest_cursor ===================================================
 
 
@@ -1908,3 +1924,247 @@ def test_download_unsupported_native_raises_even_when_export_enabled(
     dest = tmp_path / "Survey"
     with pytest.raises(UnsupportedFileError):
         cof.client.download("/Survey", str(dest), file_id=file_id)
+
+
+# ==== Sharing (Phase 5h) ===================================================
+# create_shared_link / revoke_shared_link / list_shared_links / share_dir
+# against the stateful FakeDrive permissions() resource.
+
+
+def _seed_fake_file(cof, path: str = "/f.txt", content: bytes = b"x") -> str:
+    """Add a root-level file to the fake and register it in the path cache."""
+    fid = cof.fake.add_file(path, content=content)
+    name = path.rsplit("/", 1)[-1]
+    cof.client._path_cache.set(path, fid, ROOT_ID, name, False)
+    return fid
+
+
+def test_create_shared_link_returns_metadata(client_on_fake):
+    from bora.core import LinkAccessLevel, LinkAudience, SharedLinkMetadata
+
+    cof = client_on_fake
+    fid = _seed_fake_file(cof)
+
+    md = cof.client.create_shared_link("/f.txt")
+
+    assert isinstance(md, SharedLinkMetadata)
+    assert fid in md.url
+    assert md.name == "f.txt"
+    assert md.path_lower == "/f.txt"
+    assert md.expires is None  # basic Drive links have no expiry
+    assert md.link_permissions.effective_audience is LinkAudience.Public
+    assert md.link_permissions.link_access_level is LinkAccessLevel.Viewer
+    assert md.link_permissions.require_password is False
+    assert md.link_permissions.can_revoke is True
+
+    # The fake backing store gained an anyone-with-link reader permission
+    # and now reports the file as shared.
+    rec = cof.fake.files[fid]
+    anyone = [p for p in rec["permissions"] if p["type"] == "anyone"]
+    assert len(anyone) == 1
+    assert anyone[0]["role"] == "reader"
+    assert rec["shared"] is True
+
+
+def test_create_shared_link_is_idempotent(client_on_fake):
+    cof = client_on_fake
+    fid = _seed_fake_file(cof)
+
+    first = cof.client.create_shared_link("/f.txt")
+    second = cof.client.create_shared_link("/f.txt")
+
+    assert second.url == first.url
+    # No duplicate permission was created by the second call.
+    rec = cof.fake.files[fid]
+    assert len([p for p in rec["permissions"] if p["type"] == "anyone"]) == 1
+
+
+def test_create_shared_link_unknown_path_raises_notfound(client_on_fake):
+    from bora.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError):
+        client_on_fake.client.create_shared_link("/nope.txt")
+
+
+def test_revoke_shared_link_by_url(client_on_fake):
+    cof = client_on_fake
+    fid = _seed_fake_file(cof)
+    md = cof.client.create_shared_link("/f.txt")
+
+    cof.client.revoke_shared_link(md.url)
+
+    rec = cof.fake.files[fid]
+    assert not [p for p in rec["permissions"] if p["type"] == "anyone"]
+    assert rec["shared"] is False  # only the owner permission remains
+
+
+def test_revoke_shared_link_by_folder_url(client_on_fake):
+    """Folder links use the /drive/folders/<id> URL shape."""
+    cof = client_on_fake
+    fid = cof.fake.add_folder("/Docs")
+    cof.client._path_cache.set("/Docs", fid, ROOT_ID, "Docs", True)
+    md = cof.client.create_shared_link("/Docs")
+    assert "/folders/" in md.url
+
+    cof.client.revoke_shared_link(md.url)
+
+    rec = cof.fake.files[fid]
+    assert not [p for p in rec["permissions"] if p["type"] == "anyone"]
+
+
+def test_revoke_shared_link_accepts_remote_path(client_on_fake):
+    """Convenience divergence from Dropbox: a remote path also works."""
+    cof = client_on_fake
+    fid = _seed_fake_file(cof)
+    cof.client.create_shared_link("/f.txt")
+
+    cof.client.revoke_shared_link("/f.txt")
+
+    rec = cof.fake.files[fid]
+    assert not [p for p in rec["permissions"] if p["type"] == "anyone"]
+
+
+def test_revoke_shared_link_without_link_raises(client_on_fake):
+    from bora.exceptions import SharedLinkError
+
+    cof = client_on_fake
+    _seed_fake_file(cof)
+    with pytest.raises(SharedLinkError):
+        cof.client.revoke_shared_link("/f.txt")
+
+
+def test_revoke_shared_link_unparsable_url_raises(client_on_fake):
+    from bora.exceptions import SharedLinkError
+
+    with pytest.raises(SharedLinkError):
+        client_on_fake.client.revoke_shared_link("https://example.com/no-id-here")
+
+
+def test_revoke_shared_link_unknown_file_raises_notfound(client_on_fake):
+    from bora.exceptions import NotFoundError
+
+    url = "https://drive.google.com/file/d/does-not-exist/view"
+    with pytest.raises(NotFoundError):
+        client_on_fake.client.revoke_shared_link(url)
+
+
+def test_list_shared_links_all(client_on_fake):
+    cof = client_on_fake
+    fid_a = _seed_fake_file(cof, "/a.txt")
+    fid_b = _seed_fake_file(cof, "/b.txt")
+    _seed_fake_file(cof, "/private.txt")
+
+    cof.client.create_shared_link("/a.txt")
+    cof.client.create_shared_link("/b.txt")
+
+    res = cof.client.list_shared_links()
+
+    assert res.has_more is False
+    assert res.cursor == ""
+    assert {e.path_lower for e in res.entries} == {"/a.txt", "/b.txt"}
+    urls = "".join(e.url for e in res.entries)
+    assert fid_a in urls and fid_b in urls
+
+
+def test_list_shared_links_single_path(client_on_fake):
+    cof = client_on_fake
+    fid = _seed_fake_file(cof, "/a.txt")
+    _seed_fake_file(cof, "/b.txt")
+    cof.client.create_shared_link("/a.txt")
+    cof.client.create_shared_link("/b.txt")
+
+    res = cof.client.list_shared_links("/a.txt")
+
+    assert [e.path_lower for e in res.entries] == ["/a.txt"]
+    assert fid in res.entries[0].url
+
+
+def test_list_shared_links_unshared_path_is_empty(client_on_fake):
+    cof = client_on_fake
+    _seed_fake_file(cof, "/a.txt")
+
+    res = cof.client.list_shared_links("/a.txt")
+
+    assert res.entries == []
+    assert res.has_more is False
+
+
+def test_list_shared_links_unknown_path_raises_notfound(client_on_fake):
+    from bora.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError):
+        client_on_fake.client.list_shared_links("/nope.txt")
+
+
+def test_list_shared_links_uncached_item_has_none_path(client_on_fake):
+    """A link on an item outside the sync root (not in the path cache) is
+    listed with path_lower=None rather than being dropped."""
+    cof = client_on_fake
+    fid = cof.fake.add_file("/orphan.txt", content=b"o")
+    cof.fake.files[fid]["permissions"].append(
+        {"id": "perm-x", "type": "anyone", "role": "reader"}
+    )
+    # Deliberately NOT registered in the path cache.
+
+    res = cof.client.list_shared_links()
+
+    assert len(res.entries) == 1
+    entry = res.entries[0]
+    assert entry.path_lower is None
+    assert fid in entry.url
+    assert entry.name == "orphan.txt"
+
+
+def test_list_shared_links_reports_editor_access_for_writer_role(client_on_fake):
+    from bora.core import LinkAccessLevel
+
+    cof = client_on_fake
+    fid = _seed_fake_file(cof, "/a.txt")
+    cof.fake.files[fid]["permissions"].append(
+        {"id": "perm-x", "type": "anyone", "role": "writer"}
+    )
+
+    res = cof.client.list_shared_links("/a.txt")
+
+    assert res.entries[0].link_permissions.link_access_level is LinkAccessLevel.Editor
+
+
+def test_share_dir_creates_missing_folder(client_on_fake):
+    cof = client_on_fake
+
+    md = cof.client.share_dir("/Team")
+
+    assert isinstance(md, FolderMetadata)
+    assert md.path_display == "/Team"
+    assert cof.fake.get_by_path("/Team")["mimeType"].endswith("folder")
+
+
+def test_share_dir_reuses_existing_folder(client_on_fake):
+    """Unlike make_dir, share_dir must not raise FolderConflictError for an
+    existing folder — upstream shares the directory that is already there."""
+    cof = client_on_fake
+    fid = cof.fake.add_folder("/Team")
+
+    md = cof.client.share_dir("/Team")
+
+    assert isinstance(md, FolderMetadata)
+    assert md.id == fid
+
+
+def test_share_dir_grants_user_permission(client_on_fake):
+    cof = client_on_fake
+
+    md = cof.client.share_dir("/Team", email="friend@example.com", role="writer")
+
+    assert isinstance(md, FolderMetadata)
+    assert md.shared is True  # refreshed metadata reflects the grant
+    rec = cof.fake.get_by_path("/Team")
+    grants = [p for p in rec["permissions"] if p.get("role") != "owner"]
+    assert grants == [
+        {
+            "id": grants[0]["id"],
+            "type": "user",
+            "role": "writer",
+            "emailAddress": "friend@example.com",
+        }
+    ]
