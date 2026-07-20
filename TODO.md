@@ -3,8 +3,9 @@
 Status as of 2026-07-19, verified against the codebase. The original phase plan
 (Maestral → Google Drive port) is complete except for the items under
 **Remaining work** below. The project name ended up as **bora** (not "cumulus";
-that name survives only as the Google Cloud project id `cumulus-496101` in
-`client_secret.json`).
+since 2026-07-20 the bundled OAuth client in `client_secret.json` also lives in
+a Google Cloud project named `bora-500821`, replacing the original
+`cumulus-496101`).
 
 ---
 
