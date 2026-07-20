@@ -40,8 +40,19 @@ resolved as of 2026-07-20:
       deprecation timeline) so an old shipped credential can be retired without
       poisoning the project's abuse quota. Confirm the client is restricted to
       the intended Drive scopes and project before publishing.
-- [ ] **Windows smoke test.** Install and run a basic link + sync on Windows
-      (out of reach from the Linux dev VM).
+- [ ] **Windows is not currently supported.** Verified 2026-07-20: Bora
+      cannot install-and-run on Windows today — `fcntl`/`xattr` are
+      imported unconditionally in `src/bora/utils/path.py` and
+      `src/bora/daemon.py` (both POSIX-only), `xattr` is an unconditional
+      dependency with no Windows wheel, and
+      `src/bora/utils/appdirs.py` raises `RuntimeError("Platform not
+      supported")` for every path lookup on anything but Darwin/Linux.
+      This matches Bora's own declared platform support (pyproject
+      classifiers, CLI `--help`). See `docs/windows-smoke-test.md` for the
+      full blocker list, what a port would need, and the smoke-test
+      checklist to run once one exists. Needs a release-time decision:
+      ship v0.1.0 without Windows support (defer), or scope/do the port
+      first.
 - [x] **Real-account end-to-end smoke.** Done 2026-07-20 against
       `bora-test@arko.net` (config `smoke-test`): linked via `bora auth link
       --refresh-token`, synced a small tree both directions (local upload via
