@@ -877,6 +877,90 @@ def test_upload_resumable_progress_reported(client, cache):
     _os.unlink(local)
 
 
+def _resumable_upload_with_limit(client, limit):
+    """Run a 3-chunk resumable upload with bandwidth_limit_up=limit and
+    return the list of sleep durations the throttle requested."""
+    size = 5 * 1024 * 1024 + 1
+    local = _big_tempfile(size)
+    md5 = hashlib.md5(b"a" * size).hexdigest()
+    final_resp = {
+        "id": "Fa",
+        "name": "big.bin",
+        "mimeType": "application/octet-stream",
+        "md5Checksum": md5,
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(size),
+        "headRevisionId": "rev1",
+    }
+    status = Mock()
+    status.resumable_progress = 0
+    request = Mock()
+    request.next_chunk = Mock(
+        side_effect=[
+            (status, None),
+            (status, None),
+            (status, final_resp),
+        ]
+    )
+    svc = fake_service()
+    svc.files.return_value.create.return_value = request
+    client._get_service = Mock(return_value=svc)
+    client.bandwidth_limit_up = limit
+
+    slept = []
+    from bora.core import WriteMode
+
+    with patch("bora.writes.MediaFileUpload") as mfu:
+        mfu.return_value = Mock()
+        with patch("bora.client.time.sleep", lambda s: slept.append(s)):
+            client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
+    _os.unlink(local)
+    return slept
+
+
+def test_upload_resumable_throttled_per_chunk(client, cache):
+    # 8 MB chunks at 8 MB/s -> one 1.0s sleep per next_chunk call (3 chunks),
+    # mirroring how _throttle_down runs between download chunks.
+    slept = _resumable_upload_with_limit(client, 8 * 1024 * 1024)
+    assert slept == [1.0, 1.0, 1.0]
+
+
+def test_upload_resumable_unthrottled_when_no_limit(client, cache):
+    # bandwidth_limit_up=0 means unlimited: no sleeps at all.
+    slept = _resumable_upload_with_limit(client, 0)
+    assert slept == []
+
+
+def test_upload_simple_not_throttled(client, cache):
+    # The simple (non-resumable) path uploads in a single request, so
+    # bandwidth_limit_up does not apply there even when set.
+    size = 5 * 1024 * 1024  # exactly at threshold -> simple path
+    local = _big_tempfile(size)
+    md5 = hashlib.md5(b"a" * size).hexdigest()
+    svc = fake_service()
+    svc.files.return_value.create.return_value.execute.return_value = {
+        "id": "Fa",
+        "name": "big.bin",
+        "mimeType": "application/octet-stream",
+        "md5Checksum": md5,
+        "modifiedTime": "2026-05-30T12:00:00.000Z",
+        "size": str(size),
+        "headRevisionId": "rev1",
+    }
+    client._get_service = Mock(return_value=svc)
+    client.bandwidth_limit_up = 1000
+
+    slept = []
+    from bora.core import WriteMode
+
+    with patch("bora.writes.MediaFileUpload") as mfu:
+        mfu.return_value = Mock()
+        with patch("bora.client.time.sleep", lambda s: slept.append(s)):
+            client._writes.upload(local, "/big.bin", write_mode=WriteMode.Add)
+    assert slept == []
+    _os.unlink(local)
+
+
 def test_upload_resumable_shutdown_aborts(client, cache):
     size = 5 * 1024 * 1024 + 1
     local = _big_tempfile(size)

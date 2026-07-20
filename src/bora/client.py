@@ -1,12 +1,10 @@
 """Google Drive API client for the Bora sync engine.
 
-Implemented (Stage 3): authentication/linking, account info, file/folder
+Implemented: authentication/linking, account info, file/folder
 metadata, directory listing (non-recursive and recursive bootstrap),
-file download with MD5 verification, the change feed, and the retry/backoff
-layer.
-
-Still stubbed for later stages: write operations (upload, move, remove,
-mkdir), file restore, and sharing.
+file download with MD5 verification, the change feed, the retry/backoff
+layer, write operations (upload, move, remove, mkdir), file restore, and
+sharing via the Drive permissions API (Phase 5h).
 """
 
 from __future__ import annotations
@@ -16,6 +14,7 @@ import hashlib
 import logging
 import os
 import random
+import re
 import threading
 import time
 from contextlib import suppress
@@ -48,9 +47,14 @@ from .core import (
     FileMetadata,
     FolderMetadata,
     FullAccount,
+    LinkAccessLevel,
+    LinkAudience,
+    LinkPermissions,
     ListFolderResult,
+    ListSharedLinkResult,
     Metadata,
     PersonalSpaceUsage,
+    SharedLinkMetadata,
     WriteMode,
 )
 from .errorhandling import (
@@ -65,8 +69,10 @@ from .exceptions import (
     CancelledError,
     CursorResetError,
     DataCorruptionError,
+    FolderConflictError,
     NotFoundError,
     NotLinkedError,
+    SharedLinkError,
     UnsupportedFileError,
 )
 from .export import ExportOptions, project_leaf_name
@@ -142,10 +148,36 @@ def _retry_after_seconds(exc: HttpError) -> float | None:
         return None
 
 
-def _not_implemented() -> None:
-    raise NotImplementedError(
-        "Google Drive client not yet implemented. See PLAN.md Phases 3–5."
-    )
+# Patterns to extract a Drive file ID from a webViewLink-style URL.
+# Drive links come in a handful of shapes:
+#   https://drive.google.com/file/d/<id>/view              (binary files)
+#   https://docs.google.com/document/d/<id>/edit           (Docs)
+#   https://docs.google.com/spreadsheets/d/<id>/edit       (Sheets)
+#   https://docs.google.com/presentation/d/<id>/edit       (Slides)
+#   https://drive.google.com/drive/folders/<id>            (folders)
+#   https://drive.google.com/open?id=<id>                  (legacy)
+_URL_ID_PATTERNS = (
+    re.compile(r"/(?:file|document|spreadsheets|presentation)/d/([\w-]+)"),
+    re.compile(r"/folders/([\w-]+)"),
+    re.compile(r"[?&]id=([\w-]+)"),
+)
+
+
+def _file_id_from_url(url: str) -> str | None:
+    """Extract the Drive file ID embedded in a share URL, or ``None``."""
+    for pattern in _URL_ID_PATTERNS:
+        match = pattern.search(url)
+        if match:
+            return match.group(1)
+    return None
+
+
+# Drive permission roles mapped onto the Dropbox-era link access levels.
+_ROLE_TO_ACCESS_LEVEL = {
+    "reader": LinkAccessLevel.Viewer,
+    "commenter": LinkAccessLevel.Viewer,
+    "writer": LinkAccessLevel.Editor,
+}
 
 
 @dataclass
@@ -897,6 +929,12 @@ class GoogleDriveClient:
         if self.bandwidth_limit_down > 0:
             time.sleep(nbytes / self.bandwidth_limit_down)
 
+    def _throttle_up(self, nbytes: int) -> None:
+        """Crude upload bandwidth throttle: sleep proportionally to the
+        configured limit. A no-op when no limit is set."""
+        if self.bandwidth_limit_up > 0:
+            time.sleep(nbytes / self.bandwidth_limit_up)
+
     def upload(
         self,
         local_path: str,
@@ -1009,16 +1047,313 @@ class GoogleDriveClient:
         return self._writes.make_dir_batch(remote_paths)
 
     def share_dir(
-        self, remote_path: str, force_async: bool = False
+        self,
+        remote_path: str,
+        force_async: bool = False,
+        *,
+        email: str | None = None,
+        role: str = "writer",
     ) -> FolderMetadata | None:
-        """Shares a folder.  No-op for MVP (Shared Drives not supported).
+        """Shares the folder at *remote_path*, creating it if necessary.
 
-        :param remote_path: Path of folder.
-        :param force_async: Ignored.
-        :returns: Metadata of shared folder or ``None``.
+        Dropbox's "convert to shared folder" operation has no Google Drive
+        equivalent — a Drive folder becomes shared implicitly when
+        permissions are granted on it. This method therefore ensures the
+        folder exists (reusing a same-name folder instead of raising a
+        conflict, matching the upstream semantics of sharing an existing
+        directory) and, when *email* is given, grants that user *role* via
+        the Drive permissions API.
+
+        :param remote_path: Path of the folder to share.
+        :param force_async: Ignored (Dropbox-era parameter, kept for
+            call-site compatibility with the sync engine).
+        :param email: Optional email address of an account to share the
+            folder with.
+        :param role: Drive role granted to *email* — ``"reader"``,
+            ``"commenter"``, or ``"writer"`` (default).
+        :returns: Metadata of the shared folder, or ``None`` if the folder
+            was deleted remotely before its updated metadata could be
+            fetched (mirroring the upstream contract that a folder vanishing
+            mid-share yields ``None``).
         """
-        _not_implemented()
-        return None  # unreachable
+        try:
+            md = self.make_dir(remote_path)
+        except FolderConflictError:
+            # The folder already exists on Drive; make_dir's conflict probe
+            # has adopted it into the path cache, so resolve its metadata.
+            existing = self.get_metadata(remote_path)
+            if not isinstance(existing, FolderMetadata):
+                raise
+            md = existing
+
+        if email is None:
+            return md
+
+        file_id = md.id
+        with convert_api_errors(remote_path=remote_path):
+            self._retry_transient(
+                lambda: self._get_service()
+                .permissions()
+                .create(
+                    fileId=file_id,
+                    body={"type": "user", "role": role, "emailAddress": email},
+                    fields="id",
+                )
+                .execute()
+            )
+        self._count_request()
+
+        # Refetch so the returned metadata reflects the new shared state.
+        try:
+            refreshed = self.get_metadata(remote_path)
+        except NotFoundError:
+            return None
+        if isinstance(refreshed, FolderMetadata):
+            return refreshed
+        return None
+
+    # ---- Sharing (Phase 5h) -----------------------------------------------------------
+
+    def _resolve_path_for_sharing(self, remote_path: str) -> tuple[str, str]:
+        """Resolve *remote_path* through the path cache for a sharing call.
+
+        :returns: Tuple of (file ID, true-cased remote path).
+        :raises NotFoundError: if *remote_path* is not known to the path
+            cache.
+        """
+        self._ensure_root_id()
+        file_id = self._path_cache.path_to_id(remote_path)
+        if file_id is None:
+            raise NotFoundError(
+                "Not found",
+                f"No item at '{remote_path}' is known to Bora.",
+                remote_path=remote_path,
+            )
+        cased_path = self._path_cache.id_to_path(file_id) or remote_path
+        return file_id, cased_path
+
+    def _list_permissions(
+        self, file_id: str, remote_path: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List all permissions on *file_id*, exhausting all pages."""
+        perms: list[dict[str, Any]] = []
+        page_token: str | None = None
+        with convert_api_errors(remote_path=remote_path):
+            while True:
+
+                def _list_permissions_page(pt: str | None = page_token) -> Any:
+                    return (
+                        self._get_service()
+                        .permissions()
+                        .list(
+                            fileId=file_id,
+                            fields="nextPageToken, permissions(id, type, role)",
+                            pageSize=100,
+                            pageToken=pt,
+                        )
+                        .execute()
+                    )
+
+                resp = self._retry_transient(_list_permissions_page)
+                self._count_request()
+                perms.extend(resp.get("permissions", []))
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+        return perms
+
+    @staticmethod
+    def _anyone_permission(perms: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """The ``anyone``(-with-link) permission from *perms*, or ``None``."""
+        for perm in perms:
+            if perm.get("type") == "anyone":
+                return perm
+        return None
+
+    @staticmethod
+    def _shared_link_metadata(
+        file: dict[str, Any], cased_path: str | None, role: str
+    ) -> SharedLinkMetadata:
+        """Project a Drive file resource (with ``webViewLink``) that carries
+        an ``anyone`` permission of *role* into a :class:`SharedLinkMetadata`.
+        """
+        return SharedLinkMetadata(
+            url=file["webViewLink"],
+            name=file["name"],
+            path_lower=fold_path(cased_path) if cased_path else None,
+            expires=None,
+            link_permissions=LinkPermissions(
+                can_revoke=True,
+                allow_download=True,
+                effective_audience=LinkAudience.Public,
+                link_access_level=_ROLE_TO_ACCESS_LEVEL.get(
+                    role, LinkAccessLevel.Other
+                ),
+                require_password=False,
+            ),
+        )
+
+    def create_shared_link(self, remote_path: str) -> SharedLinkMetadata:
+        """Creates a shared link for the item at *remote_path*.
+
+        Implemented via the Drive permissions API: an ``anyone``-with-link
+        reader permission is added to the item and its ``webViewLink`` is
+        returned as the link URL. Idempotent — if the item already carries
+        an ``anyone`` permission (of any role), the existing link is
+        returned unchanged.
+
+        Divergences from the Dropbox semantics: basic Drive links carry no
+        expiry, password, or restricted visibility, so ``expires`` is always
+        ``None``, ``require_password`` is always ``False``, and the audience
+        is always public (anyone with the link).
+
+        :param remote_path: Remote path of the item to share.
+        :returns: Metadata of the shared link.
+        :raises NotFoundError: if there is no item at *remote_path*.
+        """
+        file_id, cased_path = self._resolve_path_for_sharing(remote_path)
+        anyone = self._anyone_permission(self._list_permissions(file_id, remote_path))
+        if anyone is None:
+            with convert_api_errors(remote_path=remote_path):
+                anyone = self._retry_transient(
+                    lambda: self._get_service()
+                    .permissions()
+                    .create(
+                        fileId=file_id,
+                        body={"type": "anyone", "role": "reader"},
+                        fields="id, type, role",
+                    )
+                    .execute()
+                )
+            self._count_request()
+        with convert_api_errors(remote_path=remote_path):
+            file = self._retry_transient(
+                lambda: self._get_service()
+                .files()
+                .get(fileId=file_id, fields="id, name, webViewLink")
+                .execute()
+            )
+        self._count_request()
+        return self._shared_link_metadata(
+            file, cased_path, anyone.get("role", "reader")
+        )
+
+    def revoke_shared_link(self, url_or_path: str) -> None:
+        """Revokes a shared link by deleting the ``anyone`` permission.
+
+        Matches the upstream (Dropbox) call signature of taking the link
+        URL. Drive share URLs embed the file ID, which is parsed directly
+        from the URL — no API lookup is needed. As a convenience beyond the
+        upstream semantics, a remote path (leading ``/``) is accepted too
+        and resolved through the path cache.
+
+        :param url_or_path: Shared link URL (``webViewLink``) or remote path.
+        :raises SharedLinkError: if the URL is not a recognizable Google
+            Drive link or the item is not shared with a link.
+        :raises NotFoundError: if the item does not exist on Drive.
+        """
+        remote_path: str | None
+        if url_or_path.startswith("/"):
+            file_id, remote_path = self._resolve_path_for_sharing(url_or_path)
+        else:
+            self._ensure_root_id()
+            parsed = _file_id_from_url(url_or_path)
+            if parsed is None:
+                raise SharedLinkError(
+                    "Could not revoke shared link",
+                    f"'{url_or_path}' is not a recognizable Google Drive "
+                    "shared link.",
+                )
+            file_id = parsed
+            remote_path = self._path_cache.id_to_path(file_id)
+        # A 404 for an unknown file ID surfaces here as NotFoundError.
+        anyone = self._anyone_permission(self._list_permissions(file_id, remote_path))
+        if anyone is None:
+            raise SharedLinkError(
+                "Could not revoke shared link",
+                "The item is not shared with a link.",
+                remote_path=remote_path,
+            )
+        with convert_api_errors(remote_path=remote_path):
+            self._retry_transient(
+                lambda: self._get_service()
+                .permissions()
+                .delete(fileId=file_id, permissionId=anyone["id"])
+                .execute()
+            )
+        self._count_request()
+
+    def list_shared_links(self, remote_path: str | None = None) -> ListSharedLinkResult:
+        """Lists shared links for the account, or for a single item.
+
+        Without *remote_path*, Drive is queried for all items visible to
+        anyone with the link (``visibility='anyoneWithLink'``). Items outside
+        the sync root (not resolvable through the path cache) are returned
+        with ``path_lower=None``. Pages are exhausted before returning, so
+        ``has_more`` is always ``False`` and ``cursor`` is empty — Drive has
+        no persistent listing cursor to resume from.
+
+        :param remote_path: If given, only return the link for this item
+            (an empty result when it is not shared with a link).
+        :returns: A :class:`ListSharedLinkResult` with all entries.
+        :raises NotFoundError: if *remote_path* is given but does not exist.
+        """
+        if remote_path is not None:
+            file_id, cased_path = self._resolve_path_for_sharing(remote_path)
+            anyone = self._anyone_permission(
+                self._list_permissions(file_id, remote_path)
+            )
+            if anyone is None:
+                return ListSharedLinkResult(entries=[], has_more=False, cursor="")
+            with convert_api_errors(remote_path=remote_path):
+                file = self._retry_transient(
+                    lambda: self._get_service()
+                    .files()
+                    .get(fileId=file_id, fields="id, name, webViewLink")
+                    .execute()
+                )
+            self._count_request()
+            entry = self._shared_link_metadata(
+                file, cased_path, anyone.get("role", "reader")
+            )
+            return ListSharedLinkResult(entries=[entry], has_more=False, cursor="")
+
+        self._ensure_root_id()
+        entries: list[SharedLinkMetadata] = []
+        page_token: str | None = None
+        with convert_api_errors():
+            while True:
+
+                def _list_shared_links_page(pt: str | None = page_token) -> Any:
+                    return (
+                        self._get_service()
+                        .files()
+                        .list(
+                            q="visibility='anyoneWithLink' and trashed=false",
+                            fields=(
+                                "nextPageToken, files(id, name, webViewLink, "
+                                "permissions(id, type, role))"
+                            ),
+                            pageSize=_LIST_PAGE_SIZE,
+                            pageToken=pt,
+                        )
+                        .execute()
+                    )
+
+                resp = self._retry_transient(_list_shared_links_page)
+                self._count_request()
+                for file in resp.get("files", []):
+                    anyone = self._anyone_permission(file.get("permissions", []))
+                    role = anyone.get("role", "reader") if anyone else "reader"
+                    entries.append(
+                        self._shared_link_metadata(
+                            file, self._path_cache.id_to_path(file["id"]), role
+                        )
+                    )
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+        return ListSharedLinkResult(entries=entries, has_more=False, cursor="")
 
     # ---- Change detection / sync feed ------------------------------------------------
 

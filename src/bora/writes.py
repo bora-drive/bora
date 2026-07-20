@@ -288,7 +288,10 @@ class _WriteHelper:
                 sync_event=sync_event,
             )
         else:
-            # Simple path.
+            # Simple path. The whole body goes up in a single request, so
+            # there is no chunk boundary at which to apply
+            # bandwidth_limit_up; small transfers stay unthrottled, matching
+            # how the download side only throttles between chunks.
             if mode == "create":
                 # Reserve a pre-generated ID so a retried create (after a
                 # "committed but response lost" connection error) fails with
@@ -492,6 +495,7 @@ class _WriteHelper:
                     status, response = client._retry_transient(request.next_chunk)
                     if sync_event is not None and status is not None:
                         sync_event.completed = status.resumable_progress
+                    client._throttle_up(_RESUMABLE_CHUNK_SIZE)
         except BoraApiError as exc:
             # convert_api_errors has already converted the HttpError (409
             # has no dedicated bora class), so inspect __cause__ rather
