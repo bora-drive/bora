@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 from unittest import mock
 
 from click.testing import CliRunner
@@ -105,6 +106,29 @@ def test_filestatus(m: Bora) -> None:
     assert result.exit_code == 2
     assert isinstance(result.exception, SystemExit)
     assert "'/invalid-dir' does not exist" in result.output
+
+
+def test_ls_non_tty_prints_names(m: Bora, monkeypatch) -> None:
+    """Piped (non-tty) `bora ls` must print entry names, one per line.
+
+    Regression test: the non-tty branch used to re-iterate the already
+    exhausted `list_folder_iterator` result and printed nothing.
+    """
+    entries = [SimpleNamespace(name="b.txt"), SimpleNamespace(name="a.txt")]
+
+    m_proxy = _make_proxy_mock(pending_link=False, config_name=m.config_name)
+    m_proxy.list_folder_iterator = mock.Mock(return_value=iter([entries]))
+    monkeypatch.setattr(
+        "bora.daemon.BoraProxy",
+        lambda config_name, fallback: m_proxy,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["ls", "-c", m.config_name])
+
+    assert result.exit_code == 0, result.output
+    assert "a.txt" in result.output
+    assert "b.txt" in result.output
 
 
 def test_autostart(m: Bora) -> None:
