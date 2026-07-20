@@ -4224,3 +4224,164 @@ def test_export_full_cycle_integration(sync_engine: SyncEngine) -> None:
 
     # The other mirrors are untouched by the Doc-only edits.
     assert osp.isfile(L("/Book.xlsx")) and osp.isfile(L("/Deck.pptx"))
+
+
+# ==== Selective sync: exclusion list must follow remote renames / moves ==============
+#
+# Drive's change feed is id-keyed: a rename or reparent of a folder arrives as
+# a SINGLE entry at the NEW path — no event for the old path, no per-child
+# entries. Excluded folders are never downloaded, so they have no index entry
+# and _apply_remote_move cannot catch them. Without rewriting, the stale
+# ``excluded_items`` entry stops matching and the renamed folder silently
+# starts syncing under its new name. The engine snapshots the ids of excluded
+# items from the client's path cache before each feed batch
+# (_snapshot_excluded_ids) and rewrites the affected entries in
+# apply_remote_changes (_rewrite_excluded_after_remote_move). These tests
+# drive the REAL download cycle end-to-end against FakeDrive.
+
+
+def test_remote_rename_of_excluded_folder_updates_exclusion_list(
+    sync_engine: SyncEngine,
+) -> None:
+    """Renaming an excluded folder remotely must rewrite its excluded_items
+    entry to the new path, and the folder must stay excluded (not download)."""
+    L = sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+
+    secret = fake.add_folder("/Secret")
+    fake.add_file("/Secret/hidden.txt", b"hidden bytes")
+    fake.add_file("/keep.txt", b"keep bytes")
+    sync_engine.excluded_items = ["/Secret"]
+
+    sync_engine.download_sync_cycle()
+
+    assert osp.isfile(L("/keep.txt"))
+    assert not osp.exists(L("/Secret"))
+    assert sync_engine.excluded_items == {"/secret"}
+
+    # Remote rename — one id-keyed change entry at the new path. The new name
+    # carries punctuation to exercise the fold_human matching path.
+    fake.files[secret]["name"] = "Geheim (2024)"
+    fake._record_change(secret)
+
+    sync_engine.download_sync_cycle()
+
+    # The exclusion followed the rename ...
+    assert sync_engine.excluded_items == {"/geheim (2024)"}
+    # ... and nothing was downloaded under either name.
+    assert not osp.exists(L("/Secret"))
+    assert not osp.exists(L("/Geheim (2024)"))
+    assert sync_engine.get_index_entry_by_remote_id(secret) is None
+    assert sync_engine.sync_errors == []
+
+
+def test_remote_move_of_excluded_folder_updates_exclusion_list(
+    sync_engine: SyncEngine,
+) -> None:
+    """Moving an excluded folder to a different parent must rewrite its
+    excluded_items entry to the new path and keep it excluded."""
+    L = sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+
+    fake.add_folder("/Parent1")
+    parent2 = fake.add_folder("/Parent2")
+    secret = fake.add_folder("/Parent1/Secret")
+    fake.add_file("/Parent1/Secret/hidden.txt", b"hidden bytes")
+    sync_engine.excluded_items = ["/Parent1/Secret"]
+
+    sync_engine.download_sync_cycle()
+
+    assert osp.isdir(L("/Parent1"))
+    assert osp.isdir(L("/Parent2"))
+    assert not osp.exists(L("/Parent1/Secret"))
+    assert sync_engine.excluded_items == {"/parent1/secret"}
+
+    # Remote reparent — one id-keyed change entry at the new path.
+    fake.files[secret]["parents"] = [parent2]
+    fake._record_change(secret)
+
+    sync_engine.download_sync_cycle()
+
+    assert sync_engine.excluded_items == {"/parent2/secret"}
+    assert not osp.exists(L("/Parent1/Secret"))
+    assert not osp.exists(L("/Parent2/Secret"))
+    assert sync_engine.get_index_entry_by_remote_id(secret) is None
+    assert sync_engine.sync_errors == []
+
+
+def test_remote_rename_of_non_excluded_folder_leaves_exclusion_list(
+    sync_engine: SyncEngine,
+) -> None:
+    """A rename of a folder that is NOT excluded (and holds no excluded
+    entries) must leave excluded_items untouched and sync normally."""
+    L = sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+
+    public = fake.add_folder("/Public")
+    fake.add_file("/Public/a.txt", b"public bytes")
+    fake.add_folder("/Secret")
+    sync_engine.excluded_items = ["/Secret"]
+
+    sync_engine.download_sync_cycle()
+
+    assert osp.isfile(L("/Public/a.txt"))
+    assert not osp.exists(L("/Secret"))
+    assert sync_engine.excluded_items == {"/secret"}
+
+    fake.files[public]["name"] = "PublicNew"
+    fake._record_change(public)
+
+    sync_engine.download_sync_cycle()
+
+    # The exclusion list is untouched; the rename synced normally.
+    assert sync_engine.excluded_items == {"/secret"}
+    assert osp.isdir(L("/PublicNew"))
+    assert osp.isfile(L("/PublicNew/a.txt"))
+    assert not osp.exists(L("/Public"))
+    assert not osp.exists(L("/Secret"))
+    assert sync_engine.sync_errors == []
+
+
+def test_remote_rename_of_parent_rewrites_excluded_child_entries(
+    sync_engine: SyncEngine,
+) -> None:
+    """Renaming a SYNCED folder that holds excluded entries must rewrite every
+    excluded_items entry below it (the feed emits no per-child events)."""
+    L = sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+
+    parent = fake.add_folder("/Parent")
+    sub1 = fake.add_folder("/Parent/Sub1")
+    sub2 = fake.add_folder("/Parent/Sub2")
+    fake.add_file("/Parent/Sub1/hidden.txt", b"hidden bytes")
+    fake.add_file("/Parent/visible.txt", b"visible bytes")
+    sync_engine.excluded_items = ["/Parent/Sub1", "/Parent/Sub2"]
+
+    sync_engine.download_sync_cycle()
+
+    assert osp.isfile(L("/Parent/visible.txt"))
+    assert not osp.exists(L("/Parent/Sub1"))
+    assert not osp.exists(L("/Parent/Sub2"))
+    assert sync_engine.excluded_items == {"/parent/sub1", "/parent/sub2"}
+
+    # Remote rename of the (synced, non-excluded) parent — one id-keyed entry.
+    fake.files[parent]["name"] = "Moved"
+    fake._record_change(parent)
+
+    sync_engine.download_sync_cycle()
+
+    # Both child entries were rewritten under the new parent path.
+    assert sync_engine.excluded_items == {"/moved/sub1", "/moved/sub2"}
+    # The synced content moved with the parent; the excluded children stayed
+    # excluded (nothing downloaded under the old or new paths).
+    assert osp.isfile(L("/Moved/visible.txt"))
+    assert not osp.exists(L("/Parent"))
+    assert not osp.exists(L("/Moved/Sub1"))
+    assert not osp.exists(L("/Moved/Sub2"))
+    assert sync_engine.get_index_entry_by_remote_id(sub1) is None
+    assert sync_engine.get_index_entry_by_remote_id(sub2) is None
+    assert sync_engine.sync_errors == []

@@ -693,6 +693,14 @@ class SyncEngine:
         self._excluded_items: set[str] = self.clean_excluded_items_list(
             self._conf.get("sync", "excluded_items")
         )
+        # Snapshot of {remote_id: excluded path (fold_human form)} taken
+        # immediately before each change-feed batch is pulled. Excluded items
+        # are never downloaded and therefore have no local index entry, so the
+        # client's path cache is the only place that still knows the OLD path
+        # of an excluded item when a remote rename/move arrives — and the
+        # client rewrites the cache while producing the batch, hence the
+        # snapshot. See :meth:`_snapshot_excluded_ids`.
+        self._excluded_ids_snapshot: dict[str, str] = {}
         self._max_cpu_percent: float = (
             self._conf.get("sync", "max_cpu_percent") * CPU_CORE_COUNT
         )
@@ -3452,7 +3460,19 @@ class SyncEngine:
                 last_cursor, resolve_deleted_path=self._index_path_for_remote_id
             )
 
-        for changes in changes_iter:
+        while True:
+            # The client rewrites the path cache while producing the next
+            # batch. Capture the file ids of currently excluded items first,
+            # while the cache still holds their OLD paths, so that
+            # ``apply_remote_changes`` can map a rename/move of an excluded
+            # item back to its exclusion-list entry.
+            self._snapshot_excluded_ids()
+
+            try:
+                changes = next(changes_iter)
+            except StopIteration:
+                return
+
             changes = self._clean_remote_changes(changes)
             changes.entries.sort(key=lambda x: x.path_lower.count("/"))
 
@@ -3463,6 +3483,87 @@ class SyncEngine:
             self._logger.debug("Converted remote changes to SyncEvents")
 
             yield sync_events, changes.cursor
+
+    def _snapshot_excluded_ids(self) -> None:
+        """
+        Records the remote file id of every excluded item, resolved through the
+        client's path cache. Must be called immediately before a change-feed
+        batch is pulled: producing the batch mutates the path cache, so the ids
+        have to be captured while the cache still maps them to the OLD paths.
+
+        Excluded items are not indexed locally (they are never downloaded), so
+        this snapshot is the only source that can associate the id-keyed change
+        entry of a renamed/moved excluded item with its stale exclusion-list
+        entry.
+        """
+        snapshot: dict[str, str] = {}
+
+        for path in self.excluded_items:
+            # ``excluded_items`` entries are in fold_human form (decoded,
+            # casefolded); the cache lookup takes an encoded path and matches
+            # case-insensitively via the fold key.
+            file_id = self.client._path_cache.path_to_id(encode_path(path))
+            if file_id is not None:
+                snapshot[file_id] = path
+
+        self._excluded_ids_snapshot = snapshot
+
+    def _rewrite_excluded_after_remote_move(
+        self, event: SyncEvent, excluded: set[str]
+    ) -> set[str]:
+        """
+        Rewrites exclusion-list entries when *event* is a remote rename / move
+        that carries excluded paths with it.
+
+        Drive's change feed is id-keyed: a rename or reparent arrives as a
+        single entry at the NEW path, with no event for the old path. Two cases
+        must rewrite ``excluded_items`` so exclusion follows the item:
+
+        1. The moved item is itself excluded. It has no local index entry, so
+           its old path comes from the pre-batch path-cache snapshot
+           (:meth:`_snapshot_excluded_ids`).
+        2. The moved item is a synced folder that contains excluded entries
+           (e.g. ``/parent`` is renamed while ``/parent/sub`` is excluded). Its
+           old path comes from the local index by remote id.
+
+        All comparisons happen in fold_human form (decoded, casefolded),
+        mirroring :meth:`is_excluded_by_user`.
+
+        :param event: Download sync event from the change feed.
+        :param excluded: Working set of excluded items (fold_human form).
+        :returns: The updated working set (unchanged if *event* is not a move
+            affecting any excluded entry).
+        """
+        if event.is_deleted or event.remote_id is None or not excluded:
+            return excluded
+
+        new_path = decode_path(event.remote_path_lower)
+        old_path = self._excluded_ids_snapshot.get(event.remote_id)
+
+        if old_path is None and event.is_directory:
+            # Not itself excluded — but a synced folder may hold excluded
+            # entries below it. Its old path is still in the index (the index
+            # is re-keyed only later, by _apply_remote_move).
+            index_entry = self.get_index_entry_by_remote_id(event.remote_id)
+            if index_entry is not None:
+                old_path = decode_path(index_entry.remote_path_lower)
+
+        if old_path is None or old_path == new_path:
+            return excluded
+
+        if not any(is_equal_or_child(p, old_path) for p in excluded):
+            return excluded
+
+        self._logger.info(
+            "Excluded item %r moved to %r remotely, updating excluded items",
+            old_path,
+            new_path,
+        )
+
+        return {
+            new_path + p[len(old_path) :] if is_equal_or_child(p, old_path) else p
+            for p in excluded
+        }
 
     def apply_remote_changes(
         self, sync_events: Collection[SyncEvent]
@@ -3495,21 +3596,28 @@ class SyncEngine:
         new_excluded = self.excluded_items
 
         for event in sync_events:
-            is_excluded = self.is_excluded_by_user(
-                event.remote_path_lower
+            # A remote rename / move of an excluded item (or of a folder that
+            # holds excluded entries) arrives as a single id-keyed entry at the
+            # NEW path. Rewrite the affected exclusion-list entries first so
+            # that exclusion follows the item to its new path.
+            new_excluded = self._rewrite_excluded_after_remote_move(event, new_excluded)
+
+            # Check exclusion against the working set so that rewrites (and
+            # deletion-pruning) from earlier events in this batch are seen.
+            # Mirrors ``is_excluded_by_user``: entries are in fold_human form,
+            # decode the engine's fold_path key before comparing.
+            decoded_path = decode_path(event.remote_path_lower)
+            is_excluded = any(
+                is_equal_or_child(decoded_path, p) for p in new_excluded
             ) or self.is_excluded(event.remote_path)
 
             if is_excluded:
                 if event.is_deleted:
                     # Remove deleted item and its children from the excluded list.
-                    # ``excluded_items`` entries are in fold_human form; decode
-                    # the engine's fold_path key to the same form before
-                    # comparing (mirrors ``is_excluded_by_user``).
-                    deleted_path_lower = decode_path(event.remote_path_lower)
                     new_excluded = {
                         path
                         for path in new_excluded
-                        if not is_equal_or_child(path, deleted_path_lower)
+                        if not is_equal_or_child(path, decoded_path)
                     }
 
             else:
