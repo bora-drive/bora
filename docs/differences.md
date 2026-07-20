@@ -44,15 +44,20 @@ namespaces in the Drive API and are not included in the sync scope.
 
 ---
 
-## Native Google Docs, Sheets, Slides, and Shortcuts
+## Native Google Docs, Sheets, and Slides
 
 Files with a `application/vnd.google-apps.*` MIME type — Google Docs, Sheets, Slides,
-Forms, Drawings, Sites, and Drive Shortcuts — have no downloadable byte content via the
-Drive API and no checksum. Bora **skips these files**; they are reported as "skipped"
-in status output and are never mirrored to your local folder.
+Forms, Drawings, and Sites — have no downloadable byte content via the Drive API and
+no checksum, so they cannot be synced as regular files.
 
-If you need a local copy of a Google Doc, export it manually from drive.google.com
-(File > Download).
+By default, Bora **exports** Google Docs, Sheets, and Slides to read-only local
+mirror files (`.md` or `.docx` for Docs, `.xlsx` for Sheets, `.pptx` for Slides).
+These mirrors are one-way: local edits to them are never uploaded. See the
+[Google Docs export section of the user guide](userguide.md#exporting-google-docs-sheets-and-slides)
+for details and how to turn this off.
+
+Other native types (Forms, Drawings, Sites) are **skipped** and never mirrored to your
+local folder. Drive Shortcuts are handled separately — see the symlink section below.
 
 ---
 
@@ -96,9 +101,31 @@ handles conflict copies locally.
 
 ---
 
-## Symlinks
+## Symlinks and Drive shortcuts
 
-Symlinks are not synced. If Bora encounters a symlink in the sync folder it is ignored.
+Google Drive has no native symlink type, but it does have **shortcuts** (small pointer
+files created with "Add shortcut to Drive"). Bora maps the two onto each other:
+
+- **Local to remote:** a symlink in the sync folder whose target resolves to a path
+  *inside* the sync folder is uploaded as a Drive shortcut pointing at the synced
+  target. Retargeting the symlink retargets the existing shortcut in place; deleting
+  the symlink deletes the shortcut.
+- **Remote to local:** a Drive shortcut whose target is synced is materialised locally
+  as a symlink with a relative target. On Windows, where creating real symlinks
+  usually requires Developer Mode or admin rights, Bora falls back to writing a
+  minimal `<name>.lnk` shortcut file instead.
+
+Limitations:
+
+- A symlink whose target lies *outside* the sync folder (or is otherwise not synced)
+  cannot be represented as a Drive shortcut and is reported as a sync error.
+- Replacing an existing regular file or folder with a symlink at the same path is not
+  supported and is reported as a sync error.
+- A remote shortcut whose target is excluded from sync (or otherwise not synced) is
+  skipped with a warning.
+- A shortcut pointing at another shortcut is not followed (only one hop is resolved).
+- Shortcuts inside view-only shared folders cannot be created, retargeted, or deleted,
+  because that would modify a folder you have no write access to.
 
 ---
 
