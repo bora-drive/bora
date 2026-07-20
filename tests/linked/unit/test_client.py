@@ -4,8 +4,10 @@ Tests run against a real Google account when BORA_TEST_REFRESH_TOKEN is
 set; they skip cleanly when the variable is absent.
 
 Dropbox-only features dropped:
-  - test_share_dir_new, test_share_dir_existing  (Shared Drives stub)
-  - test_sharedlink_lifecycle, test_sharedlink_errors  (sharing stub)
+  - test_share_dir_new, test_share_dir_existing  (Shared Drives are not
+    supported; share_dir and shared links are now implemented via the
+    Drive permissions API — see GoogleDriveClient.create_shared_link —
+    but have no linked coverage here yet)
   - All Dropbox upload-session chunk-phase hash-mismatch tests
     (the Dropbox API had per-chunk hash verification; the Drive client
     uses a single end-to-end MD5 comparison via _md5_file; there is no
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 
 import pytest
 
@@ -82,13 +85,70 @@ def test_upload_resumable(client: GoogleDriveClient) -> None:
 
     The test fixture large-file.pdf is ~1.8 MB, which is below the 5 MB
     resumable threshold, so both this and test_upload exercise the simple path
-    with the current fixtures. A truly >5 MB file would be needed to force the
-    resumable branch; that is left for a future fixture update (flagged below).
+    with the current fixtures. The real resumable branch is exercised by
+    test_upload_resumable_large below, which generates its >5 MB payload at
+    run time instead of committing a large binary fixture.
     """
     large_file = resources + "/large-file.pdf"
     md = client.upload(large_file, "/large-file.pdf")
     assert isinstance(md, FileMetadata)
     assert md.content_hash == _md5(large_file)
+
+
+@requires_account
+def test_upload_resumable_large(
+    client: GoogleDriveClient, monkeypatch, tmp_path
+) -> None:
+    """Force the real resumable-upload branch with a generated >5 MB file.
+
+    All committed fixtures are below _SIMPLE_UPLOAD_THRESHOLD (5 MB), so
+    test_upload and test_upload_resumable only exercise the simple path.
+    This test generates a 6 MiB file of deterministic pseudo-random bytes at
+    test time (nothing large is committed to the repo), uploads it, and
+    verifies:
+
+    - the payload is over the resumable threshold (precondition),
+    - _WriteHelper._upload_resumable was actually invoked, via a spy wrapper
+      that delegates to the real implementation (same monkeypatch style as
+      test_upload_hash_mismatch),
+    - Drive's md5Checksum matches the local MD5, and
+    - a download round-trip returns byte-identical content (MD5 compare).
+    """
+    import bora.writes as _writes
+    from bora.writes import _SIMPLE_UPLOAD_THRESHOLD
+
+    size = 6 * 1024 * 1024  # 6 MiB, above the 5 MiB resumable threshold
+    local = tmp_path / "resumable-large.bin"
+    local.write_bytes(random.Random(20260720).randbytes(size))
+    assert local.stat().st_size == size
+    assert size > _SIMPLE_UPLOAD_THRESHOLD
+
+    resumable_calls: list[str] = []
+    real_upload_resumable = _writes._WriteHelper._upload_resumable
+
+    def spying_upload_resumable(self, **kwargs):
+        resumable_calls.append(kwargs["remote_path"])
+        return real_upload_resumable(self, **kwargs)
+
+    monkeypatch.setattr(
+        _writes._WriteHelper, "_upload_resumable", spying_upload_resumable
+    )
+
+    md = client.upload(str(local), "/resumable-large.bin")
+
+    assert resumable_calls == [
+        "/resumable-large.bin"
+    ], "upload of a >5 MB file must go through _upload_resumable"
+    assert isinstance(md, FileMetadata)
+    assert md.size == size
+    assert md.content_hash == _md5(str(local))
+
+    # MD5 round-trip: download the file back and compare digests.
+    dest = tmp_path / "resumable-large-downloaded.bin"
+    md_down = client.download("/resumable-large.bin", str(dest))
+    assert isinstance(md_down, FileMetadata)
+    assert _md5(str(dest)) == _md5(str(local))
+    assert md_down.content_hash == md.content_hash
 
 
 @requires_account
