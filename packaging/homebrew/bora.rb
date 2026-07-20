@@ -25,7 +25,7 @@ class Bora < Formula
   include Language::Python::Virtualenv
 
   desc "Open-source Google Drive sync client for macOS and Linux"
-  homepage "https://bora.tools"
+  homepage "https://github.com/indirect/bora"
   # TODO(release): replace git placeholder with published sdist url + sha256.
   url "https://github.com/indirect/bora.git", using: :git, tag: "v0.1.0"
   version "0.1.0"

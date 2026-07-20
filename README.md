@@ -29,7 +29,7 @@ already exists with the same content locally or in the cloud (verified via MD5 c
 On all platforms, you can install Bora as a Python package from PyPI.
 
 For more detailed information on installation, setup, and system requirements, see the
-[documentation](https://bora.tools/docs).
+[documentation](docs/setup.md).
 
 ### Python package using PyPI
 
@@ -92,7 +92,7 @@ bora         user@gmail.com        ~/Library/Application Support/bora/bora.ini
 work         user@mycorp.org       ~/Library/Application Support/bora/work.ini
 ```
 
-A full reference for the CLI is available on the [website](https://bora.tools/cli).
+A full reference for the CLI is available in the [user guide](docs/userguide.md).
 
 ## Differences from Maestral / Dropbox
 
@@ -101,9 +101,11 @@ upstream Maestral. The most notable:
 
 - **Polling latency:** changes made on drive.google.com may take up to ~3 minutes to
   appear locally (Google Drive has no long-poll API; Bora polls every 180 seconds).
-- **Native Google Docs/Sheets/Slides** are not downloaded — they have no byte content
-  on the Drive API and are skipped.
-- **Shared links** are not supported in v0.1.0.
+- **Native Google Docs/Sheets/Slides** have no byte content on the Drive API; they are
+  exported as read-only Office/Markdown mirrors (configurable with `bora export`).
+  Forms, Sites and Drawings are skipped.
+- **Shared links** are available through the Python API (Drive `anyone`-reader
+  permissions); there is no `bora sharelink` CLI command in v0.1.0.
 
 See [docs/differences.md](docs/differences.md) for the full list.
 
@@ -114,7 +116,7 @@ additional platforms. Look out for issues marked "good first issue" or "help wan
 
 Relevant resources:
 
-- [Bora API docs](https://bora.tools/api)
+- [Bora API docs](docs/index.rst) (build with Sphinx from `docs/`)
 - [Google Drive API docs](https://developers.google.com/drive/api/reference/rest/v3)
 - [Google Drive Python client docs](https://googleapis.github.io/google-api-python-client/docs/dyn/drive_v3.html)
 

@@ -72,9 +72,12 @@ a Google Cloud project named `bora-500821`, replacing the original
 
 ## Remaining work
 
-Everything automatable in this section was completed in the 2026-07-20 sweep
-(details below). What's left needs a live Google login, another OS, or a
-release-time decision — see the consolidated lists at the end of this section.
+Everything automatable in this section was completed in the 2026-07-20 sweep,
+and the live-login checklist was run the same day against
+`bora-test@arko.net` (details below). What's left: Google OAuth app
+verification (needs the Cloud Console), the sharing 403 sub-check (needs a
+second account), another OS, or a release-time decision — see the
+consolidated lists at the end of this section.
 
 ### Completed 2026-07-20
 
@@ -135,22 +138,45 @@ release-time decision — see the consolidated lists at the end of this section.
    `sharedWithMeTime`), the local `/Shared with me` mount dir was uploaded as
    a real folder by local indexing, and the while-inactive scan synthesized a
    spurious create event for the mount on every restart.
-2. **Google Docs export live spot-check** (pre-release gate): mirrors open
-   correctly; a web-UI Doc edit re-exports within a poll interval; nothing is
-   ever re-uploaded; `bora export markdown off` re-exports as `.docx`; verify
-   the Drive `version` field is present and monotonically increments on
-   native-doc edits (`modifiedTime` fallback exists but is unverified live).
-3. **Sharing live verification:** real `webViewLink` URL shapes for all item
-   types (esp. native docs on docs.google.com) against `_URL_ID_PATTERNS`;
-   whether the `anyoneWithLink` listing returns the `permissions` field for
-   all items; `permissions.create` on an unshareable item maps 403 →
-   `InsufficientPermissionsError`.
-4. **Selective-sync rename live check:** confirm a real `changes.list` rename
-   entry arrives as modeled (single entry, new `parents`+`name`, not
-   removed/trashed), and exercise a rename of an excluded folder end to end.
-5. **Real-account end-to-end smoke test** (release checklist).
+2. [x] **Google Docs export live spot-check** — DONE 2026-07-20 (see the
+   "Google Docs Export" section below for details): mirrors open, edits
+   re-export within a poll interval with no conflicted copy, nothing is ever
+   re-uploaded, Drive `version` verified present and monotonic. One gap
+   found, recorded below: the `bora export markdown off` flip only takes
+   effect after a daemon restart, and an existing unchanged mirror is not
+   re-exported until the Doc next changes.
+3. [x] **Sharing live verification** — DONE 2026-07-20 (probe script:
+   `$CLAUDE_JOB_DIR/tmp/sharing_probe.py` pattern): `webViewLink` shapes for
+   regular file, folder, Doc, Sheet and Slides all parse back to the correct
+   id via `_URL_ID_PATTERNS`; the account-wide `anyoneWithLink` listing
+   returned every shared item; `create_shared_link` is idempotent and
+   `revoke_shared_link` works by URL for both binary files and native docs.
+   STILL OPEN: the `permissions.create` 403 →
+   `InsufficientPermissionsError` mapping needs an item the test account
+   cannot share — requires a second account to share something read-only
+   into `bora-test@arko.net` first (the account currently has no
+   shared-with-me items).
+4. [x] **Selective-sync rename live check** — DONE 2026-07-20: a real
+   `changes.list` rename arrives exactly as modeled (single entry carrying
+   the new `name` + `parents`, `removed=False`, `file.trashed=False`), and
+   an end-to-end rename of an excluded folder (`bora excluded add` →
+   remote rename → poll) rewrote `excluded_items` to the new path with no
+   local re-download.
+5. [x] **Real-account end-to-end smoke test** — DONE 2026-07-20 (config
+   `smoke-test`, sync dir `~/BoraSmoke`): link via refresh token, local tree
+   uploaded (inotify path), remote-born file downloaded within a poll cycle,
+   `bora status` / `bora auth status` show email/type/usage, 0 sync errors.
+   Found and fixed a real CLI bug: piped (non-tty) `bora ls` printed nothing
+   because it re-iterated an exhausted `list_folder_iterator` (regression
+   test added in `tests/offline/test_cli.py`).
 6. **Google OAuth app verification** — consent screen is still in Testing
    mode, so refresh tokens expire after 7 days.
+
+Minor observation from the live runs (display-level, not a sync defect):
+`bora ls` shows native docs by their raw Drive `name` (`live-doc`) while the
+canonical `path_display` and the on-disk mirror carry the projected leaf
+(`live-doc.md`) — `to_file_metadata` intentionally leaves `name` unprojected.
+Decide at some point whether `ls` should display the projected leaf.
 
 ### Needs another environment or a release decision
 
@@ -178,17 +204,34 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
 - Covered end-to-end by `tests/offline/test_sync.py::test_export_full_cycle_integration`.
 
 **Remaining manual work / known gaps** (see `.superpowers/sdd/task-12-report.md`):
-- [ ] Live spot-check against a real linked Google account (SKIPPED — no account
-  in this environment): verify the mirrors open correctly, a web-UI Doc edit
-  auto-updates the mirror within a poll interval, nothing is ever re-uploaded,
-  and `bora export markdown off` re-exports as `.docx`.
-- [ ] Verify empirically that the live Drive `version` field is present and
-  monotonically increments on native-doc edits (design assumption replacing
-  `headRevisionId`; UNVERIFIED against live Drive). The `modifiedTime` fallback
-  is now implemented — `to_file_metadata` reads `version` via `.get` and
-  derives the rev from `modifiedTime` when it is absent, so a missing field
-  degrades gracefully instead of wedging the poll cycle. Part of the skipped
-  live check.
+- [x] Live spot-check — DONE 2026-07-20 against `bora-test@arko.net`:
+  mirrors open correctly (`.md` byte-exact, `.xlsx`/`.pptx` valid Office
+  zips, all read-only on disk); an API-level Doc edit (media import — the
+  Drive-API equivalent of a web-UI edit) re-exported the mirror within one
+  poll interval with NO conflicted copy (the f15d19c untouched-mirror fix
+  holds live); nothing was ever re-uploaded (the Doc's `modifiedTime` stayed
+  at the edit's own timestamp and no mirror-named binaries appeared in
+  Drive).
+- [x] Drive `version` field — VERIFIED live 2026-07-20: present on every
+  native doc from creation and strictly monotonic across edits (observed
+  4→6→7→9→11 on one Doc). Note: Drive also bumps `version` server-side
+  without user-visible edits (e.g. right after creation and after import
+  processing), so the engine may occasionally see a phantom "change" and
+  re-export an unchanged mirror — harmless (no upload, idempotent
+  re-export). The `modifiedTime` fallback remains untested live because
+  `version` is in practice always present.
+- [ ] GAP found in the live check — **export-toggle flips don't reach the
+  running engine**: the `export_google_docs`/`export_google_docs_markdown`
+  setters in `main.py` only write config; `SyncEngine.reload_cached_config`
+  runs at engine init, so `bora export markdown off` takes effect only after
+  a daemon restart. Even then an existing unchanged mirror is NOT
+  re-exported (an unchanged Doc produces no change entry); the mirror
+  converts on the Doc's next real edit — at which point the swap is clean
+  (`live-doc.md` removed, `live-doc.docx` written with the new content,
+  same `remote_id` identity). Fix idea: have the setters call
+  `sync.reload_cached_config()`; forcing re-export of unchanged mirrors is
+  trickier — a reindex would currently trip the rebuild-with-mirrors
+  limitation below.
 - [x] FIXED (f15d19c, with tests): a server-side re-export of an exported
   mirror used to spawn a spurious writable conflicted copy of the prior mirror
   (exports have no server hash, so `_check_download_conflict` fell through to
@@ -221,9 +264,10 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
 
 - **Shared Drives (Team Drives)** — My Drive only; `is_team_space` hardcoded
   `False`; no `driveId`/`supportsAllDrives` usage.
-- **Google Docs/Sheets/Slides export** — LANDED (see "Google Docs Export"
-  above); Forms/Sites/Drawings remain skipped, and the live spot-check plus
-  the rebuild-with-mirrors limitation are still open.
+- **Google Docs/Sheets/Slides export** — LANDED and live-verified (see
+  "Google Docs Export" above); Forms/Sites/Drawings remain skipped, and the
+  rebuild-with-mirrors limitation plus the export-toggle-flip gap are still
+  open.
 - **Webhook change notifications** — polling only (~180 s), by design.
 - **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
   desktop entry references `bora gui` but there is no GUI.

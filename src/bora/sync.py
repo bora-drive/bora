@@ -380,7 +380,7 @@ class FSEventHandler(FileSystemEventHandler):
             return
 
         # Ignore moves onto itself, they may be erroneously emitted on older versions of
-        # macOS. See https://github.com/samschott/bora/issues/671.
+        # macOS. See https://github.com/samschott/maestral/issues/671.
         if is_moved(event) and event.src_path == event.dest_path:
             return
 
