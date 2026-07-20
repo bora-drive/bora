@@ -65,8 +65,12 @@ __all__ = [
 FILE_FIELDS = (
     "id, name, parents, mimeType, modifiedTime, size, md5Checksum, version, "
     "shared, headRevisionId, trashed, lastModifyingUser(permissionId), "
-    "sharedWithMe, ownedByMe, capabilities(canEdit), "
+    "sharedWithMeTime, ownedByMe, capabilities(canEdit), "
     "shortcutDetails(targetId, targetMimeType)"
+    # NB: "sharedWithMe" is only a search-query term in Drive v3, not a File
+    # resource field — requesting it in a fields projection is a 400
+    # invalidParameter (found live, 2026-07-20). The presence of
+    # sharedWithMeTime is the field-level signal for a direct share.
 )
 
 # Page size for changes.list. 100 keeps each cache-write batch modest.
@@ -192,7 +196,7 @@ def classify(change: dict[str, Any], path_cache: "PathIDCache") -> ChangeDecisio
     parents = file.get("parents") or []
     in_scope = any(path_cache.id_to_path(p) is not None for p in parents)
     if not in_scope:
-        if file.get("sharedWithMe"):
+        if file.get("sharedWithMeTime"):
             # New shared-with-me attach point: in scope under the virtual root.
             return ChangeDecision.APPLY
         if path_cache.id_to_path(file["id"]) is not None:
@@ -302,7 +306,7 @@ def _emit_apply(
         (p for p in parents if path_cache.id_to_path(p) is not None),
         None,
     )
-    if parent_id is None and file.get("sharedWithMe"):
+    if parent_id is None and file.get("sharedWithMeTime"):
         # New shared-with-me attach point — mount under the virtual root.
         parent_id = SHARED_WITH_ME_ID
     # classify() returns APPLY only with at least one in-scope parent (or a

@@ -563,7 +563,7 @@ class TestPopulateSharedRoots:
             "name": "TeamFolder",
             "mimeType": "application/vnd.google-apps.folder",
             "parents": ["SOMEONE_ELSES_ID"],
-            "sharedWithMe": True,
+            "sharedWithMeTime": "2026-01-01T00:00:00.000Z",
         }
         child = {
             "id": "SC",
@@ -581,7 +581,7 @@ class TestPopulateSharedRoots:
             "id": "O",
             "name": "x.txt",
             "mimeType": "text/plain",
-            "parents": ["UNREACHABLE"],  # no sharedWithMe flag
+            "parents": ["UNREACHABLE"],  # no sharedWithMeTime field
         }
         cache.populate_from_listing([orphan])
         assert cache.id_to_path("O") is None
@@ -613,7 +613,7 @@ class TestReservedNameCollision:
             "name": "Shared with me",
             "mimeType": "application/vnd.google-apps.folder",
             "parents": ["SOMEONE_ELSES_ID"],
-            "sharedWithMe": True,
+            "sharedWithMeTime": "2026-01-01T00:00:00.000Z",
         }
         cache.populate_from_listing([shared_root])
         assert cache.id_to_path("SR") == "/Shared with me/Shared with me"
