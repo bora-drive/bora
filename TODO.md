@@ -127,11 +127,14 @@ release-time decision — see the consolidated lists at the end of this section.
 
 ### Needs a live Google login (consolidated — do together)
 
-1. **Run the linked suites** (`tests/README.md`: link the dedicated test
-   account, set `BORA_TEST_REFRESH_TOKEN`, then `pytest tests/linked` plus
-   `pytest tests/linked -m slow` for the write burst). Covers the new
-   resumable-upload, rate-limit, token-refresh, and disconnect tests, and the
-   selective-sync integration tests.
+1. [x] **Run the linked suites** — DONE 2026-07-20 against
+   `bora-test@arko.net` (new `bora-500821` OAuth client): all 90 linked tests
+   pass, each verified in an isolated single-test pytest run (`-m slow` burst
+   included). Live testing surfaced and fixed three real bugs: `sharedWithMe`
+   is not a selectable Drive v3 field (projections now use
+   `sharedWithMeTime`), the local `/Shared with me` mount dir was uploaded as
+   a real folder by local indexing, and the while-inactive scan synthesized a
+   spurious create event for the mount on every restart.
 2. **Google Docs export live spot-check** (pre-release gate): mirrors open
    correctly; a web-UI Doc edit re-exports within a poll interval; nothing is
    ever re-uploaded; `bora export markdown off` re-exports as `.docx`; verify
