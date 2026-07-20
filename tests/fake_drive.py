@@ -68,6 +68,23 @@ def _now_rfc3339() -> str:
     return datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _web_view_link(fid: str, mime: str) -> str:
+    """A realistic webViewLink for a record (folders use /drive/folders/)."""
+    if mime == FOLDER_MIME:
+        return f"https://drive.google.com/drive/folders/{fid}"
+    return f"https://drive.google.com/file/d/{fid}/view"
+
+
+def _owner_permission() -> dict[str, Any]:
+    """The implicit owner permission every Drive item starts with."""
+    return {
+        "id": "perm-1",
+        "type": "user",
+        "role": "owner",
+        "emailAddress": "bora-test@example.com",
+    }
+
+
 class FakeDrive:
     """In-memory Drive backing store + Resource-tree factory."""
 
@@ -75,6 +92,7 @@ class FakeDrive:
         self.files: dict[str, dict[str, Any]] = {}
         self._id_counter = 0
         self._rev_counter = 0
+        self._perm_counter = 1  # "perm-1" is the implicit owner permission
         self._seq = 100  # opaque change cursor; ints rendered as str
         self._change_log: list[tuple[int, str]] = []  # (seq, fileId)
         self._fail_rules: list[dict] = []
@@ -113,6 +131,8 @@ class FakeDrive:
             "content": b"",
             "revisions": [],
             "lastModifyingUser": {"permissionId": "perm-1"},
+            "webViewLink": _web_view_link(ROOT_ID, FOLDER_MIME),
+            "permissions": [_owner_permission()],
         }
 
     # ---- id / rev / change bookkeeping ----
@@ -123,6 +143,10 @@ class FakeDrive:
     def _new_rev(self) -> str:
         self._rev_counter += 1
         return f"rev-{self._rev_counter}"
+
+    def _new_perm_id(self) -> str:
+        self._perm_counter += 1
+        return f"perm-{self._perm_counter}"
 
     def _record_change(self, file_id: str, *, is_edit: bool = False) -> None:
         """Append a change-log entry for *file_id*.
@@ -411,6 +435,8 @@ class FakeDrive:
             "content": b"",
             "revisions": [],
             "lastModifyingUser": {"permissionId": "perm-1"},
+            "webViewLink": _web_view_link(fid, mime),
+            "permissions": [_owner_permission()],
         }
         self.files[fid] = rec
         self._record_change(fid)
@@ -439,6 +465,8 @@ class FakeDrive:
             "content": content,
             "revisions": [],
             "lastModifyingUser": {"permissionId": "perm-1"},
+            "webViewLink": _web_view_link(fid, mime),
+            "permissions": [_owner_permission()],
         }
         if not is_folder:
             rec["revisions"].append(self._revision_dict(rec))
@@ -659,6 +687,7 @@ def _match_query(rec: dict, query: str) -> bool:
       "name = '<value>'"           -> name equality (Drive-escaped)
       "mimeType = '<value>'"       -> mimeType equality
       "sharedWithMe=true"          -> rec["sharedWithMe"] truthy
+      "visibility='anyoneWithLink'" -> rec has an 'anyone' permission
     """
     if not query:
         return True
@@ -666,6 +695,12 @@ def _match_query(rec: dict, query: str) -> bool:
         frag = frag.strip()
         if frag in ("trashed=false", "trashed = false"):
             if rec["trashed"]:
+                return False
+        elif frag in (
+            "visibility='anyoneWithLink'",
+            "visibility = 'anyoneWithLink'",
+        ):
+            if not any(p.get("type") == "anyone" for p in rec.get("permissions", [])):
                 return False
         elif frag in ("sharedWithMe=true", "sharedWithMe = true"):
             if not rec.get("sharedWithMe"):
@@ -774,6 +809,8 @@ class _FilesResource:
                 "content": content,
                 "revisions": [],
                 "lastModifyingUser": {"permissionId": "perm-1"},
+                "webViewLink": _web_view_link(fid, mime),
+                "permissions": [_owner_permission()],
             }
             if "shortcutDetails" in body_:
                 rec["shortcutDetails"] = dict(body_["shortcutDetails"])
@@ -1063,6 +1100,106 @@ class _RevisionsResource:
         raise make_http_error(404, "notFound", "Revision not found")
 
 
+class _PermissionsResource:
+    """Minimal permissions() resource: create / list / delete.
+
+    Backing store: each file record carries a ``permissions`` list seeded
+    with the implicit owner permission. Adding any non-owner permission sets
+    the record's ``shared`` flag; removing the last one clears it — matching
+    how Drive derives ``shared`` from the permission set.
+    """
+
+    def __init__(self, drive: "FakeDrive"):
+        self._d = drive
+
+    def _rec(self, fileId: str) -> dict:
+        rec = self._d.files.get(fileId)
+        if rec is None:
+            raise make_http_error(404, "notFound", "File not found")
+        return rec
+
+    @staticmethod
+    def _update_shared_flag(rec: dict) -> None:
+        rec["shared"] = any(
+            p.get("role") != "owner" for p in rec.get("permissions", [])
+        )
+
+    def create(self, fileId, body=None, fields="", **_):
+        def run():
+            rec = self._rec(fileId)
+            body_ = body or {}
+            perm = {
+                "id": self._d._new_perm_id(),
+                "type": body_.get("type"),
+                "role": body_.get("role"),
+            }
+            if body_.get("emailAddress"):
+                perm["emailAddress"] = body_["emailAddress"]
+            rec.setdefault("permissions", [_owner_permission()]).append(perm)
+            self._update_shared_flag(rec)
+            self._d._record_change(fileId)
+            return _project(perm, fields) if fields else dict(perm)
+
+        return _Request(
+            "permissions.create",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"fileId": fileId, "body": body},
+        )
+
+    def list(self, fileId, fields="", pageSize=100, pageToken=None, **_):
+        def run():
+            rec = self._rec(fileId)
+            perms = rec.setdefault("permissions", [_owner_permission()])
+            start = int(pageToken) if pageToken else 0
+            page = perms[start : start + pageSize]
+            inner = (
+                fields[
+                    fields.index("permissions(")
+                    + len("permissions(") : fields.rindex(")")
+                ]
+                if "permissions(" in fields
+                else ""
+            )
+            resp = {
+                "permissions": [_project(p, inner) if inner else dict(p) for p in page]
+            }
+            if start + pageSize < len(perms):
+                resp["nextPageToken"] = str(start + pageSize)
+            return resp
+
+        return _Request(
+            "permissions.list",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"fileId": fileId, "pageToken": pageToken},
+        )
+
+    def delete(self, fileId, permissionId, **_):
+        def run():
+            rec = self._rec(fileId)
+            perms = rec.get("permissions", [])
+            for i, perm in enumerate(perms):
+                if perm["id"] == permissionId:
+                    perms.pop(i)
+                    break
+            else:
+                raise make_http_error(404, "notFound", "Permission not found")
+            self._update_shared_flag(rec)
+            self._d._record_change(fileId)
+            return None
+
+        return _Request(
+            "permissions.delete",
+            self._d._maybe_fail,
+            run,
+            fail_after_check=self._d._maybe_fail_after,
+            fail_kwargs={"fileId": fileId, "permissionId": permissionId},
+        )
+
+
 class _Batch:
     def __init__(self):
         self._reqs: list = []
@@ -1095,6 +1232,9 @@ class _Service:
 
     def revisions(self):
         return _RevisionsResource(self._d)
+
+    def permissions(self):
+        return _PermissionsResource(self._d)
 
     def new_batch_http_request(self):
         return _Batch()

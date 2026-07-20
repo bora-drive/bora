@@ -56,3 +56,56 @@ def test_full_account_drops_dropbox_only_fields():
         "profile_photo_url",
         "disabled",
     }.issubset(field_names)
+
+
+def test_shared_link_metadata_field_set():
+    """Pin the SharedLinkMetadata surface produced by the sharing client
+    (Phase 5h): url/name/path_lower/expires/link_permissions."""
+    from bora.core import LinkPermissions, ListSharedLinkResult, SharedLinkMetadata
+
+    assert {f.name for f in fields(SharedLinkMetadata)} == {
+        "url",
+        "name",
+        "path_lower",
+        "expires",
+        "link_permissions",
+    }
+    assert {f.name for f in fields(LinkPermissions)} == {
+        "can_revoke",
+        "allow_download",
+        "effective_audience",
+        "link_access_level",
+        "require_password",
+    }
+    assert {f.name for f in fields(ListSharedLinkResult)} == {
+        "entries",
+        "has_more",
+        "cursor",
+    }
+
+
+def test_shared_link_metadata_drive_defaults_construct():
+    """A Drive-flavored link (no expiry, no password, public reader) is
+    representable without any Dropbox-only state."""
+    from bora.core import (
+        LinkAccessLevel,
+        LinkAudience,
+        LinkPermissions,
+        SharedLinkMetadata,
+    )
+
+    md = SharedLinkMetadata(
+        url="https://drive.google.com/file/d/file-1/view",
+        name="f.txt",
+        path_lower="/f.txt",
+        expires=None,
+        link_permissions=LinkPermissions(
+            can_revoke=True,
+            allow_download=True,
+            effective_audience=LinkAudience.Public,
+            link_access_level=LinkAccessLevel.Viewer,
+            require_password=False,
+        ),
+    )
+    assert md.expires is None
+    assert md.link_permissions.require_password is False
