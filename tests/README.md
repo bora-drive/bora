@@ -59,6 +59,21 @@ python -m pytest tests/linked
 `BORA_TEST_ACCESS_TOKEN` is optional. `BORA_TEST_REFRESH_TOKEN` is
 required; its absence causes the entire `tests/linked/` tree to skip.
 
+Tests marked `slow` (currently the rate-limit write-burst test in
+`tests/linked/unit/test_resilience.py`) are deselected by default via the
+project-wide `-m "not slow"` addopts; include them with
+`python -m pytest tests/linked -m slow`.
+
+### Resilience tests (`tests/linked/unit/test_resilience.py`)
+
+Real-account counterparts to the offline fault-injection suites: rate-limit
+retry/backoff (real-shaped 429/403 injected at the `_retry_transient` seam,
+with the retried request hitting the live API, plus a `slow`-marked real
+write burst), token refresh (access token force-expired, next call must
+auto-refresh via `PersistingCredentials` and persist), and network
+disconnect/reconnect (one-shot and full-outage `ConnectionError` injection
+with real recovery). No test deliberately exhausts real Drive quota.
+
 ### Dedicated test account
 
 The linked suite must use a **dedicated Google test account**, linked under the
