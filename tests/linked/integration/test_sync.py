@@ -66,6 +66,7 @@ from bora.exceptions import (
 )
 from bora.main import Bora
 from bora.models import SyncDirection, SyncEvent
+from bora.path_cache import SHARED_WITH_ME_PATH
 from bora.utils.appdirs import get_home_dir
 from bora.utils.path import (
     delete,
@@ -1684,6 +1685,10 @@ def _assert_synced_once(m: Bora, tree: DirTreeType | None = None) -> None:
     # Assert that all local items are present on server.
     for path, _ in walk(m.sync_path, m.sync._scandir_with_ignore):
         remote_path_lower = m.sync.to_remote_path_lower(path)
+        if remote_path_lower == SHARED_WITH_ME_PATH.lower():
+            # The "/Shared with me" mount exists locally only; its remote
+            # side is a virtual root that never appears in listings.
+            continue
         assert (
             remote_path_lower in remote_items_map
         ), f'local item "{path}" does not exist on drive'

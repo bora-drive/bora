@@ -3864,6 +3864,42 @@ def _export_native_doc(
     return fake, file_id, remote_path, local_path, content
 
 
+def test_shared_mount_never_uploaded(sync_engine: SyncEngine) -> None:
+    """A local event for the "/Shared with me" mount folder itself must never
+    upload: the mount has no real remote counterpart, and uploading it
+    creates a real Drive folder that collides with the virtual root
+    (observed live, 2026-07-20)."""
+    from bora.path_cache import SHARED_WITH_ME_PATH
+
+    fake = FakeDrive()
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.ensure_shared_with_me_dir_present()
+
+    event = SyncEvent(
+        direction=SyncDirection.Up,
+        item_type=ItemType.Folder,
+        sync_time=datetime.today().timestamp(),
+        remote_path=SHARED_WITH_ME_PATH,
+        remote_path_lower=SHARED_WITH_ME_PATH.lower(),
+        remote_id=None,
+        local_path=sync_engine.to_local_path_from_cased(SHARED_WITH_ME_PATH),
+        rev=None,
+        content_hash=None,
+        symlink_target=None,
+        change_type=ChangeType.Added,
+        status=SyncStatus.Queued,
+        size=0,
+        completed=0,
+    )
+
+    results = sync_engine.apply_local_changes([event])
+
+    assert results == []
+    # No real "Shared with me" folder was created on the (fake) server.
+    names = [rec["name"] for rec in fake.files.values()]
+    assert "Shared with me" not in names, names
+
+
 def test_download_only_never_uploads(sync_engine: SyncEngine) -> None:
     """A local file event on a read-only export mirror must never produce an
     upload: apply_local_changes returns no result for it and the backing

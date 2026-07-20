@@ -1691,6 +1691,19 @@ class SyncEngine:
 
         return False
 
+    def _is_shared_mount_event(self, event: SyncEvent) -> bool:
+        """Whether *event* concerns the virtual "/Shared with me" mount
+        folder itself (not its children). The mount exists locally but has
+        no real remote counterpart, so local changes to it are never
+        propagated to Drive."""
+        mount = fold_human(SHARED_WITH_ME_PATH)
+        if fold_human(event.remote_path) == mount:
+            return True
+        return (
+            event.remote_path_from is not None
+            and fold_human(event.remote_path_from) == mount
+        )
+
     def is_excluded_by_user(self, remote_path_lower: str) -> bool:
         """
         Check if file has been excluded through "selective sync" by the user.
@@ -2166,6 +2179,18 @@ class SyncEngine:
 
         for event in sync_events:
             if self.is_excluded(event.local_path) or self.is_mignore(event):
+                continue
+
+            if self._is_shared_mount_event(event):
+                # The local "Shared with me" mount dir has no real remote
+                # counterpart (the remote side is a virtual root). Creating,
+                # deleting or moving it locally must never propagate to
+                # Drive — uploading it would create a real folder that then
+                # collides with the virtual root (found live, 2026-07-20).
+                self._logger.debug(
+                    "Ignoring local change of the virtual mount: %s",
+                    event.local_path,
+                )
                 continue
 
             dl_entry = self._download_only_entry_for(event)
