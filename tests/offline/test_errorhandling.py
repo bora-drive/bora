@@ -19,6 +19,7 @@ from bora.errorhandling import (
 from bora.exceptions import (
     BadInputError,
     BoraApiError,
+    ConflictError,
     ConnectionError,
     InsufficientPermissionsError,
     InsufficientSpaceError,
@@ -58,6 +59,7 @@ def test_extract_reason_empty_when_absent(make_http_error):
         (403, "insufficientFilePermissions", InsufficientPermissionsError),
         (403, "someUnknownReason", InsufficientPermissionsError),
         (404, "", NotFoundError),
+        (409, "", ConflictError),
         (429, "", ConnectionError),
         (500, "", ServerError),
         (502, "", ServerError),
@@ -128,6 +130,13 @@ def test_os_error_enametoolong_reports_limits_in_correct_order():
     assert (
         f"shorter than {max_name} and {max_path} characters" in result.message
     ), result.message
+
+
+def test_http_error_409_maps_to_conflict(make_http_error):
+    exc = make_http_error(409, reason="")
+    out = http_error_to_bora(409, "", exc, remote_path="/foo.txt")
+    assert isinstance(out, ConflictError)
+    assert "/foo.txt" in str(out) or out.remote_path == "/foo.txt"
 
 
 def test_http_error_412_condition_not_met_maps_to_data_changed(make_http_error):

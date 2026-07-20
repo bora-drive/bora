@@ -45,7 +45,6 @@ __all__ = [
     "RETRYABLE_HTTP_STATUS",
     "extract_http_reason",
     "http_error_to_bora",
-    "google_api_to_bora_error",
     "os_to_bora_error",
     "convert_api_errors",
 ]
@@ -164,6 +163,14 @@ def http_error_to_bora(
         return NotFoundError(
             "Not found",
             "The requested item does not exist on Google Drive.",
+            remote_path=remote_path,
+            local_path=local_path,
+        )
+    if status == 409:
+        return ConflictError(
+            "Conflict",
+            "The request conflicts with the current state of the item "
+            "on Google Drive.",
             remote_path=remote_path,
             local_path=local_path,
         )
@@ -319,20 +326,3 @@ def os_to_bora_error(
     bora_exc.__cause__ = exc
 
     return bora_exc
-
-
-def google_api_to_bora_error(
-    exc: Exception,
-    remote_path: str | None = None,
-    local_path: str | None = None,
-) -> BoraApiError:
-    """Converts a Google API exception to a :exc:`bora.exceptions.BoraApiError`.
-
-    .. note:: Not yet implemented. Will be completed in Phase 6.
-
-    :param exc: Google API exception.
-    :param remote_path: Remote path associated with the error.
-    :param local_path: Local path associated with the error.
-    :returns: Converted exception.
-    """
-    raise NotImplementedError("Google API error handling not yet implemented (Phase 6)")
