@@ -301,6 +301,24 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
     timestamps, before falling back to a full byte compare) before framing
     `bora rebuild-index` as safe to run routinely on export-heavy sync
     folders.
+  - [x] FIXED (Task 15, offline TDD): `_adopt_untouched_mirror` now falls
+    back to a zip-aware equivalence check (module-level `_zip_contents_equal`
+    in `sync.py`) when the raw byte compare fails. If both `tmp_fname` and
+    the local mirror are valid zip archives (`zipfile.is_zipfile`), it
+    compares each member's `(filename, CRC-32, file_size)` tuple, sorted,
+    ignoring `date_time` — this is exactly the field the live 2026-07-20
+    finding above showed Drive stamps with export wall-clock time on every
+    `.xlsx`/`.pptx`/`.docx` export regardless of content changes. Not
+    extension-gated: `is_zipfile` on both sides covers docx/xlsx/pptx
+    uniformly and safely no-ops for `.md` (not a zip) and genuine content
+    edits (differing CRCs). Covered by
+    `tests/offline/test_sync.py::test_adopt_untouched_mirror_true_on_zip_member_match_different_timestamps`
+    (adopts despite differing per-entry timestamps),
+    `..._false_on_zip_member_content_mismatch` (a real edit still conflicts),
+    and `..._false_when_one_side_not_a_zip` (existing byte-mismatch behavior
+    preserved for non-zip mirrors). **Live re-verification against
+    `bora-test@arko.net` (repeat of Task 13 check 2, `.xlsx` half) is still
+    pending** — this fix is offline-tested only so far.
 - [x] RESOLVED: `Manager.did_drop_table` for the path cache now has a reader.
   Verified the path cache has no lazy repopulation on a lookup miss (Drive's
   API is ID-based — no path-lookup endpoint to fall back to — so a miss
@@ -323,11 +341,14 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   export-toggle-flip gap (c036c17) and the rebuild-with-mirrors limitation
   (255bf37) are both resolved in code and live spot-checked (plan Task 13,
   DONE 2026-07-20): the toggle-reload fix holds live and the byte-stable
-  `.md` rebuild case is clean, but the live check also confirmed a real,
-  unresolved gap for byte-UNSTABLE exports — `bora rebuild-index` spawns and
-  **uploads** a conflicted copy for every untouched `.xlsx`/`.pptx` mirror,
-  because Drive's zip-based exports embed the export timestamp even when
-  content is unchanged, defeating any byte-compare adoption check.
+  `.md` rebuild case is clean. The live check also confirmed a real gap for
+  byte-UNSTABLE exports — `bora rebuild-index` spawned and **uploaded** a
+  conflicted copy for an untouched `.xlsx` mirror, because Drive's zip-based
+  exports embed the export timestamp even when content is unchanged,
+  defeating a raw byte-compare adoption check. This is now FIXED (Task 15)
+  with a zip-aware member comparison that ignores those timestamps; the fix
+  is covered by offline unit tests but **not yet live re-verified** against
+  `bora-test@arko.net`.
 - **Webhook change notifications** — polling only (~180 s), by design.
 - **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
   desktop entry references `bora gui` but there is no GUI.
