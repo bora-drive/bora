@@ -263,6 +263,27 @@ def test_link_with_access_token_happy_path(client, cred_storage, monkeypatch):
     assert client.linked is True
 
 
+def test_link_returns_2_when_account_fetch_http_errors(
+    client, cred_storage, monkeypatch
+):
+    """The post-exchange account-info call can HTTP-error even though the
+    token exchange succeeded (seen live: 403 accessNotConfigured with the
+    Drive API disabled on the OAuth client's Cloud project). link() must
+    keep its 0/1/2 contract instead of leaking the HttpError."""
+    from tests.fake_drive import make_http_error
+
+    monkeypatch.delenv("BORA_CLIENT_SECRET_PATH", raising=False)
+    fake_service = mock.MagicMock()
+    fake_service.about().get().execute.side_effect = make_http_error(
+        403, reason="accessNotConfigured", message="Drive API has not been used"
+    )
+    with mock.patch("bora.client.build", return_value=fake_service):
+        res = client.link(access_token="at-abc")
+
+    assert res == 2
+    assert client.linked is False
+
+
 def test_link_with_bad_code_returns_1_not_traceback(client, monkeypatch):
     """An invalid/expired pasted auth code must return 1 (review F13.2),
     not surface a raw oauthlib traceback."""
