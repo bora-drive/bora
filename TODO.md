@@ -182,7 +182,14 @@ table, piped output, and the tty grid.
 
 ### Needs another environment or a release decision
 
-- [ ] Windows smoke test (needs a Windows machine).
+- [ ] Windows is not currently supported — verified 2026-07-20 that
+  `bora --version` and every config-touching command fail outright
+  (`fcntl`/`xattr` unconditional POSIX imports in `src/bora/utils/path.py`
+  and `src/bora/daemon.py`; unconditional `xattr` dependency with no
+  Windows wheel; `src/bora/utils/appdirs.py` raises `RuntimeError` for any
+  platform but Darwin/Linux). See `docs/windows-smoke-test.md` for the
+  full blocker list and the checklist to run once a port exists. Needs a
+  release-time decision: defer Windows support, or scope and do the port.
 - [ ] Publish to PyPI (optional).
 - [ ] Finalize the Homebrew formula at release time (real url/sha256,
   regenerate resources, `ruby -c`).

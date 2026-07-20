@@ -1,16 +1,112 @@
-# Windows Smoke Test
+# Windows Support Status
 
-Manual checklist for the "Windows smoke test" item on the [release
-checklist](release-checklist.md) — Bora has never been run on Windows, so
-this is a from-scratch install-and-sync pass on a real Windows machine. It
-is not automated and is not part of CI.
+**Bora v0.1.0 does not support Windows.** It cannot be installed and run
+end-to-end on Windows today — not "untested," but actively broken by
+POSIX-only code paths that trigger on the very first command. This was
+found during review of an earlier draft of this checklist, which had
+assumed a working install and walked through link/sync steps without
+verifying that any of it could run on Windows at all.
 
-Run every command exactly as written in **PowerShell**. Each step lists the
-command(s) and the expected result. Fill in the results table at the end as
-you go, and stop to capture a traceback (paste it into the table) if any
-step fails.
+This matches the project's own declared platform support: `pyproject.toml`
+describes Bora as "Open-source Google Drive sync client for macOS and
+Linux," carries only the `Operating System :: Unix` classifier (no
+Windows classifier), and the CLI's own `--help` text
+(`src/bora/cli/cli_main.py:23`) says `"File sync client for Linux and
+macOS."` Windows was never a supported target; it just hadn't been
+explicitly ruled out in the release checklist until now.
+
+## Verified blockers
+
+1. **`src/bora/utils/path.py:8` and `:21`** unconditionally `import fcntl`
+   and `import xattr` at module scope. Both are POSIX-only (`fcntl` isn't
+   available on Windows Python at all; `xattr` has no Windows wheel).
+   `path.py` is imported early in the CLI's dependency chain, so even
+   `bora --version` — the very first smoke-test step — would fail with
+   `ModuleNotFoundError` before any Bora-specific code runs.
+   `src/bora/daemon.py:10` has the same unconditional `import fcntl` (used
+   for a file lock at line ~254-260), an independent instance of the same
+   problem in the daemon process itself.
+
+2. **`xattr` is an unconditional runtime dependency** in `pyproject.toml`
+   (`dependencies = [..., "xattr", ...]`, no platform marker), with no
+   Windows wheel on PyPI. Contrast with `rubicon-objc`, two lines above it,
+   which correctly carries `;sys_platform=='darwin'`. Depending on what
+   `pip` resolves, `pip install` itself may fail on Windows before the code
+   in point 1 is ever reached.
+
+3. **`src/bora/utils/appdirs.py`** — every path-resolution function
+   (`get_conf_path`, `get_data_path`, `get_cache_path`, `get_log_path`,
+   `get_autostart_path`, `get_runtime_path`) branches on
+   `platform.system() == "Darwin"` / `"Linux"` and does `else: raise
+   RuntimeError("Platform not supported")` for anything else, including
+   Windows. These functions are called from `src/bora/config/main.py`,
+   `src/bora/config/__init__.py`, `src/bora/daemon.py`,
+   `src/bora/main.py`, `src/bora/sync.py`, and `src/bora/autostart.py` —
+   i.e. every config-touching or state-touching command. Even if points 1
+   and 2 were fixed, virtually every command would still die here.
+
+Any one of these is fatal on its own; all three exist independently, so
+partial fixes (e.g. only patching `appdirs.py`) would still leave a
+non-functional Windows build.
+
+## What a Windows port would need
+
+- **Platform-gate the POSIX-only imports/deps** in `path.py` and
+  `daemon.py` — move `fcntl`/`xattr` behind `if not IS_WINDOWS` (or
+  equivalent) imports with a Windows-native replacement for whatever they
+  back (file locking, extended attributes), and add a `;sys_platform !=
+  'win32'` marker to `xattr` in `pyproject.toml` (matching the existing
+  `rubicon-objc` pattern) plus a Windows-only substitute dependency if one
+  is needed.
+- **Add a Windows branch to `appdirs.py`** — real Windows paths (e.g.
+  `%APPDATA%`/`%LOCALAPPDATA%` via `os.environ` rather than XDG variables)
+  for all six path functions, in place of the current `raise
+  RuntimeError`.
+- **Audit `daemon`/`fsevents`/`autostart`/`notify` for platform gates.**
+  Findings from this pass:
+  - `src/bora/fsevents/__init__.py` **already has a working Windows
+    fallback** — it picks `InotifyObserver` on Linux, `FSEventsObserver` on
+    Darwin, and otherwise falls back to its own `OrderedPollingObserver`
+    (`src/bora/fsevents/polling.py`), which is plain `watchdog` polling and
+    has no platform-specific code. So file-change detection is not a
+    blocker for a Windows port.
+  - `src/bora/utils/shortcuts.py` **already has a Windows path**: it tries
+    a real `os.symlink` first and falls back to writing a minimal `.lnk`
+    file (`write_lnk`) on `OSError`, which is the documented, expected
+    outcome on Windows without Developer Mode/elevation. This piece is
+    ready.
+  - `src/bora/autostart.py` has **no Windows backend** —
+    `SupportedImplementations` only enumerates `systemd`, `launchd`, and
+    `xdg_desktop`; a Windows port would need e.g. a Scheduled Task or
+    Startup-folder shortcut backend. Not a blocker for basic sync, but
+    needed for feature parity.
+  - `src/bora/notify.py` depends on `desktop-notifier`, which is
+    cross-platform (Windows Toast support included) — no gate needed here.
+  - `src/bora/daemon.py` beyond the `fcntl` import above uses `Pyro5` for
+    the CLI↔daemon RPC; this is pure Python and should be fine on Windows
+    once the `fcntl` lock is replaced, but hasn't been verified beyond that.
+- Beyond code changes, `pyproject.toml`'s description/classifiers and the
+  CLI `--help` text would need updating once Windows is actually
+  supported, plus real testing — this document's checklist below is the
+  starting point for that, once the above is done.
 
 ---
+
+# Checklist (for a future Windows port)
+
+**This section does not apply to Bora v0.1.0 — do not run it against the
+current release.** It is kept here, unexecuted, as the manual test plan to
+run once the blockers above are fixed and a Windows port actually exists.
+Steps and commands below were written against the current (Linux/macOS
+only) codebase and will need re-verification against whatever the ported
+code actually does — e.g. the install step's `pip install` may no longer
+need a `xattr` workaround, and the config-path step may look different
+once `appdirs.py` gains a real Windows branch.
+
+Run every command exactly as written in **PowerShell**. Each step lists
+the command(s) and the expected result. Fill in the results table at the
+end as you go, and stop to capture a traceback (paste it into the table)
+if any step fails.
 
 ## 0. Prerequisites
 
@@ -75,7 +171,9 @@ Verify the install:
 bora --version
 ```
 
-Expected: `0.1.0`.
+Expected (once the port exists): `0.1.0`. **On the current, unported
+codebase this will instead raise `ModuleNotFoundError` — see the status
+section above.**
 
 ---
 
@@ -146,9 +244,10 @@ When prompted `Please choose a local sync folder:`, type:
 `C:\Users\<you>\BoraSmoke`.) The folder doesn't need to exist yet; Bora
 creates it.
 
-When prompted `Would you like to sync all folders?`, answer `y` (this is a
-fresh/test account, so there's no reason to exclude anything for the smoke
-test).
+When prompted, the exact text is `Would you like sync all folders?`
+(`src/bora/cli/cli_core.py:256` — note: no "to" in the prompt). Answer `y`
+(this is a fresh/test account, so there's no reason to exclude anything for
+the smoke test).
 
 Expected: `[OK] Setup completed. Starting sync.` followed by
 `Starting Bora...        [OK]`.
