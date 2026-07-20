@@ -2,10 +2,16 @@
 Bora Developer Documentation
 ============================
 
-This documentation provides an API reference for the bora daemon.
-It is built from the current dev branch and is intended for developers.
-For a user manual and an overview of Bora's functionality, please
-refer to `bora.tools <https://bora.tools>`_.
+This documentation provides a user guide and an API reference for the
+bora daemon. It is built from the current dev branch. If you are new to
+Bora, start with the :doc:`userguide`.
+
+.. toctree::
+   :hidden:
+   :caption: User Guide
+   :maxdepth: 2
+
+   userguide
 
 .. toctree::
    :hidden:

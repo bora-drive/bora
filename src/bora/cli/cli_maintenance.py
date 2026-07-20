@@ -367,6 +367,12 @@ Currently available config keys are:
 - keep_history: the sync history to keep in seconds
 - upload: if upload sync is enabled
 - download: if download sync is enabled
+- bandwidth_limit_up: upload limit in bytes / sec (0 = unlimited)
+- bandwidth_limit_down: download limit in bytes / sec (0 = unlimited)
+- max_parallel_uploads: maximum number of parallel uploads
+- max_parallel_downloads: maximum number of parallel downloads
+- export_google_docs: if native Docs/Sheets/Slides are exported on download
+- export_google_docs_markdown: if Docs export as Markdown instead of .docx
 """,
 )
 def config() -> None:

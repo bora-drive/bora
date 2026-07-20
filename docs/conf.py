@@ -8,8 +8,11 @@ sys.path.insert(0, os.path.abspath("../src"))
 
 # -- Project information ---------------------------------------------------------------
 
-author = "Sam Schott"
-version = "1.9.6"
+# Read author and version from the package itself so the docs never go stale.
+from bora import __author__, __version__  # noqa: E402
+
+author = __author__
+version = __version__
 release = version
 project = "Bora"
 title = "Bora API Documentation"
