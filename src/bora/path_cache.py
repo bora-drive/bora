@@ -424,6 +424,15 @@ class PathIDCache:
                 shared_root_ids.add(fid)
             else:
                 parents = item.get("parents", [])
+                if len(parents) > 1:
+                    logger.warning(
+                        "File '%s' (id=%s) has multiple parents %s; only the "
+                        "first parent (%s) is used for its local path",
+                        item.get("name"),
+                        fid,
+                        parents,
+                        parents[0],
+                    )
                 parent_id = parents[0] if parents else None
 
             if parent_id is not None:

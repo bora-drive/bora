@@ -290,6 +290,14 @@ def _emit_apply(
     if is_google_native(mime) and not (opts.enabled and is_exportable(mime)):
         return True
     parents = file.get("parents") or []
+    if len(parents) > 1 and warn_on_conflict:
+        logger.warning(
+            "File '%s' (id=%s) has multiple parents %s; only the first "
+            "in-scope parent is used for its local path",
+            file.get("name"),
+            file.get("id"),
+            parents,
+        )
     parent_id = next(
         (p for p in parents if path_cache.id_to_path(p) is not None),
         None,
@@ -358,6 +366,14 @@ def _emit_shortcut(
     """
     file = change["file"]
     parents = file.get("parents") or []
+    if len(parents) > 1 and warn_on_conflict:
+        logger.warning(
+            "File '%s' (id=%s) has multiple parents %s; only the first "
+            "in-scope parent is used for its local path",
+            file.get("name"),
+            file.get("id"),
+            parents,
+        )
     parent_id = None
     parent_path = None
     for p in parents:

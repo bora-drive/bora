@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 import pytest
@@ -503,6 +504,40 @@ class TestPopulateFromListing:
         cache.populate_from_listing(items)
         assert cache.path_to_id("/ok.txt") == "F1"
         assert cache.get_entry("F2") is None
+
+    def test_multi_parent_warns_and_uses_first(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        cache = make_cache()
+        items = [
+            make_drive_item("DIR", "Documents", parents=["ROOT"], is_folder=True),
+            make_drive_item("F1", "report.pdf", parents=["DIR", "ROOT"]),
+        ]
+        with caplog.at_level(logging.WARNING, logger="bora.path_cache"):
+            cache.populate_from_listing(items)
+        # Canonical path uses the first parent only.
+        assert cache.path_to_id("/Documents/report.pdf") == "F1"
+        assert cache.path_to_id("/report.pdf") is None
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "multiple parents" in r.getMessage()
+        ]
+        assert len(warnings) == 1
+        assert "F1" in warnings[0].getMessage()
+
+    def test_single_parent_does_not_warn(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        cache = make_cache()
+        items = [
+            make_drive_item("DIR", "Documents", parents=["ROOT"], is_folder=True),
+            make_drive_item("F1", "report.pdf", parents=["DIR"]),
+        ]
+        with caplog.at_level(logging.WARNING, logger="bora.path_cache"):
+            cache.populate_from_listing(items)
+        assert cache.path_to_id("/Documents/report.pdf") == "F1"
+        assert not any("multiple parents" in r.getMessage() for r in caplog.records)
 
     def test_clear_then_populate(self) -> None:
         cache = make_cache()
