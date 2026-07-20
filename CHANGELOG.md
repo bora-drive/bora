@@ -19,8 +19,9 @@ Dropbox API to the Google Drive API.
 - Google Docs/Sheets/Slides export to Markdown/Office on download (Doc →
   `.md`/`.docx`, Sheet → `.xlsx`, Slides → `.pptx`), with `bora export
   docs on|off` / `bora export markdown on|off` toggles (both default on).
-- "Shared with me" virtual `/Shared with me` root, read-only on disk and
-  never uploaded.
+- "Shared with me" virtual `/Shared with me` root; view-only shared items are
+  read-only on disk and never uploaded (an editor-access shared item syncs
+  writable, per Drive's `can_edit`).
 - Symlink ↔ Drive-shortcut mapping: local symlinks create/retarget Drive
   shortcuts, and remote shortcuts materialize as platform symlinks / `.lnk`.
 - Upload bandwidth throttling (`_throttle_up`), matching the existing
@@ -55,6 +56,9 @@ Dropbox API to the Google Drive API.
 
 ### Known limitations
 - Shared Drives (team drives) are not supported.
-- The OAuth consent screen is published but unverified — Google shows an
-  "unverified app" warning during linking (100-user cap) until verification
-  clears; add yourself as a test user in the meantime (see `docs/setup.md`).
+- The OAuth app is unverified and its consent screen is still in Testing
+  mode, so refresh tokens expire after 7 days; add yourself as a test user
+  in the meantime (see `docs/setup.md`). Publishing the consent screen to
+  "In production" — planned before release — removes the 7-day expiry but
+  will show Google's "unverified app" warning during linking (100-user cap)
+  until verification clears.
