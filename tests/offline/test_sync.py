@@ -3748,9 +3748,7 @@ def test_local_deleted_symlink_gate_holds_db_lock(
 # asserts the on-disk read-only bit + persisted download_only/content_hash.
 
 
-_DOCX_MIME = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-)
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def test_export_download_marks_file_read_only_and_download_only(
@@ -3873,16 +3871,12 @@ def test_download_only_never_uploads(sync_engine: SyncEngine) -> None:
     version counter and empty content are unchanged). A metadata-only touch
     (here: making the mirror writable without changing bytes, e.g. the
     read-only chmod being echoed) is ignored outright -- no conflicted copy."""
-    fake, file_id, remote_path, local_path, content = _export_native_doc(
-        sync_engine
-    )
+    fake, file_id, remote_path, local_path, content = _export_native_doc(sync_engine)
 
     # Simulate a metadata touch: user flips the read-only bit off, bytes
     # unchanged. The local content hash still equals the indexed export hash.
     os.chmod(local_path, 0o644)
-    event = _local_modified_event(
-        sync_engine, remote_path, content_hash=_md5(content)
-    )
+    event = _local_modified_event(sync_engine, remote_path, content_hash=_md5(content))
 
     results = sync_engine.apply_local_changes([event])
 
@@ -3907,9 +3901,7 @@ def test_download_only_edit_makes_conflict_copy(sync_engine: SyncEngine) -> None
     conflicted copy, and the original path is dropped from the index so the
     next download pass re-exports the untouched server version to the original
     read-only name."""
-    fake, file_id, remote_path, local_path, content = _export_native_doc(
-        sync_engine
-    )
+    fake, file_id, remote_path, local_path, content = _export_native_doc(sync_engine)
     directory = osp.dirname(local_path)
 
     # User edits the mirror: make it writable and change the bytes.
@@ -3918,9 +3910,7 @@ def test_download_only_edit_makes_conflict_copy(sync_engine: SyncEngine) -> None
     with open(local_path, "wb") as f:
         f.write(edited)
 
-    event = _local_modified_event(
-        sync_engine, remote_path, content_hash=_md5(edited)
-    )
+    event = _local_modified_event(sync_engine, remote_path, content_hash=_md5(edited))
     results = sync_engine.apply_local_changes([event])
 
     # Never uploaded to the native doc.
@@ -4094,9 +4084,7 @@ def test_export_toggle_on_to_off_does_not_reindex(sync_engine: SyncEngine) -> No
 # re-export (leg 3) and markdown-toggle re-projection (leg 4).
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-_PPTX_MIME = (
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-)
+_PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 _MD_MIME = "text/markdown"
 
 
@@ -4236,4 +4224,3 @@ def test_export_full_cycle_integration(sync_engine: SyncEngine) -> None:
 
     # The other mirrors are untouched by the Doc-only edits.
     assert osp.isfile(L("/Book.xlsx")) and osp.isfile(L("/Deck.pptx"))
-

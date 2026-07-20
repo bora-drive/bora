@@ -31,9 +31,14 @@ def test_export_metadata_uses_version_as_rev():
 
 def test_binary_metadata_unchanged():
     rec = {
-        "id": "b", "name": "a.bin", "mimeType": "application/octet-stream",
-        "modifiedTime": "2026-07-05T00:00:00.000Z", "version": "9",
-        "md5Checksum": "abc", "headRevisionId": "rev9", "size": "3",
+        "id": "b",
+        "name": "a.bin",
+        "mimeType": "application/octet-stream",
+        "modifiedTime": "2026-07-05T00:00:00.000Z",
+        "version": "9",
+        "md5Checksum": "abc",
+        "headRevisionId": "rev9",
+        "size": "3",
         "trashed": False,
     }
     md = to_file_metadata(rec, "/a.bin", ExportOptions(True, False))

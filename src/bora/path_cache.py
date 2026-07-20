@@ -260,9 +260,7 @@ class PathIDCache:
             for child in children:
                 self._table.delete_primary_key(child.file_id)
 
-    def move(
-        self, old_path: str, new_path: str, name: str | None = None
-    ) -> bool:
+    def move(self, old_path: str, new_path: str, name: str | None = None) -> bool:
         """Rename *old_path* → *new_path*, updating all children atomically.
 
         Both paths are encoded. Returns ``False`` (and does nothing) if

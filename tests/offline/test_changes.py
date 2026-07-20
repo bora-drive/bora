@@ -943,6 +943,7 @@ def test_invalid_page_token_raises_cursor_reset(make_http_error):
 
 def _drain_export(fake, cache, start, opts, resolve_deleted_path=None):
     """Like _drain, but threads *opts* (ExportOptions) into iter_remote_changes."""
+
     def factory():
         return fake.service()
 
@@ -951,7 +952,10 @@ def _drain_export(fake, cache, start, opts, resolve_deleted_path=None):
 
     pages = list(
         iter_remote_changes(
-            factory, retry, cache, start,
+            factory,
+            retry,
+            cache,
+            start,
             resolve_deleted_path=resolve_deleted_path,
             export_opts=opts,
         )
@@ -1014,9 +1018,7 @@ def test_exportable_doc_rename_reprojects_and_keeps_raw_name():
     # Seed the cache as populate would (projected path, raw name).
     cache.set("/Report.docx", fid, ROOT_ID, "Report", False)
     start = _start(fake)
-    fake.service().files().update(
-        fileId=fid, body={"name": "Renamed"}
-    ).execute()
+    fake.service().files().update(fileId=fid, body={"name": "Renamed"}).execute()
     entries, pages = _drain_export(fake, cache, start, ExportOptions(True, False))
     assert cache.path_to_id("/Report.docx") is None
     assert cache.path_to_id("/Renamed.docx") == fid

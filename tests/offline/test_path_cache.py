@@ -795,8 +795,7 @@ class TestExportLeafProjection:
     def test_populate_projects_export_leaf(self) -> None:
         cache = make_cache()
         items = [
-            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
-             "parents": ["ROOT"]},
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME, "parents": ["ROOT"]},
         ]
         cache.populate_from_listing(items, export_opts=ExportOptions(True, False))
         assert cache.path_to_id("/Report.docx") == "d1"
@@ -807,8 +806,7 @@ class TestExportLeafProjection:
     def test_populate_disabled_keeps_raw_leaf(self) -> None:
         cache = make_cache()
         items = [
-            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
-             "parents": ["ROOT"]},
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME, "parents": ["ROOT"]},
         ]
         # Export disabled (default) -> byte-identical to today: no extension.
         cache.populate_from_listing(items)
@@ -818,8 +816,7 @@ class TestExportLeafProjection:
     def test_populate_markdown_projects_md_extension(self) -> None:
         cache = make_cache()
         items = [
-            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
-             "parents": ["ROOT"]},
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME, "parents": ["ROOT"]},
         ]
         cache.populate_from_listing(items, export_opts=ExportOptions(True, True))
         assert cache.path_to_id("/Report.md") == "d1"
@@ -827,8 +824,7 @@ class TestExportLeafProjection:
     def test_move_preserves_raw_name(self) -> None:
         cache = make_cache()
         cache.populate_from_listing(
-            [{"id": "d1", "name": "Report", "mimeType": DOC_MIME,
-              "parents": ["ROOT"]}],
+            [{"id": "d1", "name": "Report", "mimeType": DOC_MIME, "parents": ["ROOT"]}],
             export_opts=ExportOptions(True, False),
         )
         # A pure relocation: the projected leaf ('Report.docx') must NOT leak
@@ -850,8 +846,7 @@ class TestExportLeafProjection:
     def test_resolve_path_returns_projected_leaf(self) -> None:
         cache = make_cache()
         cache.populate_from_listing(
-            [{"id": "d1", "name": "Report", "mimeType": DOC_MIME,
-              "parents": ["ROOT"]}],
+            [{"id": "d1", "name": "Report", "mimeType": DOC_MIME, "parents": ["ROOT"]}],
             export_opts=ExportOptions(True, False),
         )
         # resolve_path must return the stored projected path, not a path
@@ -867,10 +862,13 @@ class TestExportLeafProjection:
         # file-ids share one remote_path_fold.
         cache = make_cache()
         items = [
-            {"id": "d1", "name": "Report", "mimeType": DOC_MIME,
-             "parents": ["ROOT"]},
-            {"id": "f2", "name": "Report.docx", "mimeType": "application/pdf",
-             "parents": ["ROOT"]},
+            {"id": "d1", "name": "Report", "mimeType": DOC_MIME, "parents": ["ROOT"]},
+            {
+                "id": "f2",
+                "name": "Report.docx",
+                "mimeType": "application/pdf",
+                "parents": ["ROOT"],
+            },
         ]
         cache.populate_from_listing(items, export_opts=ExportOptions(True, False))
         # id-order winner ("d1" < "f2") keeps the path; the loser is skipped.

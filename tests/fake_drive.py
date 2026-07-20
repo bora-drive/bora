@@ -857,7 +857,8 @@ class _FilesResource:
         content = self._d._export_bytes.get((fileId, mimeType))
         if content is None:
             raise make_http_error(
-                404, "notFound",
+                404,
+                "notFound",
                 f"No export bytes registered for {fileId!r} at {mimeType!r}",
             )
         return _MediaRequest(

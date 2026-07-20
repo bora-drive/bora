@@ -794,8 +794,13 @@ class GoogleDriveClient:
                         local_path=local_path,
                     )
                 return self._download_export(
-                    meta_file, mime, file_id, remote_path, local_path,
-                    tmp_path, sync_event,
+                    meta_file,
+                    mime,
+                    file_id,
+                    remote_path,
+                    local_path,
+                    tmp_path,
+                    sync_event,
                 )
             request = self._get_service().files().get_media(fileId=file_id)
             try:
@@ -852,8 +857,10 @@ class GoogleDriveClient:
         downloaded bytes instead of being checked against Drive.
         """
         export_mime, _ext = export_target(mime, self.export_opts.markdown)
-        request = self._get_service().files().export_media(
-            fileId=file_id, mimeType=export_mime
+        request = (
+            self._get_service()
+            .files()
+            .export_media(fileId=file_id, mimeType=export_mime)
         )
         try:
             with open(tmp_path, "wb") as fh:
@@ -1274,9 +1281,7 @@ class GoogleDriveClient:
 
         # Atomic populate. The cache BFS-filters to items reachable from
         # root_id; Computers/Backup, shared-with-me and orphans drop out.
-        self._path_cache.populate_from_listing(
-            filtered, export_opts=self.export_opts
-        )
+        self._path_cache.populate_from_listing(filtered, export_opts=self.export_opts)
         indexed = self._path_cache.count()
         skipped = len(filtered) - indexed
         if skipped > 0:
@@ -1395,7 +1400,9 @@ class GoogleDriveClient:
                         queue.append((file["id"], child_path))
                     else:
                         entries.append(
-                            to_file_metadata(file, child_path, export_opts=self.export_opts)
+                            to_file_metadata(
+                                file, child_path, export_opts=self.export_opts
+                            )
                         )
                 page_token = resp.get("nextPageToken")
                 yield ListFolderResult(
