@@ -316,9 +316,22 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
     (adopts despite differing per-entry timestamps),
     `..._false_on_zip_member_content_mismatch` (a real edit still conflicts),
     and `..._false_when_one_side_not_a_zip` (existing byte-mismatch behavior
-    preserved for non-zip mirrors). **Live re-verification against
-    `bora-test@arko.net` (repeat of Task 13 check 2, `.xlsx` half) is still
-    pending** — this fix is offline-tested only so far.
+    preserved for non-zip mirrors). **Live re-verified 2026-07-20 (Task 15)
+    against `bora-test@arko.net`, `smoke-test` config**: fresh `task15-doc`
+    (Doc) and `task15-sheet` (Sheet) were created via API media import;
+    `bora stop -c smoke-test && bora rebuild-index -c smoke-test` followed by
+    a restart reproduced the same live scenario as the Task 13 finding — the
+    `.xlsx` re-export again differed byte-for-byte from the original
+    download (md5 `84046456...` → `0e0cbcfe...`, same as before) — but this
+    time NO conflicted copy was created and NO binary was uploaded to Drive
+    (confirmed via `files.list` on the account root: only the two native
+    Doc/Sheet items remained, no `task15-sheet`-named binary). The daemon's
+    debug log (`~/.cache/bora/smoke-test.log`) shows the fix engaging
+    exactly as designed: `.md` took the pre-existing fast path (`Equal
+    content hashes for "/task15-doc.md": no conflict`), while `.xlsx` hit
+    the new fallback (`Adopting untouched mirror "/task15-sheet.xlsx" after
+    index rebuild`). Both mirrors stayed read-only (`444`) throughout. See
+    `.superpowers/sdd/task-13-report.md`, "Task 15 live re-verification".
 - [x] RESOLVED: `Manager.did_drop_table` for the path cache now has a reader.
   Verified the path cache has no lazy repopulation on a lookup miss (Drive's
   API is ID-based — no path-lookup endpoint to fall back to — so a miss
@@ -346,9 +359,11 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   conflicted copy for an untouched `.xlsx` mirror, because Drive's zip-based
   exports embed the export timestamp even when content is unchanged,
   defeating a raw byte-compare adoption check. This is now FIXED (Task 15)
-  with a zip-aware member comparison that ignores those timestamps; the fix
-  is covered by offline unit tests but **not yet live re-verified** against
-  `bora-test@arko.net`.
+  with a zip-aware member comparison that ignores those timestamps, covered
+  by offline unit tests AND live re-verified 2026-07-20 against
+  `bora-test@arko.net`: a fresh `.xlsx` mirror rebuilt with byte-differing
+  (but content-identical) re-export bytes and was adopted silently — no
+  conflicted copy, nothing uploaded.
 - **Webhook change notifications** — polling only (~180 s), by design.
 - **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
   desktop entry references `bora gui` but there is no GUI.
