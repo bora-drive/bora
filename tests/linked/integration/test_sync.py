@@ -1755,6 +1755,13 @@ def assert_local_tree(m: Bora, tree: DirTreeType) -> None:
         dirnames[:] = [d for d in dirnames if not m.sync.is_excluded(d)]
         filenames[:] = [d for d in filenames if not m.sync.is_excluded(d)]
 
+        if dirpath == m.sync_path:
+            # The "/Shared with me" mount is local-only by design and not
+            # part of any expected tree; tests that exercise shared content
+            # address it via explicit paths instead.
+            mount_name = SHARED_WITH_ME_PATH.lstrip("/")
+            dirnames[:] = [d for d in dirnames if d != mount_name]
+
         for dirname in dirnames:
             node[dirname] = {}
 
