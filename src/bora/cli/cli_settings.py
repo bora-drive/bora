@@ -209,6 +209,10 @@ def export_docs(m: Bora, state: str | None) -> None:
     if state is not None:
         m.export_google_docs = state.lower() == "on"
         ok(f"Exporting native Google Docs: {state.lower()}.")
+        echo(
+            "Existing mirrors convert on each Doc's next edit; "
+            "run 'bora rebuild-index' to convert them now."
+        )
     else:
         echo("on" if m.export_google_docs else "off")
 
@@ -227,5 +231,9 @@ def export_markdown(m: Bora, state: str | None) -> None:
     if state is not None:
         m.export_google_docs_markdown = state.lower() == "on"
         ok(f"Exporting Google Docs to Markdown: {state.lower()}.")
+        echo(
+            "Existing mirrors convert on each Doc's next edit; "
+            "run 'bora rebuild-index' to convert them now."
+        )
     else:
         echo("on" if m.export_google_docs_markdown else "off")
