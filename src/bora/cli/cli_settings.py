@@ -207,12 +207,19 @@ def export() -> None:
 @inject_proxy(fallback=True, existing_config=True)
 def export_docs(m: Bora, state: str | None) -> None:
     if state is not None:
-        m.export_google_docs = state.lower() == "on"
+        turning_on = state.lower() == "on"
+        m.export_google_docs = turning_on
         ok(f"Exporting native Google Docs: {state.lower()}.")
-        echo(
-            "Existing mirrors convert on each Doc's next edit; "
-            "run 'bora rebuild-index' to convert them now."
-        )
+        if turning_on:
+            echo(
+                "A full re-scan has been scheduled to export Docs, Sheets and "
+                "Slides that were skipped while this was off."
+            )
+        else:
+            echo(
+                "Mirrors already on disk are left as-is and are no longer "
+                "managed by Bora; delete them locally if you don't want them."
+            )
     else:
         echo("on" if m.export_google_docs else "off")
 
@@ -232,8 +239,10 @@ def export_markdown(m: Bora, state: str | None) -> None:
         m.export_google_docs_markdown = state.lower() == "on"
         ok(f"Exporting Google Docs to Markdown: {state.lower()}.")
         echo(
-            "Existing mirrors convert on each Doc's next edit; "
-            "run 'bora rebuild-index' to convert them now."
+            "Existing mirrors convert on each Doc's next remote edit. Do not "
+            "run 'bora rebuild-index' to convert them now -- it leaves the "
+            "old-format mirror behind as an unmanaged file that may get "
+            "uploaded to Drive."
         )
     else:
         echo("on" if m.export_google_docs_markdown else "off")

@@ -562,6 +562,11 @@ class SyncEngine:
         # _create_or_load_db below), so a reindex must not be scheduled from
         # the first, construction-time call. Flipped on once the DB is ready.
         self._export_reindex_ready = False
+        # Set by _schedule_export_reindex when an off -> on export reindex
+        # cannot be applied immediately because sync_lock is held elsewhere
+        # (a cycle is in progress). Consumed at the next safe cycle-start
+        # point -- see download_sync_cycle.
+        self._pending_export_reindex = False
         self.reload_cached_config()
 
         self.desktop_notifier = desktop_notifier
@@ -681,9 +686,12 @@ class SyncEngine:
         This also refreshes :attr:`client`'s :class:`~bora.export.ExportOptions` from
         the ``sync.export_google_docs`` / ``sync.export_google_docs_markdown`` config
         keys. If export just transitioned off -> on, a full reindex is scheduled (via
-        :meth:`reset_sync_state`, the same drop-and-rebuild mechanism used elsewhere for
-        this derived-cache index) so native docs that were previously skipped are picked
-        up on the next sync cycle.
+        :meth:`_schedule_export_reindex`, which reuses the same drop-and-rebuild
+        mechanism as :meth:`reset_sync_state` for this derived-cache index) so native
+        docs that were previously skipped are picked up. If the engine is idle, this
+        happens immediately; if it is busy, it happens as soon as it becomes safe to do
+        so -- see :meth:`_schedule_export_reindex` for why this must never call
+        :meth:`reset_sync_state` directly here.
         """
         new_export_opts = ExportOptions.from_config(self._conf)
         old_export_opts = self.client.export_opts
@@ -698,7 +706,7 @@ class SyncEngine:
                 "Google Docs export enabled, scheduling reindex to pick up "
                 "previously-skipped native docs"
             )
-            self.reset_sync_state()
+            self._schedule_export_reindex()
 
         self._sync_path: str = self._conf.get("sync", "path")
         self._mignore_path: str = osp.join(self._sync_path, MIGNORE_FILE)
@@ -903,10 +911,28 @@ class SyncEngine:
             return sync_events
 
     def reset_sync_state(self) -> None:
-        """Resets all saved sync state. Settings are not affected."""
-        if self.busy():
-            raise RuntimeError("Cannot reset sync state while syncing.")
+        """Resets all saved sync state. Settings are not affected.
 
+        :raises RuntimeError: if a sync cycle currently holds :attr:`sync_lock`.
+        """
+        if not self.sync_lock.acquire(blocking=False):
+            raise RuntimeError("Cannot reset sync state while syncing.")
+        try:
+            self._reset_sync_state_locked()
+        finally:
+            self.sync_lock.release()
+
+        self._logger.debug("Sync state reset")
+
+    def _reset_sync_state_locked(self) -> None:
+        """Core of :meth:`reset_sync_state`.
+
+        Assumes the caller already holds (or has otherwise made safe)
+        :attr:`sync_lock`. Shared by :meth:`reset_sync_state` and
+        :meth:`_schedule_export_reindex` so an off -> on export reindex can be
+        applied without going through :meth:`reset_sync_state`'s busy check,
+        which raises instead of deferring.
+        """
         with self._database_access():
             self._index_table.clear()
             self._history_table.clear()
@@ -916,7 +942,37 @@ class SyncEngine:
         self._state.reset_to_defaults("sync")
         self.reload_cached_config()
 
-        self._logger.debug("Sync state reset")
+    def _schedule_export_reindex(self) -> None:
+        """Applies (or defers) the full reindex triggered by an export
+        off -> on transition in :meth:`reload_cached_config`.
+
+        Calling :meth:`reset_sync_state` directly from
+        :meth:`reload_cached_config` is unsafe: it raises ``RuntimeError``
+        when a sync cycle holds :attr:`sync_lock`, which would escape to the
+        caller (e.g. the CLI, via Pyro) with the config already flipped and
+        no reindex ever scheduled. Instead, this tries to acquire
+        :attr:`sync_lock` without blocking:
+
+        * If it is free, the reset runs immediately while holding the lock,
+          so it cannot race a cycle that starts concurrently -- this also
+          covers an idle-but-running daemon, since any cycle about to start
+          must itself acquire the same lock and will simply block until the
+          reset finishes.
+        * If it is held (a cycle is currently in progress), the reset is
+          deferred via :attr:`_pending_export_reindex` and applied at the
+          start of the next :meth:`download_sync_cycle`, itself under
+          :attr:`sync_lock` -- mirroring the safe point
+          :meth:`~bora.manager.SyncManager.reset_sync_state` gates on via its
+          ``running`` check.
+        """
+        if self.sync_lock.acquire(blocking=False):
+            try:
+                self._reset_sync_state_locked()
+            finally:
+                self.sync_lock.release()
+        else:
+            self._pending_export_reindex = True
+            self._logger.debug("Sync busy; export reindex deferred to next cycle")
 
     # ==== Sync error management =======================================================
 
@@ -3437,8 +3493,20 @@ class SyncEngine:
 
         Handles updating the remote cursor and resuming interrupted syncs for you.
         Calling this method will perform a full indexing if this is the first download.
+
+        If an export off -> on reindex was deferred by
+        :meth:`_schedule_export_reindex` because the engine was busy at the
+        time, it is applied here first, before this cycle does any work --
+        the same safe point used elsewhere.
         """
         with self.sync_lock:
+            if self._pending_export_reindex:
+                self._pending_export_reindex = False
+                self._logger.info(
+                    "Applying deferred export reindex now that sync is idle"
+                )
+                self._reset_sync_state_locked()
+
             self.ensure_shared_with_me_dir_present()
 
             if self.remote_cursor == "":

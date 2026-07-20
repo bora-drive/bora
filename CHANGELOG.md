@@ -53,6 +53,11 @@ Dropbox API to the Google Drive API.
   (f15d19c). A follow-up fix (255bf37) adds `_adopt_untouched_mirror` as a
   fallback for the case where that index row doesn't survive an
   index rebuild — see `TODO.md` for the byte-stable-vs-byte-unstable nuance.
+  For Office mirrors (`.xlsx`/`.pptx`), whose re-exports are zip containers
+  that differ byte-for-byte on every export even when unchanged (per-entry
+  zip timestamps), adoption now falls back to a zip-aware comparison of
+  member names/CRCs/sizes (3677ca3) so these mirrors are still adopted
+  instead of spawning a conflicted copy and an unnecessary upload.
 
 ### Known limitations
 - Shared Drives (team drives) are not supported.

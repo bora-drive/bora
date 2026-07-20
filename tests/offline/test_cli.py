@@ -294,6 +294,10 @@ def test_export_docs(m: Bora) -> None:
 
     assert result.exit_code == 0, result.output
     assert m.export_google_docs is False
+    # Turning docs off must NOT recommend 'rebuild-index': running it would
+    # upload every mirror already on disk to Drive as a new binary.
+    assert "rebuild-index" not in result.output
+    assert "no longer" in result.output.lower()
 
     result = runner.invoke(main, ["export", "docs", "-c", m.config_name])
 
@@ -304,6 +308,11 @@ def test_export_docs(m: Bora) -> None:
 
     assert result.exit_code == 0, result.output
     assert m.export_google_docs is True
+    # Turning docs on schedules the reindex itself (reload_cached_config);
+    # the hint must describe that instead of telling the user to run
+    # 'bora rebuild-index' by hand.
+    assert "rebuild-index" not in result.output
+    assert "re-scan" in result.output.lower() or "scheduled" in result.output.lower()
 
 
 def test_export_markdown(m: Bora) -> None:
@@ -312,6 +321,10 @@ def test_export_markdown(m: Bora) -> None:
 
     assert result.exit_code == 0, result.output
     assert m.export_google_docs_markdown is False
+    # A format flip must warn against running 'bora rebuild-index': it would
+    # download the new-format mirror but leave the stale-format mirror
+    # behind as an unmanaged local file that may get uploaded to Drive.
+    assert "do not run 'bora rebuild-index'" in result.output.lower()
 
     result = runner.invoke(main, ["export", "markdown", "-c", m.config_name])
 
@@ -322,6 +335,7 @@ def test_export_markdown(m: Bora) -> None:
 
     assert result.exit_code == 0, result.output
     assert m.export_google_docs_markdown is True
+    assert "do not run 'bora rebuild-index'" in result.output.lower()
 
 
 def test_log_level(m: Bora) -> None:
