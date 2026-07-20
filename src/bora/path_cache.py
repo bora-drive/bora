@@ -408,7 +408,7 @@ class PathIDCache:
         )  # snapshot once; unlocked phases 1-2 are self-consistent
 
         # Phase 1: index by id and by parent. Shared-with-me attach points
-        # (sharedWithMe == true) are re-parented onto the virtual root; Drive
+        # (sharedWithMeTime present) are re-parented onto the virtual root; Drive
         # sets that flag only on the top of each shared subtree, so descendants
         # keep their real parent and resolve into /Shared with me for free.
         by_id: dict[str, dict[str, Any]] = {}
@@ -419,7 +419,7 @@ class PathIDCache:
             fid = item["id"]
             by_id[fid] = item
 
-            if item.get("sharedWithMe"):
+            if item.get("sharedWithMeTime"):
                 parent_id: str | None = SHARED_WITH_ME_ID
                 shared_root_ids.add(fid)
             else:

@@ -2354,7 +2354,7 @@ def test_get_remote_item_creates_shared_with_me_mount(
     # ``_ensure_parent`` walks straight into the mount-materialization gap.
     content = b"shared file content"
     file_id = fake._insert("report.txt", "OTHER_ROOT", "text/plain", content)
-    fake.files[file_id]["sharedWithMe"] = True
+    fake.files[file_id]["sharedWithMeTime"] = "2026-01-01T00:00:00.000Z"
     fake.files[file_id]["ownedByMe"] = False
     sync_engine.client._get_service = Mock(return_value=fake.service())
     sync_engine.client._cached_account_info = FullAccount(
@@ -2821,7 +2821,7 @@ def test_view_only_shared_file_download_sets_read_only_and_gates_upload(
     fake = FakeDrive()
     content = b"view only content"
     file_id = fake._insert("viewonly.txt", "OTHER_ROOT", "text/plain", content)
-    fake.files[file_id]["sharedWithMe"] = True
+    fake.files[file_id]["sharedWithMeTime"] = "2026-01-01T00:00:00.000Z"
     fake.files[file_id]["ownedByMe"] = False
     fake.files[file_id]["capabilities"] = {"canEdit": False}
     sync_engine.client._get_service = Mock(return_value=fake.service())

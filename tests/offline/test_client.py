@@ -1740,7 +1740,7 @@ def test_list_shared_roots_returns_shared_items(client_on_fake) -> None:
     client, fake = client_on_fake.client, client_on_fake.fake
     fake.add_shared_root("Team Docs", shared_with_me=True)
     roots = client.list_shared_roots()
-    assert any(r["name"] == "Team Docs" and r.get("sharedWithMe") for r in roots)
+    assert any(r["name"] == "Team Docs" and r.get("sharedWithMeTime") for r in roots)
 
 
 # ==== Task 4c: export projection through listing / metadata ===============

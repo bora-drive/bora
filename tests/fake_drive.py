@@ -380,7 +380,10 @@ class FakeDrive:
         the sync root's parent chain — only via ``sharedWithMe=true``
         queries, mirroring the real Drive semantics."""
         fid = self._insert(name, "OTHER_ROOT", FOLDER_MIME, b"")
-        self.files[fid]["sharedWithMe"] = shared_with_me
+        # Real Drive v3 has no "sharedWithMe" File field (only the query
+        # term); direct shares carry sharedWithMeTime instead.
+        if shared_with_me:
+            self.files[fid]["sharedWithMeTime"] = "2026-01-01T00:00:00.000Z"
         self.files[fid]["ownedByMe"] = False
         self.files[fid]["capabilities"] = {"canEdit": False}
         return fid
@@ -703,7 +706,7 @@ def _match_query(rec: dict, query: str) -> bool:
             if not any(p.get("type") == "anyone" for p in rec.get("permissions", [])):
                 return False
         elif frag in ("sharedWithMe=true", "sharedWithMe = true"):
-            if not rec.get("sharedWithMe"):
+            if not rec.get("sharedWithMeTime"):
                 return False
         elif " in parents" in frag:
             pid = frag.split(" in parents")[0].strip().strip("'")

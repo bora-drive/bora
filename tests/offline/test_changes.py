@@ -215,7 +215,7 @@ def test_classify_shared_with_me_is_apply_without_parent():
             "parents": ["OTHER"],
             "mimeType": "application/vnd.google-apps.folder",
             "trashed": False,
-            "sharedWithMe": True,
+            "sharedWithMeTime": "2026-01-01T00:00:00.000Z",
         },
     }
     assert classify(change, cache) is ChangeDecision.APPLY
@@ -231,7 +231,7 @@ def test_emit_apply_attaches_shared_root_to_sentinel():
             "parents": ["OTHER"],
             "mimeType": "application/vnd.google-apps.folder",
             "trashed": False,
-            "sharedWithMe": True,
+            "sharedWithMeTime": "2026-01-01T00:00:00.000Z",
         }
     }
     assert _emit_apply(change, cache, out) is True
