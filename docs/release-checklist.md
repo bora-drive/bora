@@ -45,6 +45,26 @@ the bundled values still say "cumulus":
       account-state fix). NOTE: the rebrand changed the on-disk config identity
       to `bora`, so any pre-rebrand `cumulus` link must be re-created.
 
+## Packaging
+
+- [x] **systemd user service template.** Done: `packaging/bora-daemon@.service`,
+      a template user unit (instance name = config name, matching the
+      `bora-daemon@<config>.service` name that `bora autostart` generates in
+      `src/bora/autostart.py`). Uses `Type=notify` + `WatchdogSec=30s` — the
+      daemon sends READY/WATCHDOG/STOPPING via sd_notify (`src/bora/daemon.py`).
+      Install/usage notes are in the unit's comment header. Not wired into
+      `pyproject.toml` data-files (neither is `packaging/bora.desktop`); distro
+      packages should install it to `/usr/lib/systemd/user/`.
+- [ ] **Homebrew formula.** A template exists at `packaging/homebrew/bora.rb`
+      (homebrew-core Python-virtualenv pattern; upstream maestral now ships
+      only a cask, so the formula follows the standard pattern instead). At
+      release time it still needs: the real sdist/tarball `url` + `sha256`
+      (currently a git-URL placeholder, since Bora is not on PyPI), and the
+      resource blocks regenerated to the full transitive dependency set with
+      `brew update-python-resources packaging/homebrew/bora.rb` — the
+      checked-in blocks cover direct pyproject.toml deps with PLACEHOLDER
+      checksums only. Also re-check the `python@3.x` dependency then.
+
 ## Cut the release
 
 - [ ] Confirm the offline suite is green (`pytest tests/offline -m "not load"`)
