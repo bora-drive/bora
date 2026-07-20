@@ -222,18 +222,14 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   re-export an unchanged mirror — harmless (no upload, idempotent
   re-export). The `modifiedTime` fallback remains untested live because
   `version` is in practice always present.
-- [ ] GAP found in the live check — **export-toggle flips don't reach the
-  running engine**: the `export_google_docs`/`export_google_docs_markdown`
-  setters in `main.py` only write config; `SyncEngine.reload_cached_config`
-  runs at engine init, so `bora export markdown off` takes effect only after
-  a daemon restart. Even then an existing unchanged mirror is NOT
-  re-exported (an unchanged Doc produces no change entry); the mirror
-  converts on the Doc's next real edit — at which point the swap is clean
-  (`live-doc.md` removed, `live-doc.docx` written with the new content,
-  same `remote_id` identity). Fix idea: have the setters call
-  `sync.reload_cached_config()`; forcing re-export of unchanged mirrors is
-  trickier — a reindex would currently trip the rebuild-with-mirrors
-  limitation below.
+- [x] RESOLVED (c036c17): the `export_google_docs`/`export_google_docs_markdown`
+  setters in `main.py` now call `sync.reload_cached_config()`, so a toggle
+  flip reaches the running engine without a daemon restart. Forcing
+  re-export of an already-unchanged mirror is still not automatic (an
+  unchanged Doc produces no change entry), so the mirror converts on the
+  Doc's next real edit, or immediately via `bora rebuild-index` — the CLI
+  now prints a hint to that effect. Live spot-check (plan Task 13) is still
+  pending before release.
 - [x] FIXED (f15d19c, with tests): a server-side re-export of an exported
   mirror used to spawn a spurious writable conflicted copy of the prior mirror
   (exports have no server hash, so `_check_download_conflict` fell through to
@@ -243,18 +239,20 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   `download_only` index row's `content_hash` — so a re-export of an unedited
   mirror is `RemoteNewer` (no conflict copy); only a genuinely edited mirror is
   preserved.
-- [ ] KNOWN LIMITATION (rebuild-with-mirrors): the fix above depends on the
-  `download_only` index row (holding the export hash) surviving. After a
-  `rebuild-index` / `reset_sync_state` / re-link while exported mirrors are
-  already on disk, that row is gone, so an untouched mirror no longer matches
-  and hits the ctime heuristic instead. Result: with export ON the mirror is
-  conflict-copied and re-uploaded to Drive as a new binary (the copy keeps the
-  mirror's read-only perms; upload happens regardless); with export OFF the
-  mirror uploads as a new binary. First upgrade is safe — no mirrors exist yet
-  when the schema-drift reset runs. Suggested future fix: byte-compare freshly
-  exported bytes against the local file via the `.bora-part` sidecar and adopt
-  the mirror silently on a match (no conflict copy, no upload), re-seeding the
-  index row.
+- [x] RESOLVED (255bf37): added `_adopt_untouched_mirror` as a fallback in
+  `_on_remote_file`'s post-download re-check — it byte-compares the freshly
+  downloaded export bytes directly against the local mirror, with no
+  `download_only` index row required, and adopts silently on a match (no
+  conflict copy, no re-upload). Nuance for the record: offline analysis
+  during implementation found the original "rebuild-with-mirrors" limitation
+  above was overstated for byte-stable exports — the post-download conflict
+  re-check already sees a locally computed export md5, so untouched `.md`
+  mirrors were already resolved as `Identical` even before this fix. This
+  change makes the recovery explicit and independent of hash-cache/index
+  incidentals, rather than "fixing" a break that fully existed. The residual,
+  still-unverified risk is byte-UNSTABLE re-exports (`.xlsx`/`.pptx` are zip
+  containers that may embed timestamps) — that is exactly what the live
+  spot-check (plan Task 13) is meant to measure, and it has not run yet.
 - [x] RESOLVED: `Manager.did_drop_table` for the path cache now has a reader.
   Verified the path cache has no lazy repopulation on a lookup miss (Drive's
   API is ID-based — no path-lookup endpoint to fall back to — so a miss
@@ -273,9 +271,11 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
 - **Shared Drives (Team Drives)** — My Drive only; `is_team_space` hardcoded
   `False`; no `driveId`/`supportsAllDrives` usage.
 - **Google Docs/Sheets/Slides export** — LANDED and live-verified (see
-  "Google Docs Export" above); Forms/Sites/Drawings remain skipped, and the
-  rebuild-with-mirrors limitation plus the export-toggle-flip gap are still
-  open.
+  "Google Docs Export" above); Forms/Sites/Drawings remain skipped. The
+  export-toggle-flip gap and the rebuild-with-mirrors limitation are both
+  resolved in code (c036c17, 255bf37); a live spot-check of the fixes,
+  including byte-unstable `.xlsx`/`.pptx` re-exports, is still pending
+  (plan Task 13).
 - **Webhook change notifications** — polling only (~180 s), by design.
 - **GUI packages** (`maestral-qt`/`maestral-cocoa` equivalents) — not ported;
   desktop entry references `bora gui` but there is no GUI.
