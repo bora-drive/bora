@@ -5,28 +5,41 @@
 # distributed only as a Homebrew *cask* for the bundled GUI app, so a current
 # homebrew-core formula for it no longer exists to copy from).
 #
-# THIS FILE IS NOT INSTALLABLE AS-IS. Bora is not published to PyPI yet, so:
+# THIS FILE IS NOT INSTALLABLE AS-IS YET. Bora is not published to PyPI (and
+# won't be for this release), so `url` below pins the tagged git repository
+# directly rather than a PyPI sdist. That part is final for v0.1.0. What's
+# still outstanding is the resource checksums below, which are PLACEHOLDERs
+# and must be regenerated for real before this formula can be used.
 #
-#   * `url`/`sha256` below point at the git repository as a placeholder.
-#     TODO(release): replace with the sdist tarball URL on PyPI (or a GitHub
-#     release tarball) and its real sha256 once v0.1.0 is published.
-#   * Every `resource` block below covers only Bora's *direct* dependencies
-#     (from pyproject.toml) and uses PLACEHOLDER checksums and predictable-URL
-#     placeholders. At release time, regenerate the full transitive resource
-#     set (keyring, desktop-notifier etc. pull in further packages) with:
+# github.com/indirect/bora is currently PRIVATE, so this formula cannot be
+# installed by anyone outside the project until the repo is made public.
 #
-#         brew update-python-resources packaging/homebrew/bora.rb
+# To finalize this formula (on a Mac, with `brew` installed):
 #
-#     which rewrites the blocks with real pythonhosted.org URLs and sha256s.
-#   * Check the python@3.x dependency against the newest Python that Bora's
-#     dependency set supports at release time (requires-python = ">=3.10").
+#   1. Make sure your git credentials (SSH key or HTTPS token) grant read
+#      access to the private github.com/indirect/bora repo — `brew` shells
+#      out to `git` to fetch the tagged source, so this must work from the
+#      command line first (e.g. `git ls-remote git@github.com:indirect/bora.git`).
+#   2. Run `brew update-python-resources packaging/homebrew/bora.rb`. This
+#      resolves Bora's full transitive dependency set (keyring,
+#      desktop-notifier etc. pull in further packages beyond the direct
+#      dependencies listed here) and rewrites every `resource` block below
+#      with real pythonhosted.org URLs and sha256s, replacing the
+#      PLACEHOLDER checksums.
+#   3. Run `ruby -c packaging/homebrew/bora.rb` to sanity-check the
+#      resulting syntax before committing.
+#
+#   * Also check the python@3.x dependency against the newest Python that
+#     Bora's dependency set supports at release time (requires-python =
+#     ">=3.10").
 
 class Bora < Formula
   include Language::Python::Virtualenv
 
   desc "Open-source Google Drive sync client for macOS and Linux"
   homepage "https://github.com/indirect/bora"
-  # TODO(release): replace git placeholder with published sdist url + sha256.
+  # Not on PyPI: pin the tagged git repo directly. Requires git credentials
+  # with read access to this private repo (see header comment above).
   url "https://github.com/indirect/bora.git", using: :git, tag: "v0.1.0"
   version "0.1.0"
   license "MIT"
