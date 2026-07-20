@@ -1996,6 +1996,16 @@ class SyncEngine:
         # Get modified or added items.
         for local_path, st in walk(self.sync_path, self._scandir_with_ignore):
             is_dir = S_ISDIR(st.st_mode)
+
+            if is_dir and fold_human(self.to_remote_path(local_path)) == fold_human(
+                SHARED_WITH_ME_PATH
+            ):
+                # The virtual "/Shared with me" mount is untracked by design
+                # (no index entry, no real remote counterpart) — never
+                # synthesize a created event for it. Its children are still
+                # visited by the walk.
+                continue
+
             index_entry = self.get_index_entry_for_local_path(local_path)
 
             if index_entry:
