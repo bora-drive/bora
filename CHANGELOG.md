@@ -11,6 +11,21 @@ Dropbox API to the Google Drive API.
   resolution, selective sync (`.mignore`), file revisions and restore.
 - Google OAuth account linking (`bora auth link`), including a headless
   paste-redirect / SSH port-forward fallback.
+- Sharing support via Drive permissions: `create_shared_link` (idempotent
+  `anyone`-reader link), `revoke_shared_link`, `list_shared_links`, and
+  `share_dir` (folder + optional per-email role grant). These currently ship
+  as `Client` methods only — there is no `bora sharelink`-style CLI command
+  yet.
+- Google Docs/Sheets/Slides export to Markdown/Office on download (Doc →
+  `.md`/`.docx`, Sheet → `.xlsx`, Slides → `.pptx`), with `bora export
+  docs on|off` / `bora export markdown on|off` toggles (both default on).
+- "Shared with me" virtual `/Shared with me` root, read-only on disk and
+  never uploaded.
+- Symlink ↔ Drive-shortcut mapping: local symlinks create/retarget Drive
+  shortcuts, and remote shortcuts materialize as platform symlinks / `.lnk`.
+- Upload bandwidth throttling (`_throttle_up`), matching the existing
+  download-side throttle; simple ≤5 MB uploads are single-request and stay
+  unthrottled by design.
 
 ### Changed
 - Renamed the project to **Bora** (CLI command `bora`).
@@ -24,8 +39,22 @@ Dropbox API to the Google Drive API.
   `NSEvent` at load time, so it failed with "ObjC Class NSEvent couldn't be
   found" and the daemon died before creating its Pyro socket. AppKit is now
   loaded explicitly first. (Surfaced by CI on macOS + Python 3.14.)
+- `bora ls` requested the wrong change-feed field (`sharedWithMe` instead of
+  `sharedWithMeTime`), which broke the "Shared with me" projection.
+- The local `/Shared with me` mount directory is no longer uploaded to Drive
+  or synthesized as a create event by the while-inactive scan.
+- Piped (non-tty) `bora ls` printed nothing because it re-iterated an
+  already-exhausted `list_folder_iterator`.
+- A server-side re-export of an exported Google Docs mirror used to spawn a
+  spurious writable conflicted copy; `_check_download_conflict` now
+  byte-compares an untouched mirror against the surviving index row's
+  content hash, so an unedited mirror is treated as `RemoteNewer` instead
+  (f15d19c). A follow-up fix (255bf37) adds `_adopt_untouched_mirror` as a
+  fallback for the case where that index row doesn't survive an
+  index rebuild — see `TODO.md` for the byte-stable-vs-byte-unstable nuance.
 
 ### Known limitations
-- Shared links are not supported yet (no `sharelink` command).
 - Shared Drives (team drives) are not supported.
-- The OAuth app is unverified; add yourself as a test user (see `docs/setup.md`).
+- The OAuth consent screen is published but unverified — Google shows an
+  "unverified app" warning during linking (100-user cap) until verification
+  clears; add yourself as a test user in the meantime (see `docs/setup.md`).
