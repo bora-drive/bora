@@ -26,7 +26,7 @@
 
 [Unit]
 Description=Bora daemon for the config %i
-Documentation=https://bora.tools
+Documentation=https://github.com/indirect/bora
 After=network-online.target
 Wants=network-online.target
 

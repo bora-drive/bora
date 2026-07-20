@@ -76,9 +76,10 @@ with real recovery). No test deliberately exhausts real Drive quota.
 
 ### Dedicated test account
 
-The linked suite must use a **dedicated Google test account**, linked under the
-config name **`bora-test-config`**. This is distinct from the `smoke-test`
-config used by the smoke-test account (`cumulus@arko.net`).
+The linked suite must use a **dedicated Google test account**
+(`bora-test@arko.net`), linked under the config name **`bora-test-config`**.
+This is distinct from the `smoke-test` config used for manual end-to-end
+smoke testing.
 
 **Do not run `pytest tests/linked` while a smoke-test account is linked.** The
 keyring stores credentials by config name; using the same config for both a

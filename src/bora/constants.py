@@ -99,5 +99,4 @@ IS_LINUX = platform.system() == "Linux"
 # Google OAuth client ID / secret will be loaded from config or resources.
 
 # urls
-# TODO: Update to point to the fork's releases URL.
-GITHUB_RELEASES_API = "https://api.github.com/repos/samschott/bora/releases"
+GITHUB_RELEASES_API = "https://api.github.com/repos/indirect/bora/releases"

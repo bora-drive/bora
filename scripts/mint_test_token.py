@@ -48,7 +48,7 @@ def main() -> int:
     )
 
     print("\n1) Open this URL in a browser signed into the DEDICATED TEST")
-    print("   account (NOT the cumulus@arko.net smoke account):\n")
+    print("   account (bora-test@arko.net):\n")
     print(f"   {url}\n")
     print("2) Approve the Google Drive access request.")
     print("3) Your browser will then try to load a 'localhost:8080?code=...'")
@@ -92,9 +92,10 @@ def main() -> int:
 
     print("\n" + "=" * 70)
     print(f"Linked account: {email}")
-    if email == "cumulus@arko.net":
-        print("\n!! WARNING: this is the SMOKE account, not a dedicated test")
-        print("   account. Do NOT use this token for the linked test suite.")
+    if email not in ("bora-test@arko.net", "<unknown>"):
+        print("\n!! WARNING: this is not the dedicated test account")
+        print("   (bora-test@arko.net). Do NOT use this token for the")
+        print("   linked test suite.")
     print("\nRefresh token (export this):\n")
     print(f"  export BORA_TEST_REFRESH_TOKEN='{refresh_token}'")
     print("=" * 70 + "\n")

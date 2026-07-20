@@ -6,24 +6,27 @@ deliberately.
 
 ## Pre-release — external identities still named for earlier codenames
 
-These reference real external resources and require re-provisioning to change;
-the bundled values still say "cumulus":
+These referenced real external resources named for earlier codenames; all
+resolved as of 2026-07-20:
 
-- [ ] **OAuth client / GCP project (`cumulus-496101`).** The shipped
-      `src/bora/resources/client_secret.json` belongs to Google Cloud project
-      `cumulus-496101`. Decide whether to keep it or re-create the OAuth client
-      under a Bora-named project before public release, and (see rotation
-      policy below) restrict it to the Drive scopes actually used.
-- [ ] **Update-check / repo URLs.** `src/bora/constants.py` `GITHUB_RELEASES_API`
-      points at `https://api.github.com/repos/samschott/bora/releases`, which
-      does not exist — the auto-update check will 404. Set it to the real Bora
-      repository, or disable the update check for v0.1.0. Also fix the
-      `samschott/bora` issue URLs in `src/bora/sync.py` and `src/bora/models.py`,
-      and replace the `https://bora.tools` homepage placeholder in
-      `pyproject.toml` / docs if the real site/repo differs.
-- [ ] **Test account email (`cumulus@arko.net`).** `tests/README.md` documents
-      the dedicated test account by its real address; update if the account is
-      re-provisioned under a Bora name.
+- [x] **OAuth client / GCP project.** Done 2026-07-20: the shipped
+      `src/bora/resources/client_secret.json` now belongs to the Bora-named
+      Google Cloud project `bora-500821` (OAuth client "bora"), replacing the
+      original `cumulus-496101`. Still confirm before publishing (see rotation
+      policy below) that the client is restricted to the Drive scopes actually
+      used.
+- [x] **Update-check / repo URLs.** Done 2026-07-20: `GITHUB_RELEASES_API`
+      points at `indirect/bora` (the repo is private until public release, so
+      `bora check-for-updates`-style calls fail cleanly with an update-check
+      error until then); the stray `samschott/bora` issue URLs in
+      `src/bora/sync.py` / `src/bora/models.py` were restored to the upstream
+      `samschott/maestral` issues they cite; the `https://bora.tools`
+      placeholder was replaced with the GitHub repo URL in `pyproject.toml`,
+      `README.md`, the Homebrew formula and the systemd unit.
+- [x] **Test account email.** Done 2026-07-20: the linked-test account is
+      `bora-test@arko.net` (documented in `tests/README.md`), provisioned under
+      the Bora name; the old `cumulus@arko.net` smoke account is no longer
+      referenced.
 
 ## Pre-release — verification & accounts
 
@@ -39,11 +42,12 @@ the bundled values still say "cumulus":
       the intended Drive scopes and project before publishing.
 - [ ] **Windows smoke test.** Install and run a basic link + sync on Windows
       (out of reach from the Linux dev VM).
-- [ ] **Real-account end-to-end smoke.** Link a live Google account
-      (`bora auth link`), sync a small tree, and confirm `bora status` /
-      `bora auth status` now show the account email/type/usage (the Stage 8
-      account-state fix). NOTE: the rebrand changed the on-disk config identity
-      to `bora`, so any pre-rebrand `cumulus` link must be re-created.
+- [x] **Real-account end-to-end smoke.** Done 2026-07-20 against
+      `bora-test@arko.net` (config `smoke-test`): linked via `bora auth link
+      --refresh-token`, synced a small tree both directions (local upload via
+      inotify, remote download within one poll cycle), `bora status` /
+      `bora auth status` show the account email/type/usage, 0 sync errors.
+      Surfaced and fixed a piped-`bora ls` empty-output bug along the way.
 
 ## Packaging
 
