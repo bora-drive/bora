@@ -2,6 +2,7 @@ import hashlib
 import os
 import os.path as osp
 import sqlite3
+import threading
 import zipfile
 from datetime import datetime, timezone
 from queue import Queue
@@ -4305,6 +4306,86 @@ def test_export_toggle_off_to_on_schedules_reindex(sync_engine: SyncEngine) -> N
     assert sync_engine.remote_cursor == ""
 
 
+def test_export_toggle_off_to_on_defers_reindex_when_busy(
+    sync_engine: SyncEngine,
+) -> None:
+    """If sync_lock is held by another thread (a sync cycle is in progress)
+    when export is toggled off -> on, reload_cached_config must NOT raise --
+    calling reset_sync_state directly would raise RuntimeError("Cannot reset
+    sync state while syncing."), which used to escape all the way to the
+    user (e.g. as a raw Pyro traceback from the CLI) with the config already
+    flipped and no reindex ever scheduled. Instead the reset must be
+    deferred and applied once the engine reaches a safe point -- the start
+    of the next download_sync_cycle."""
+    sync_engine._conf.set("sync", "export_google_docs", False)
+    sync_engine.reload_cached_config()
+    assert sync_engine.client.export_opts.enabled is False
+
+    _seed_index_entry(
+        sync_engine, "/Report", rev="0", content_hash="deadbeef", last_sync=1.0
+    )
+    sync_engine.remote_cursor = "SOME-CURSOR"
+    assert sync_engine.index_count() == 1
+
+    lock_acquired = threading.Event()
+    release_lock = threading.Event()
+
+    def hold_lock() -> None:
+        with sync_engine.sync_lock:
+            lock_acquired.set()
+            release_lock.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    try:
+        assert lock_acquired.wait(timeout=5), "holder thread never acquired sync_lock"
+
+        # Flip the toggle on while another thread holds sync_lock.
+        sync_engine._conf.set("sync", "export_google_docs", True)
+        sync_engine.reload_cached_config()  # must not raise
+
+        assert sync_engine.client.export_opts.enabled is True
+        # Deferred: nothing has been reset yet.
+        assert sync_engine._pending_export_reindex is True
+        assert sync_engine.index_count() == 1
+        assert sync_engine.remote_cursor == "SOME-CURSOR"
+    finally:
+        release_lock.set()
+        holder.join(timeout=5)
+        assert not holder.is_alive()
+
+    # Once the lock frees, a real sync cycle applies the deferred reset
+    # at its start, before doing any download work.
+    fake = FakeDrive()
+    _wire_export_cycle(sync_engine, fake)
+    sync_engine.download_sync_cycle()
+
+    assert sync_engine._pending_export_reindex is False
+    assert sync_engine.index_count() == 0
+    assert sync_engine.remote_cursor != "SOME-CURSOR"
+
+
+def test_export_toggle_off_to_on_idle_engine_no_raise(sync_engine: SyncEngine) -> None:
+    """On an idle engine (the common case), the off -> on reindex must take
+    effect immediately and must not raise -- reload_cached_config must never
+    let reset_sync_state's RuntimeError escape from this path regardless of
+    engine state."""
+    sync_engine._conf.set("sync", "export_google_docs", False)
+    sync_engine.reload_cached_config()
+    sync_engine.remote_cursor = "SOME-CURSOR"
+
+    sync_engine._conf.set("sync", "export_google_docs", True)
+
+    try:
+        sync_engine.reload_cached_config()
+    except RuntimeError:
+        pytest.fail("reload_cached_config must not raise on an idle engine")
+
+    assert sync_engine.client.export_opts.enabled is True
+    assert sync_engine._pending_export_reindex is False
+    assert sync_engine.remote_cursor == ""
+
+
 def test_export_toggle_on_to_off_does_not_reindex(sync_engine: SyncEngine) -> None:
     """Turning export off must not clear the index / reset the cursor --
     only enabling export needs to pick up previously-skipped items."""
@@ -4321,6 +4402,113 @@ def test_export_toggle_on_to_off_does_not_reindex(sync_engine: SyncEngine) -> No
     assert sync_engine.client.export_opts.enabled is False
     assert sync_engine.index_count() == 1
     assert sync_engine.remote_cursor == "SOME-CURSOR"
+
+
+# ==== Final whole-branch review, Finding 1: CLI hint accuracy ===============
+#
+# The CLI hint printed after `export docs`/`export markdown` toggles used to
+# unconditionally recommend running `bora rebuild-index` to "convert them
+# now". These two tests, promoted from the reviewer's reproduction script,
+# characterise why that recommendation is harmful for the `docs off` and
+# `markdown` flips: rebuild-index (stop + reset_sync_state + start) drops
+# the index without deleting existing mirrors, so a subsequent mirror with
+# no surviving index row is treated as a new local file -- it lingers on
+# disk in the old format/location AND gets uploaded to Drive as a new
+# binary. The CLI hint text (cli_settings.py) no longer recommends
+# rebuild-index for these two flips; these tests remain as a regression
+# guard on the underlying behaviour that made the old hint unsafe.
+
+
+def _remote_names(fake: FakeDrive) -> list[str]:
+    return sorted(r["name"] for r in fake.files.values() if not r["trashed"])
+
+
+@pytest.fixture
+def mt_sync_engine():
+    """Like the module ``sync_engine`` fixture, but with ``check_same_thread=False``
+    on the path cache's connection. ``upload_local_changes_while_inactive`` (used
+    below to observe whether a stale mirror gets uploaded) dispatches uploads
+    through a thread pool, which touches the path cache from a worker thread."""
+    local_dir = osp.join(get_home_dir(), "rebuild_hint_dummy_dir")
+    os.mkdir(local_dir)
+
+    cache = PathIDCache(Database(sqlite3.connect(":memory:", check_same_thread=False)))
+    cache.root_id = "ROOT"
+    sync = SyncEngine(
+        GoogleDriveClient("test-config", CredentialStorage("test-config"), cache)
+    )
+    sync.sync_path = local_dir
+    sync.local_cursor = 0.0
+
+    yield sync
+
+    remove_configuration("test-config")
+    delete(local_dir)
+
+
+def test_markdown_flip_then_rebuild_leaves_stale_mirror_and_uploads_it(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """A markdown format flip followed by a manual rebuild-index converts
+    the mirror to the new format but leaves the stale-format mirror behind
+    (no surviving index row) and uploads it to Drive as a new binary."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    doc = fake.add_native(name="Report", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Report v1\n")
+    fake.set_export_bytes(doc, _DOCX_MIME, b"docx-bytes-v1")
+    mt_sync_engine.download_sync_cycle()
+    assert osp.isfile(L("/Report.md"))
+
+    remote_before = _remote_names(fake)
+
+    mt_sync_engine._conf.set("sync", "export_google_docs_markdown", False)
+    mt_sync_engine.reload_cached_config()
+    assert mt_sync_engine.client.export_opts.markdown is False
+
+    # What a manual 'bora rebuild-index' does: stop + reset_sync_state + start.
+    mt_sync_engine.reset_sync_state()
+    mt_sync_engine.download_sync_cycle()
+    mt_sync_engine.upload_local_changes_while_inactive()
+
+    assert osp.isfile(L("/Report.docx")), "converted mirror missing"
+    assert osp.isfile(L("/Report.md")), "expected the stale .md mirror to linger"
+    assert (
+        _remote_names(fake) != remote_before
+    ), "expected the stale mirror to be uploaded to Drive"
+
+
+def test_docs_off_then_rebuild_uploads_stale_mirror(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """Turning docs export off, then running a manual rebuild-index, uploads
+    the mirror already on disk to Drive as a new binary -- it has no
+    surviving index row and export is off, so the engine can no longer
+    recognise it as an exported, download-only file."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    doc = fake.add_native(name="Report", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Report v1\n")
+    mt_sync_engine.download_sync_cycle()
+    assert osp.isfile(L("/Report.md"))
+
+    remote_before = _remote_names(fake)
+
+    mt_sync_engine._conf.set("sync", "export_google_docs", False)
+    mt_sync_engine.reload_cached_config()
+    assert mt_sync_engine.client.export_opts.enabled is False
+
+    mt_sync_engine.reset_sync_state()
+    mt_sync_engine.download_sync_cycle()
+    mt_sync_engine.upload_local_changes_while_inactive()
+
+    assert (
+        _remote_names(fake) != remote_before
+    ), "expected the stale mirror to be uploaded to Drive"
 
 
 # ==== Task 12 (export): full-cycle end-to-end integration test ==============

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import threading
 from unittest.mock import PropertyMock, patch
 
 import pytest
@@ -104,17 +105,55 @@ def test_export_toggle_reaches_running_engine(m: Bora) -> None:
 
 def test_export_enable_schedules_reindex(m: Bora, monkeypatch) -> None:
     # reload_cached_config schedules a reindex on off -> on; the setter
-    # must trigger that path.
+    # must trigger that path. Note: the actual reset is applied via
+    # SyncEngine._reset_sync_state_locked, NOT via the public
+    # reset_sync_state -- reload_cached_config must never call that
+    # directly, since it raises RuntimeError when the sync lock is held
+    # elsewhere (see test_export_enable_on_busy_engine_does_not_raise
+    # below and tests/offline/test_sync.py for full coverage of the
+    # busy/idle split).
     m.export_google_docs = False
 
     assert m.sync.client.export_opts.enabled is False
 
     calls = []
-    monkeypatch.setattr(m.sync, "reset_sync_state", lambda: calls.append(1))
+    monkeypatch.setattr(m.sync, "_reset_sync_state_locked", lambda: calls.append(1))
 
     m.export_google_docs = True
 
     assert calls, "off -> on flip did not schedule a reindex"
+
+
+def test_export_enable_on_busy_engine_does_not_raise(m: Bora) -> None:
+    """Reproduces the finding: flipping 'export docs' off -> on while a sync
+    cycle holds sync_lock used to raise RuntimeError("Cannot reset sync
+    state while syncing.") straight out of the setter -- with the config
+    already flipped and no reindex ever scheduled. It must instead defer
+    the reindex and return normally."""
+    m.export_google_docs = False
+    assert m.sync.client.export_opts.enabled is False
+
+    lock_acquired = threading.Event()
+    release_lock = threading.Event()
+
+    def hold_lock() -> None:
+        with m.sync.sync_lock:
+            lock_acquired.set()
+            release_lock.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    try:
+        assert lock_acquired.wait(timeout=5), "holder thread never acquired sync_lock"
+
+        m.export_google_docs = True  # must not raise
+
+        assert m.sync.client.export_opts.enabled is True
+        assert m.sync._pending_export_reindex is True
+    finally:
+        release_lock.set()
+        holder.join(timeout=5)
+        assert not holder.is_alive()
 
 
 def test_shutdown_daemon_calls_client_close(m: Bora) -> None:

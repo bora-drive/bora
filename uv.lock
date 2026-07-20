@@ -263,7 +263,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'lint'" },
     { name = "bora", extras = ["lint", "test"], marker = "extra == 'dev'" },
     { name = "bump2version", marker = "extra == 'dev'" },
-    { name = "click", specifier = ">=8.2.0" },
+    { name = "click", specifier = ">=8.4.0" },
     { name = "desktop-notifier", specifier = ">=5.0.0" },
     { name = "fasteners", specifier = ">=0.15" },
     { name = "flake8", marker = "extra == 'lint'" },
