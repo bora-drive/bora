@@ -20,6 +20,7 @@ from bora.core import (
     ListFolderResult,
 )
 from bora.database.core import Database
+from bora.database.orm import Manager
 from bora.exceptions import DataChangedError
 from bora.export import ExportOptions
 from bora.keyring import CredentialStorage
@@ -31,7 +32,7 @@ from bora.models import (
     SyncEvent,
     SyncStatus,
 )
-from bora.path_cache import SHARED_WITH_ME_ID, PathIDCache
+from bora.path_cache import SHARED_WITH_ME_ID, PathCacheEntry, PathIDCache
 from bora.path_codec import encode_path, fold_path
 from bora.sync import ActivityNode, ActivityTree, Conflict, SyncEngine
 from bora.utils.appdirs import get_home_dir
@@ -341,6 +342,44 @@ def test_schema_drift_drop_resets_remote_cursor(sync_engine: SyncEngine):
     # Re-open the tables: the guard drops the drifted table, and the engine
     # must reset sync state so the cursor no longer points past the (now
     # empty) index.
+    sync._create_or_load_db()
+
+    assert sync.remote_cursor == ""
+
+
+def test_path_cache_schema_drift_drop_resets_remote_cursor(sync_engine: SyncEngine):
+    """A schema-drift drop of the *path cache* -- a separate ``Manager`` that
+    lives on the client, not one of the engine's own four tables above --
+    must also reset the remote cursor.
+
+    Unlike those derived-cache tables, the path cache has no lazy
+    repopulation on a lookup miss: Drive's API is ID-based (there is no
+    path-lookup endpoint to fall back to), so a miss raises NotFoundError
+    instead of resolving via the API, and change-feed write-through
+    (``bora.changes``) only repopulates an entry once its ancestor chain is
+    already cached. Without pairing this drop with the same reset, a
+    PathCacheEntry column drift would leave every previously-known,
+    unchanged path permanently unresolvable instead of merely rebuilding
+    lazily -- verified BLOCKED in the original Task 3 pass; this is the
+    fix. The engine's own four tables are deliberately left un-drifted here
+    so the assertion isolates the path-cache branch of the ``or``.
+    """
+    sync = sync_engine
+    sync.remote_cursor = "live-cursor-456"
+    assert sync.remote_cursor == "live-cursor-456"
+
+    # Simulate an on-disk path_cache table from an older release whose
+    # columns drift from the current model, then re-open its Manager the
+    # way PathIDCache.__init__ does on construction -- that is what sets
+    # did_drop_table.
+    cache = sync.client._path_cache
+    cache._db.executescript(
+        "DROP TABLE IF EXISTS 'path_cache';"
+        "CREATE TABLE 'path_cache' (file_id TEXT PRIMARY KEY);"
+    )
+    cache._table = Manager(cache._db, PathCacheEntry)
+    assert cache.did_drop_table is True
+
     sync._create_or_load_db()
 
     assert sync.remote_cursor == ""

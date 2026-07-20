@@ -253,10 +253,16 @@ Config toggles `sync.export_google_docs` / `sync.export_google_docs_markdown`
   exported bytes against the local file via the `.bora-part` sidecar and adopt
   the mirror silently on a match (no conflict copy, no upload), re-seeding the
   index row.
-- [ ] FOLLOW-UP: `Manager.did_drop_table` is read only by the sync-engine DB
-  owner; the path-cache (client DB) `Manager` sets it with no reader. Inert
-  today (`PathCacheEntry` schema unchanged), but a future column change there
-  would hit the same drop-without-reset class of problem.
+- [x] RESOLVED: `Manager.did_drop_table` for the path cache now has a reader.
+  Verified the path cache has no lazy repopulation on a lookup miss (Drive's
+  API is ID-based — no path-lookup endpoint to fall back to — so a miss
+  raises `NotFoundError`, and change-feed write-through only repopulates an
+  entry once its ancestor chain is already cached), so a bare log line would
+  have been wrong: `PathIDCache.did_drop_table` is exposed as a public
+  property and folded into `SyncEngine._create_or_load_db`'s
+  `dropped_on_drift` check, pairing a path-cache-only schema drift with the
+  same sync-state reset (and resulting bootstrap full listing) as the
+  engine's own derived-cache tables.
 
 ---
 
