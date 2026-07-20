@@ -375,6 +375,14 @@ class GoogleDriveClient:
             # flow (InvalidGrantError etc.) — return 1 instead of surfacing
             # a raw oauthlib traceback (review F13.2).
             return 1
+        except HttpError as exc:
+            # The post-exchange account-info call can fail with an HTTP error
+            # even though the token exchange succeeded — e.g. 403
+            # accessNotConfigured when the Drive API is disabled on the OAuth
+            # client's Cloud project (seen live, 2026-07-20). Keep the
+            # documented 0/1/2 contract instead of leaking a raw traceback.
+            logger.warning("Could not verify account after linking: %s", exc)
+            return 2
         except CONNECTION_ERRORS:
             return 2
 
