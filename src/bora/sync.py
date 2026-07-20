@@ -624,14 +624,17 @@ class SyncEngine:
             self._history_table = Manager(self._db, SyncEvent)
             self._hash_table = Manager(self._db, HashCacheEntry)
             self._sync_errors_table = Manager(self._db, SyncErrorEntry)
-            dropped_on_drift = any(
-                table.did_drop_table
-                for table in (
-                    self._index_table,
-                    self._history_table,
-                    self._hash_table,
-                    self._sync_errors_table,
+            dropped_on_drift = (
+                any(
+                    table.did_drop_table
+                    for table in (
+                        self._index_table,
+                        self._history_table,
+                        self._hash_table,
+                        self._sync_errors_table,
+                    )
                 )
+                or self.client._path_cache.did_drop_table
             )
 
         if dropped_on_drift:
@@ -647,6 +650,20 @@ class SyncEngine:
             # BoraApp._update_from_pre_v1_6_0, which likewise pairs a
             # derived-cache drop with reset_to_defaults("sync"). Safe on first
             # upgrade: no local mirrors exist yet, so re-derivation is clean.
+            #
+            # The client's path cache (``self.client._path_cache``) is folded
+            # into this same check even though it lives on a separate
+            # ``Manager`` (and, in production, a connection opened before the
+            # engine exists): unlike these derived-cache tables it has no
+            # lazy repopulation on a lookup miss. Drive's API is ID-based, so
+            # there is no path-lookup endpoint to fall back to -- a miss
+            # raises ``NotFoundError`` instead of resolving via the API -- and
+            # change-feed write-through only repopulates an entry once its
+            # ancestor chain is already cached. Left unpaired, a path-cache
+            # schema drift would leave every previously-known, unchanged path
+            # permanently unresolvable instead of merely rebuilding lazily.
+            # The full bootstrap listing this reset triggers is what actually
+            # repopulates the path cache (via ``populate_from_listing``).
             self._logger.info(
                 "Schema drift dropped cache tables; resetting sync state to "
                 "trigger a full reindex"

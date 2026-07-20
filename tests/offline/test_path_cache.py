@@ -911,3 +911,48 @@ class TestExportLeafProjection:
         assert cache.get_entry("f2") is None
         # Exactly one entry occupies the projected path (no cross-wire).
         assert cache.count() == 1
+
+
+class TestDidDropTable:
+    """``PathIDCache.did_drop_table`` must surface the underlying
+    ``Manager``'s schema-drift flag so ``SyncEngine._create_or_load_db`` can
+    fold a path-cache drop into its ``dropped_on_drift`` reset check (see
+    the TODO.md FOLLOW-UP this closes)."""
+
+    def test_false_on_fresh_database(self) -> None:
+        # No on-disk table at all: create_table_if_not_exists creates it
+        # fresh, no drift was observed.
+        cache = make_cache()
+        assert cache.did_drop_table is False
+
+    def test_false_when_schema_already_matches(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        db = Database(conn)
+        # First open creates the table with the current schema.
+        PathIDCache(db)
+        # Re-opening against the same, already-matching table must not
+        # report a drop.
+        cache2 = PathIDCache(db)
+        assert cache2.did_drop_table is False
+
+    def test_true_when_on_disk_schema_has_drifted(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        db = Database(conn)
+        # Simulate a pre-release DB: a "path_cache" table missing columns
+        # the current PathCacheEntry model defines.
+        db.executescript("CREATE TABLE 'path_cache' (file_id TEXT PRIMARY KEY);")
+
+        cache = PathIDCache(db)
+
+        assert cache.did_drop_table is True
+        # And the table is fully usable afterwards (drop + recreate, not a
+        # dangling reference to the old schema).
+        cache.root_id = "ROOT"
+        cache.set(
+            remote_path="/report.pdf",
+            file_id="F1",
+            parent_id="ROOT",
+            name="report.pdf",
+            is_folder=False,
+        )
+        assert cache.path_to_id("/report.pdf") == "F1"

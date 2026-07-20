@@ -126,6 +126,25 @@ class PathIDCache:
         self._root_id: str | None = None
         self._lock = threading.RLock()
 
+    @property
+    def did_drop_table(self) -> bool:
+        """Whether schema drift dropped and recreated ``path_cache`` on
+        construction (mirrors :attr:`bora.database.orm.Manager.did_drop_table`).
+
+        Unlike the sync engine's own derived-cache tables, this cache has
+        **no lazy repopulation** on a lookup miss: Drive's API is ID-based
+        (there is no path-lookup endpoint to fall back to), so a miss
+        raises ``NotFoundError`` instead of resolving via the API, and
+        change-feed write-through (``bora.changes``) only repopulates an
+        entry once its ancestor chain is already cached. A dropped table
+        must therefore be paired with the same sync-state reset used for
+        the engine's own tables, so the bootstrap full listing
+        (:meth:`populate_from_listing`) rebuilds it from scratch --
+        ``SyncEngine._create_or_load_db`` reads this to fold that case into
+        its ``dropped_on_drift`` check.
+        """
+        return self._table.did_drop_table
+
     # -- Root management ---------------------------------------------------
 
     @property
