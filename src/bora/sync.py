@@ -174,6 +174,18 @@ class Conflict(enum.Enum):
     LocalNewerOrIdentical = "local newer or identical"
 
 
+class _WritableDirState:
+    """Bookkeeping for :meth:`SyncEngine._writable_dir`: how many operations
+    currently hold the directory writable, and the mode to restore when the
+    last one exits (``None`` if no chmod was needed)."""
+
+    __slots__ = ("holders", "restore_mode")
+
+    def __init__(self, holders: int, restore_mode: int | None) -> None:
+        self.holders = holders
+        self.restore_mode = restore_mode
+
+
 class _Ignore:
     def __init__(
         self,
@@ -575,6 +587,9 @@ class SyncEngine:
         self.sync_lock = RLock()  # Upload and download cycles.
         self._db_lock = RLock()  # DB access.
         self._tree_traversal = RLock()  # Sync activity across multiple levels.
+        # Refcounts for _writable_dir: dir path -> per-directory state.
+        self._writable_dirs_lock = RLock()
+        self._writable_dirs: dict[str, _WritableDirState] = {}
         max_parallel_downloads = self._conf.get("app", "max_parallel_uploads")
         self._parallel_down_semaphore = threading.Semaphore(max_parallel_downloads)
         max_parallel_uploads = self._conf.get("app", "max_parallel_uploads")
@@ -4412,6 +4427,61 @@ class SyncEngine:
         with self.fs_events.ignore(FileModifiedEvent(local_path), recursive=False):
             os.chmod(local_path, mode)
 
+    @contextmanager
+    def _writable_dir(self, dir_path: str) -> Iterator[None]:
+        """Temporarily grant owner write permission on ``dir_path``.
+
+        A view-only shared directory is kept at mode 0o555 on disk (see
+        :meth:`_apply_read_only`), but bora runs as the very user that chmod
+        protects against -- so applying a remote change INSIDE such a
+        directory (mkdir of a child folder, moving a downloaded file into
+        place, unlinking a deleted child, renames) would fail with EACCES.
+        Lift the write bit for the duration of the operation and restore the
+        previous mode afterwards.
+
+        Entries are refcounted per directory: download workers apply sibling
+        events concurrently (see ``do_parallel`` in
+        :meth:`apply_remote_changes`), and the mode must not be restored
+        while another worker still mutates the same directory. No-ops if the
+        directory is missing or already owner-writable.
+        """
+        with self._writable_dirs_lock:
+            state = self._writable_dirs.get(dir_path)
+            if state is None:
+                mode: int | None
+                try:
+                    mode = stat.S_IMODE(os.lstat(dir_path).st_mode)
+                except OSError:
+                    mode = None
+                if mode is None or mode & stat.S_IWUSR:
+                    state = _WritableDirState(1, None)
+                else:
+                    with self.fs_events.ignore(
+                        FileModifiedEvent(dir_path), recursive=False
+                    ):
+                        os.chmod(dir_path, mode | stat.S_IWUSR)
+                    state = _WritableDirState(1, mode)
+                self._writable_dirs[dir_path] = state
+            else:
+                state.holders += 1
+        try:
+            yield
+        finally:
+            with self._writable_dirs_lock:
+                state.holders -= 1
+                if state.holders == 0:
+                    del self._writable_dirs[dir_path]
+                    if state.restore_mode is not None:
+                        try:
+                            with self.fs_events.ignore(
+                                FileModifiedEvent(dir_path), recursive=False
+                            ):
+                                os.chmod(dir_path, state.restore_mode)
+                        except OSError:
+                            # The directory may have been deleted or replaced
+                            # while we held it writable.
+                            pass
+
     def _restore_writable(self, local_path: str) -> None:
         """Restore write permission before overwriting/deleting a read-only
         local file or directory for an incoming remote change.
@@ -4500,9 +4570,10 @@ class SyncEngine:
                 FileCreatedEvent(event.local_path), recursive=False
             ):
                 with convert_api_errors(remote_path=event.remote_path):
-                    written_path = write_platform_symlink(
-                        event.symlink_target, event.local_path
-                    )
+                    with self._writable_dir(osp.dirname(event.local_path)):
+                        written_path = write_platform_symlink(
+                            event.symlink_target, event.local_path
+                        )
                     stat = os.lstat(written_path)
             status = SyncStatus.Done
         else:
@@ -4537,7 +4608,8 @@ class SyncEngine:
                 event_cls = DirMovedEvent if isdir(event.local_path) else FileMovedEvent
                 with self.fs_events.ignore(event_cls(event.local_path, cc_local_path)):
                     with convert_api_errors():
-                        move(event.local_path, cc_local_path, raise_error=True)
+                        with self._writable_dir(osp.dirname(event.local_path)):
+                            move(event.local_path, cc_local_path, raise_error=True)
 
                 self._logger.debug(
                     'Download conflict: renamed "%s" to "%s"',
@@ -4557,10 +4629,11 @@ class SyncEngine:
                 # first read-only nested directory and leave the item stuck.
                 self._restore_writable(event.local_path)
                 with self.fs_events.ignore(DirDeletedEvent(event.local_path)):
-                    delete(
-                        event.local_path,
-                        force_case_sensitive=not self.is_fs_case_sensitive,
-                    )
+                    with self._writable_dir(osp.dirname(event.local_path)):
+                        delete(
+                            event.local_path,
+                            force_case_sensitive=not self.is_fs_case_sensitive,
+                        )
 
             ignore_events: list[FileSystemEvent] = [
                 FileMovedEvent(tmp_fname, event.local_path)
@@ -4589,13 +4662,14 @@ class SyncEngine:
                     remote_path=event.remote_path, local_path=event.local_path
                 ):
                     stat = os.lstat(tmp_fname)
-                    move(
-                        tmp_fname,
-                        event.local_path,
-                        keep_target_permissions=preserve_metadata,
-                        keep_target_xattrs=preserve_metadata,
-                        raise_error=True,
-                    )
+                    with self._writable_dir(osp.dirname(event.local_path)):
+                        move(
+                            tmp_fname,
+                            event.local_path,
+                            keep_target_permissions=preserve_metadata,
+                            keep_target_xattrs=preserve_metadata,
+                            raise_error=True,
+                        )
 
         self.update_index_from_sync_event(event)
 
@@ -4656,7 +4730,8 @@ class SyncEngine:
             event_cls = DirMovedEvent if isdir(event.local_path) else FileMovedEvent
             with self.fs_events.ignore(event_cls(event.local_path, cc_local_path)):
                 with convert_api_errors():
-                    move(event.local_path, cc_local_path, raise_error=True)
+                    with self._writable_dir(osp.dirname(event.local_path)):
+                        move(event.local_path, cc_local_path, raise_error=True)
 
             self._logger.debug(
                 'Download conflict: renamed "%s" to "%s"',
@@ -4676,20 +4751,23 @@ class SyncEngine:
                 FileModifiedEvent(event.local_path),  # May be emitted on macOS.
                 FileDeletedEvent(event.local_path),
             ):
-                delete(
-                    event.local_path, force_case_sensitive=not self.is_fs_case_sensitive
-                )
+                with self._writable_dir(osp.dirname(event.local_path)):
+                    delete(
+                        event.local_path,
+                        force_case_sensitive=not self.is_fs_case_sensitive,
+                    )
 
-        try:
-            with self.fs_events.ignore(
-                DirCreatedEvent(event.local_path), recursive=False
-            ):
-                os.mkdir(event.local_path)
-        except FileExistsError:
-            status = SyncStatus.Skipped
-        except OSError as err:
-            self.ensure_sync_folder_present()
-            raise os_to_bora_error(err, remote_path=event.remote_path)
+        with self._writable_dir(osp.dirname(event.local_path)):
+            try:
+                with self.fs_events.ignore(
+                    DirCreatedEvent(event.local_path), recursive=False
+                ):
+                    os.mkdir(event.local_path)
+            except FileExistsError:
+                status = SyncStatus.Skipped
+            except OSError as err:
+                self.ensure_sync_folder_present()
+                raise os_to_bora_error(err, remote_path=event.remote_path)
 
         self.update_index_from_sync_event(event)
 
@@ -4728,9 +4806,10 @@ class SyncEngine:
 
         event_cls = DirDeletedEvent if isdir(event.local_path) else FileDeletedEvent
         with self.fs_events.ignore(event_cls(event.local_path)):
-            exc = delete(
-                event.local_path, force_case_sensitive=not self.is_fs_case_sensitive
-            )
+            with self._writable_dir(osp.dirname(event.local_path)):
+                exc = delete(
+                    event.local_path, force_case_sensitive=not self.is_fs_case_sensitive
+                )
 
         if not exc:
             self.update_index_from_sync_event(event)
@@ -4797,7 +4876,9 @@ class SyncEngine:
 
             event_cls = DirMovedEvent if isdir(local_path_old) else FileMovedEvent
             with self.fs_events.ignore(event_cls(local_path_old, event.local_path)):
-                exc = move(local_path_old, event.local_path)
+                with self._writable_dir(osp.dirname(local_path_old)):
+                    with self._writable_dir(osp.dirname(event.local_path)):
+                        exc = move(local_path_old, event.local_path)
 
             event_parent_lower = osp.dirname(event.remote_path_lower)
             if (
@@ -4915,7 +4996,9 @@ class SyncEngine:
 
             event_cls = DirMovedEvent if isdir(local_path_old) else FileMovedEvent
             with self.fs_events.ignore(event_cls(local_path_old, event.local_path)):
-                move(local_path_old, event.local_path)
+                with self._writable_dir(osp.dirname(local_path_old)):
+                    with self._writable_dir(osp.dirname(event.local_path)):
+                        move(local_path_old, event.local_path)
 
             with self._database_access(), self._db.transaction():
                 # The parent-row update and the child re-casing below must

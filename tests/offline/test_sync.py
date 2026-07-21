@@ -216,6 +216,11 @@ def sync_engine():
     yield sync
 
     remove_configuration("test-config")
+    # Read-only tests leave 0o555 directories behind; restore write bits so
+    # the teardown delete can traverse and remove them.
+    for dirpath, dirnames, _filenames in os.walk(local_dir):
+        for name in dirnames:
+            os.chmod(osp.join(dirpath, name), 0o755)
     delete(local_dir)
 
 
@@ -3174,6 +3179,161 @@ def test_view_only_shared_folder_download_sets_read_only_dir(
     entry = sync_engine.get_index_entry(remote_path.lower())
     assert entry is not None
     assert entry.is_read_only is True
+
+
+# ==== read-only parents: bora must still be able to mutate INSIDE them ======
+#
+# _apply_read_only chmods every view-only shared directory 0o555 as soon as it
+# is created. Since bora runs as the same user the chmod protects against,
+# every subsequent mutation inside such a directory -- mkdir of a child
+# folder, moving a downloaded file into place, deleting a child -- fails with
+# EACCES unless the parent's write bit is lifted for the duration of the
+# operation. Regression: syncing a view-only share died on the FIRST nested
+# folder ("Could not sync ...: PermissionError ... os.mkdir").
+
+
+def _seed_read_only_parent(sync_engine: SyncEngine, remote_path: str) -> str:
+    """Create a local dir for ``remote_path``, index it as a view-only folder,
+    and chmod it 0o555 exactly as _apply_read_only leaves it. Returns the
+    local path."""
+    local_path = sync_engine.to_local_path_from_cased(remote_path)
+    os.makedirs(local_path, exist_ok=True)
+    entry = IndexEntry(
+        remote_path_cased=remote_path,
+        remote_path_lower=remote_path.lower(),
+        remote_id=f"id:{remote_path.strip('/').replace('/', '-')}",
+        item_type=ItemType.Folder,
+        last_sync=datetime.today().timestamp(),
+        rev="folder",
+        content_hash="folder",
+        symlink_target=None,
+        read_only=1,
+    )
+    with sync_engine._database_access():
+        sync_engine._index_table.update(entry)
+    os.chmod(local_path, 0o555)
+    return local_path
+
+
+def test_remote_subfolder_created_inside_read_only_parent(
+    sync_engine: SyncEngine,
+) -> None:
+    """_on_remote_folder must create a child folder inside a 0o555 view-only
+    parent by temporarily lifting the parent's write bit -- and put the
+    protection back afterwards."""
+    import stat as _stat
+
+    parent_remote = "/Shared with me/Netrunner"
+    parent_local = _seed_read_only_parent(sync_engine, parent_remote)
+
+    md = FolderMetadata(
+        name="00 - Draft",
+        path_lower=f"{parent_remote.lower()}/00 - draft",
+        path_display=f"{parent_remote}/00 - Draft",
+        id="FOLDER-CHILD",
+        shared=True,
+        can_edit=False,
+    )
+    event = SyncEvent.from_metadata(md, sync_engine)
+
+    status = sync_engine._on_remote_folder(event)
+
+    assert status == SyncStatus.Done
+    assert os.path.isdir(event.local_path)
+
+    # The child is itself protected ...
+    child_mode = _stat.S_IMODE(os.lstat(event.local_path).st_mode)
+    assert not (child_mode & 0o222)
+
+    # ... and the parent's protection was restored, not left writable.
+    parent_mode = _stat.S_IMODE(os.lstat(parent_local).st_mode)
+    assert parent_mode == 0o555
+
+
+def test_remote_file_downloaded_into_read_only_parent(
+    sync_engine: SyncEngine,
+) -> None:
+    """_on_remote_file must move a downloaded file into a 0o555 view-only
+    parent by temporarily lifting the parent's write bit."""
+    import stat as _stat
+
+    parent_remote = "/Shared with me/Netrunner"
+    parent_local = _seed_read_only_parent(sync_engine, parent_remote)
+
+    fake = FakeDrive()
+    content = b"view only file body"
+    file_id = fake._insert("notes.txt", "OTHER_ROOT", "text/plain", content)
+    fake.files[file_id]["ownedByMe"] = False
+    fake.files[file_id]["capabilities"] = {"canEdit": False}
+    sync_engine.client._get_service = Mock(return_value=fake.service())
+    sync_engine.client._cached_account_info = FullAccount(
+        account_id="account-id",
+        display_name="Offline Tester",
+        email="offline@example.com",
+        profile_photo_url=None,
+        disabled=False,
+    )
+
+    remote_path = f"{parent_remote}/notes.txt"
+    sync_engine.client._path_cache.set(
+        remote_path,
+        file_id,
+        parent_id="PARENT-RO",
+        name="notes.txt",
+        is_folder=False,
+    )
+
+    md = sync_engine.client.get_metadata(remote_path)
+    assert md is not None
+    event = SyncEvent.from_metadata(md, sync_engine)
+
+    status = sync_engine._on_remote_file(event)
+
+    assert status == SyncStatus.Done
+    local_file = sync_engine.to_local_path_from_cased(remote_path)
+    assert os.path.isfile(local_file)
+    with open(local_file, "rb") as f:
+        assert f.read() == content
+
+    # File itself is read-only, parent protection restored.
+    assert not (_stat.S_IMODE(os.lstat(local_file).st_mode) & 0o222)
+    assert _stat.S_IMODE(os.lstat(parent_local).st_mode) == 0o555
+
+
+def test_remote_delete_inside_read_only_parent(sync_engine: SyncEngine) -> None:
+    """_on_remote_deleted must remove a child of a 0o555 view-only parent
+    (unlink requires the parent's write bit) and restore the protection."""
+    import stat as _stat
+
+    parent_remote = "/Shared with me/Netrunner"
+    remote_path = f"{parent_remote}/obsolete.txt"
+
+    # Child exists locally, read-only, synced; then the parent is locked down.
+    local_file = _write_local_file(sync_engine, remote_path, b"old")
+    os.chmod(local_file, 0o444)
+    _seed_index_entry(
+        sync_engine,
+        remote_path,
+        rev="r1",
+        content_hash=_md5(b"old"),
+        last_sync=datetime.today().timestamp() + 10.0,
+        read_only=1,
+        remote_id="id:obsolete",
+    )
+    parent_local = _seed_read_only_parent(sync_engine, parent_remote)
+
+    md = DeletedMetadata(
+        name="obsolete.txt",
+        path_lower=remote_path.lower(),
+        path_display=remote_path,
+    )
+    event = SyncEvent.from_metadata(md, sync_engine)
+
+    status = sync_engine._on_remote_deleted(event)
+
+    assert status == SyncStatus.Done
+    assert not os.path.exists(local_file)
+    assert _stat.S_IMODE(os.lstat(parent_local).st_mode) == 0o555
 
 
 # ==== Task 14: download path materializes shortcuts via the platform writer ==
