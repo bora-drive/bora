@@ -42,6 +42,7 @@ from bora.client import GoogleDriveClient
 from bora.core import FileMetadata, FolderMetadata, WriteMode
 from bora.exceptions import (
     DataCorruptionError,
+    InsufficientPermissionsError,
     NotFoundError,
 )
 from bora.utils.path import normalize
@@ -414,3 +415,38 @@ def test_batch_methods(client: GoogleDriveClient) -> None:
         assert res_remove[i].path_lower == normalize(folders[i])
 
     assert isinstance(res_remove[20], NotFoundError)
+
+
+# ---------------------------------------------------------------------------
+# Sharing — 403 -> InsufficientPermissionsError (TODO.md item 3 sub-check)
+# ---------------------------------------------------------------------------
+
+
+@requires_account
+def test_create_shared_link_view_only_raises(client: GoogleDriveClient) -> None:
+    """permissions.create on a view-only "Shared with me" item must map the
+    API's real 403 to InsufficientPermissionsError.
+
+    The fixture item is discovered dynamically (any "Shared with me" entry
+    with can_edit=False) rather than hardcoded by name, so this stays
+    runnable — and skips cleanly — on accounts without such a fixture. A
+    full recursive listing populates the path cache's virtual "/Shared with
+    me" subtree (see GoogleDriveClient.list_shared_roots /
+    PathIDCache.populate_from_listing); create_shared_link resolves paths
+    through that same cache.
+    """
+    result = client.list_folder("/", recursive=True)
+    shared_view_only = [
+        e
+        for e in result.entries
+        if e.path_display.startswith("/Shared with me/") and not e.can_edit
+    ]
+    if not shared_view_only:
+        pytest.skip(
+            "No view-only item under 'Shared with me' in this account; "
+            "share a file into it as Viewer from another account to enable "
+            "this check."
+        )
+    md = shared_view_only[0]
+    with pytest.raises(InsufficientPermissionsError):
+        client.create_shared_link(md.path_display)

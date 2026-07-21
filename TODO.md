@@ -152,11 +152,13 @@ consolidated lists at the end of this section.
    id via `_URL_ID_PATTERNS`; the account-wide `anyoneWithLink` listing
    returned every shared item; `create_shared_link` is idempotent and
    `revoke_shared_link` works by URL for both binary files and native docs.
-   STILL OPEN: the `permissions.create` 403 →
-   `InsufficientPermissionsError` mapping needs an item the test account
-   cannot share — requires a second account to share something read-only
-   into `bora-test@arko.net` first (the account currently has no
-   shared-with-me items).
+   CLOSED 2026-07-21: a second account shared a file (`bora-403-fixture`)
+   into `bora-test@arko.net` as Viewer; linked test
+   `tests/linked/unit/test_client.py::test_create_shared_link_view_only_raises`
+   discovers the view-only "Shared with me" item dynamically, calls
+   `create_shared_link` on it, and observed a real Drive 403
+   (`insufficientFilePermissions`) map to `InsufficientPermissionsError` —
+   PASSED live.
 4. [x] **Selective-sync rename live check** — DONE 2026-07-20: a real
    `changes.list` rename arrives exactly as modeled (single entry carrying
    the new `name` + `parents`, `removed=False`, `file.trashed=False`), and
