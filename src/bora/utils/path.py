@@ -374,6 +374,12 @@ def move(
     the destination path no longer exist, this function does nothing. Any other
     exceptions are either raised or returned if ``raise_error`` is False.
 
+    .. caution:: The silent skip also covers a *missing destination parent*
+        directory (both raise ``FileNotFoundError`` from ``os.rename``), and
+        callers rely on that contract (e.g. the stale-move detection in
+        ``SyncEngine._apply_remote_move``). Callers that must know whether the
+        item actually landed have to check the destination afterwards.
+
     Uses ``os.rename`` internally.
 
     :param src_path: Path of item to move.

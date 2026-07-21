@@ -115,7 +115,14 @@ from .models import (
     SyncStatus,
 )
 from .path_cache import SHARED_WITH_ME_PATH
-from .path_codec import decode_path, encode_path, fold_human, fold_path
+from .path_codec import (
+    decode_path,
+    decode_path_local,
+    encode_path,
+    encode_path_local,
+    fold_human,
+    fold_path,
+)
 from .utils import exc_info_tuple, removeprefix, sanitize_string
 from .utils.appdirs import get_data_path
 from .utils.caches import LRUCache
@@ -1687,12 +1694,15 @@ class SyncEngine:
             raise ValueError(f'"{path}" is not in "{self.sync_path}"')
         # Local file names are human-readable (decoded); the virtual/index
         # layer is percent-encoded for filesystem safety. Encode each
-        # component crossing the local -> virtual boundary. ASCII names are
-        # unaffected (encode is a no-op for the unreserved set).
+        # component crossing the local -> virtual boundary with the local
+        # variant, which maps segments materialized with kept escapes (a
+        # Drive name containing '/' appears locally as '%2F') back to their
+        # exact virtual path. ASCII names are unaffected (encode is a no-op
+        # for the unreserved set).
         relative = "/" + removeprefix(
             path, self.sync_path, self.is_fs_case_sensitive
         ).lstrip("/")
-        return encode_path(relative)
+        return encode_path_local(relative)
 
     def to_remote_path_lower(self, local_path: str | bytes) -> str:
         """
@@ -1716,8 +1726,11 @@ class SyncEngine:
         """
         # The virtual path is percent-encoded; the local file system uses
         # human-readable (decoded) names. Decode each component crossing the
-        # virtual -> local boundary. ASCII names are unaffected.
-        return f"{self.sync_path}{decode_path(remote_path_cased)}"
+        # virtual -> local boundary — except escapes of characters no local
+        # file name can hold ('/' and NUL), which stay encoded so a Drive
+        # name like '11/26/25' materializes as one segment instead of
+        # spilling extra directory levels. ASCII names are unaffected.
+        return f"{self.sync_path}{decode_path_local(remote_path_cased)}"
 
     def to_local_path(self, remote_path: str) -> str:
         """
@@ -4431,7 +4444,13 @@ class SyncEngine:
         resulting chmod so it is not echoed back as a local change."""
         mode = 0o555 if is_dir else 0o444
         with self.fs_events.ignore(FileModifiedEvent(local_path), recursive=False):
-            os.chmod(local_path, mode)
+            try:
+                os.chmod(local_path, mode)
+            except OSError as err:
+                # E.g. the item vanished in a concurrent local delete. An
+                # unhandled OSError here would escape _create_local_entry
+                # (which only converts SyncError) and shut down the manager.
+                self._logger.debug("Cannot set read-only: %s", err)
 
     @contextmanager
     def _writable_dir(self, dir_path: str) -> Iterator[None]:
@@ -4675,6 +4694,15 @@ class SyncEngine:
                             keep_target_permissions=preserve_metadata,
                             keep_target_xattrs=preserve_metadata,
                             raise_error=True,
+                        )
+                    if not osp.lexists(event.local_path):
+                        # move() silently skips a rename whose destination
+                        # parent directory is missing (deleted locally
+                        # mid-cycle). Surface it here — otherwise we would
+                        # record an index entry for a file that never reached
+                        # disk.
+                        raise FileNotFoundError(
+                            errno.ENOENT, os.strerror(errno.ENOENT), event.local_path
                         )
 
         self.update_index_from_sync_event(event)

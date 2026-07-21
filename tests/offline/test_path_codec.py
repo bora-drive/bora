@@ -8,8 +8,10 @@ from bora.path_codec import (
     compose_path,
     decode_name,
     decode_path,
+    decode_path_local,
     encode_name,
     encode_path,
+    encode_path_local,
     fold_human,
     fold_key,
     fold_path,
@@ -244,3 +246,73 @@ class TestFoldHuman:
 
     def test_fold_human_nested(self) -> None:
         assert fold_human("/Ördner/Straße") == "/ördner/strasse"
+
+
+class TestLocalBoundary:
+    """decode_path_local / encode_path_local: the virtual <-> local-filesystem
+    boundary pair.
+
+    Unlike :func:`decode_path`, :func:`decode_path_local` keeps the escapes of
+    characters that cannot appear in a local file name on any platform (``/``
+    and NUL) so a Drive name like ``11/26/25`` materializes as the single
+    segment ``11%2F26%2F25`` instead of spilling extra directory levels into
+    the local path. :func:`encode_path_local` is its exact inverse.
+
+    Regression: a view-only 'Shared with me' PDF named
+    ``... .pdf - 11/26/25, 2:33 PM`` crashed the sync manager with
+    ``FileNotFoundError`` because the decoded local path pointed into
+    nonexistent ``.../ - 11/26/`` directories.
+    """
+
+    def test_decode_keeps_slash_escape(self) -> None:
+        assert (
+            decode_path_local("/Shared with me/a%2Fb.pdf")
+            == "/Shared with me/a%2Fb.pdf"
+        )
+
+    def test_decode_keeps_nul_escape(self) -> None:
+        assert decode_path_local("/a%00b") == "/a%00b"
+
+    def test_decode_decodes_safe_escapes(self) -> None:
+        # '&' (%26) and U+202F narrow no-break space decode as before.
+        assert decode_path_local("/x%26y%E2%80%AFz") == "/x&y z"
+
+    def test_decode_mixed_segment(self) -> None:
+        v = "/Shared with me/copy.pdf - 11%2F26%2F25%2C 2%3A33%E2%80%AFPM"
+        assert (
+            decode_path_local(v) == "/Shared with me/copy.pdf - 11%2F26%2F25, 2:33 PM"
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        ["", "/", "/Documents/Report %281%29.txt", "/a b/100%25 off.pdf"],
+    )
+    def test_decode_matches_decode_path_without_unsafe_escapes(self, path: str) -> None:
+        assert decode_path_local(path) == decode_path(path)
+
+    def test_encode_collapses_kept_slash_escape(self) -> None:
+        # The local segment 'a%2Fb.pdf' is the materialized form of Drive
+        # name 'a/b.pdf'; it must map back to the same virtual path, not be
+        # double-encoded to 'a%252Fb.pdf'.
+        assert (
+            encode_path_local("/Shared with me/a%2Fb.pdf")
+            == "/Shared with me/a%2Fb.pdf"
+        )
+
+    @pytest.mark.parametrize(
+        "virtual",
+        [
+            "/Shared with me/copy.pdf - 11%2F26%2F25%2C 2%3A33%E2%80%AFPM",
+            "/a%00b",
+            "/plain/Report %281%29.txt",
+            "/a b/100%25 off.pdf",
+            "/",
+            "",
+        ],
+    )
+    def test_round_trip_identity(self, virtual: str) -> None:
+        assert encode_path_local(decode_path_local(virtual)) == virtual
+
+    def test_encode_matches_encode_path_without_unsafe_sequences(self) -> None:
+        p = "/Ördner/100% off (1).txt"
+        assert encode_path_local(p) == encode_path(p)

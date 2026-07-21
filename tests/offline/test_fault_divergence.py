@@ -824,3 +824,64 @@ def test_remote_id_unique_constraint_rejects_duplicate(sync_engine: SyncEngine):
     )
     with pytest.raises(_sqlite3.IntegrityError):
         sync_engine._index_table.update(duplicate)
+
+
+# ---------------------------------------------------------------------------
+# Download into a locally missing (but indexed) parent directory
+#
+# move() silently skips a rename whose destination parent is absent (both
+# FileNotFoundError cases look alike to it), so without an explicit landing
+# check the download path would record an index entry for a file that never
+# reached disk — a phantom that masks the failure until the next reindex.
+# ---------------------------------------------------------------------------
+
+
+def test_download_into_missing_parent_dir_records_sync_error(
+    sync_engine: SyncEngine,
+):
+    """A download whose destination parent dir is indexed but missing on disk
+    (e.g. deleted locally mid-cycle) must surface as a per-item sync error and
+    must NOT create an index entry for the never-written file."""
+    data = b"kid content"
+    fake = FakeDrive()
+    dir_id = fake.add_folder("/subdir")
+    kid_id = fake.add_file("/subdir/kid.txt", data)
+    kid_rev = fake.files[kid_id]["headRevisionId"]
+
+    _wire_fake(sync_engine, fake)
+    sync_engine.client._path_cache.set(
+        "/subdir", dir_id, parent_id=ROOT_ID, name="subdir", is_folder=True
+    )
+    sync_engine.client._path_cache.set(
+        "/subdir/kid.txt", kid_id, parent_id=dir_id, name="kid.txt", is_folder=False
+    )
+
+    # Parent is in the index (so _ensure_parent short-circuits) but its local
+    # directory does not exist.
+    _seed_entry(
+        sync_engine,
+        "/subdir",
+        dir_id,
+        ItemType.Folder,
+        rev="folder",
+        content_hash="folder",
+    )
+
+    event = _make_move_event(
+        sync_engine,
+        "/subdir/kid.txt",
+        kid_id,
+        ItemType.File,
+        rev=kid_rev,
+        content_hash=_md5(data),
+        size=len(data),
+    )
+
+    result = sync_engine._create_local_entry(event)
+
+    assert result.status == SyncStatus.Failed
+    assert len(sync_engine.sync_errors) == 1
+    assert sync_engine.sync_errors[0].remote_path == "/subdir/kid.txt"
+    # No phantom: the index must not claim a file that never reached disk.
+    assert sync_engine.get_index_entry("/subdir/kid.txt") is None
+    assert not osp.exists(sync_engine.to_local_path_from_cased("/subdir/kid.txt"))

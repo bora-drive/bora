@@ -5119,3 +5119,47 @@ def test_handle_sync_error_logs_cleanly_without_traceback(sync_engine, caplog):
     assert any(
         r.exc_info for r in debug_records
     ), "the traceback must still be available at DEBUG level"
+
+
+# ==== Drive names containing '/' (path-separator collision) ==================
+
+
+def test_local_path_keeps_slash_escape(sync_engine: SyncEngine) -> None:
+    """A Drive name containing '/' (legal on Drive) must materialize as a
+    single local path segment with the slash kept percent-encoded, not spill
+    extra directory levels into the local path.
+
+    Regression: a view-only 'Shared with me' PDF named
+    '... .pdf - 11/26/25, 2:33 PM' produced a local path pointing into
+    nonexistent '.../ - 11/26/' directories; the download's move was silently
+    skipped and the follow-up chmod in _apply_read_only crashed the sync
+    manager with an unhandled FileNotFoundError."""
+    remote = "/Shared with me/copy.pdf - 11%2F26%2F25%2C 2%3A33%E2%80%AFPM"
+
+    local = sync_engine.to_local_path_from_cased(remote)
+
+    relative = local[len(sync_engine.sync_path) :]
+    assert relative.split("/") == [
+        "",
+        "Shared with me",
+        "copy.pdf - 11%2F26%2F25, 2:33 PM",
+    ]
+
+
+def test_remote_local_round_trip_with_slash_name(sync_engine: SyncEngine) -> None:
+    """to_remote_path must map the escaped local segment back to the exact
+    virtual path so index lookups for such mirrors keep working."""
+    remote = "/Shared with me/a%2Fb.pdf"
+
+    local = sync_engine.to_local_path_from_cased(remote)
+
+    assert sync_engine.to_remote_path(local) == remote
+
+
+def test_apply_read_only_tolerates_missing_file(sync_engine: SyncEngine) -> None:
+    """_apply_read_only must not raise when the file is gone (e.g. removed
+    concurrently): an unhandled OSError from the download thread pool shuts
+    down the whole sync manager."""
+    missing = osp.join(sync_engine.sync_path, "gone.txt")
+
+    sync_engine._apply_read_only(missing, is_dir=False)  # must not raise

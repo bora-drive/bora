@@ -11,19 +11,33 @@ for the full encoding policy.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 import urllib.parse
+from typing import Callable
 
 __all__ = [
     "encode_name",
     "decode_name",
     "encode_path",
     "decode_path",
+    "encode_path_local",
+    "decode_path_local",
     "fold_key",
     "compose_path",
     "fold_path",
     "fold_human",
 ]
+
+# Escapes of the characters that can never appear in a local file name on any
+# platform: the path separator and NUL. ``decode_path_local`` keeps these
+# escaped so a Drive name like ``11/26/25`` materializes as the single local
+# segment ``11%2F26%2F25`` instead of spilling extra directory levels into the
+# local path; ``encode_path_local`` collapses the resulting double-encoding on
+# the way back up. Case-insensitive: canonical escapes are uppercase, but a
+# folded path may carry ``%2f``.
+_FS_UNSAFE_ESCAPE_RE = re.compile(r"(%2F|%00)", re.IGNORECASE)
+_FS_UNSAFE_DOUBLE_RE = re.compile(r"%25(2F|00)", re.IGNORECASE)
 
 
 def encode_name(name: str) -> str:
@@ -51,7 +65,35 @@ def decode_name(encoded: str) -> str:
     return urllib.parse.unquote(encoded)
 
 
-def _encode_segment_safe(segment: str) -> str:
+def _decode_name_local(encoded: str) -> str:
+    """:func:`decode_name`, except escapes of filesystem-unsafe characters
+    (``/`` and NUL) are kept verbatim so the result is always a valid single
+    path segment. Safe because in a canonically encoded segment every ``%``
+    starts an escape triple, so ``%2F``/``%00`` can only match real escapes
+    (a Drive name literally containing ``%2F`` is encoded as ``%252F``,
+    which contains no ``%2F`` substring)."""
+    parts = _FS_UNSAFE_ESCAPE_RE.split(encoded)
+    # re.split with a capture group interleaves the kept escapes at odd
+    # indices; decode only the chunks between them.
+    return "".join(part if i % 2 else decode_name(part) for i, part in enumerate(parts))
+
+
+def _encode_name_local(name: str) -> str:
+    """Inverse of :func:`_decode_name_local`: :func:`encode_name`, then
+    collapse the double-encoding of kept filesystem-unsafe escapes
+    (``%252F`` -> ``%2F``, ``%2500`` -> ``%00``) so a locally materialized
+    segment maps back to the exact virtual path it came from.
+
+    Consequence: a local file literally named ``a%2Fb`` aliases to the same
+    virtual path as the mirror of Drive name ``a/b`` — unavoidable, since
+    POSIX cannot represent ``/`` in a name and both must share the local
+    form ``a%2Fb``."""
+    return _FS_UNSAFE_DOUBLE_RE.sub(lambda m: "%" + m.group(1), encode_name(name))
+
+
+def _encode_segment_safe(
+    segment: str, encoder: Callable[[str], str] | None = None
+) -> str:
     """:func:`encode_name` a segment, but leave it untouched if it contains
     bytes that cannot be utf-8 encoded (surrogate escapes from a path with an
     unknown file-system encoding). Such paths are caught and rejected
@@ -61,7 +103,7 @@ def _encode_segment_safe(segment: str) -> str:
     if not segment:
         return segment
     try:
-        return encode_name(segment)
+        return (encoder or encode_name)(segment)
     except UnicodeEncodeError:
         return segment
 
@@ -89,6 +131,34 @@ def decode_path(path: str) -> str:
     if path in ("", "/"):
         return path
     return "/".join(decode_name(p) if p else p for p in path.split("/"))
+
+
+def decode_path_local(path: str) -> str:
+    """:func:`decode_path` for the virtual -> local-filesystem boundary.
+
+    Escapes of characters that cannot appear in a local file name (``/`` and
+    NUL) are kept verbatim, so every decoded segment is a valid local name
+    and the path has exactly as many components as the virtual one.
+    Inverse of :func:`encode_path_local`.
+    """
+    if path in ("", "/"):
+        return path
+    return "/".join(_decode_name_local(p) if p else p for p in path.split("/"))
+
+
+def encode_path_local(path: str) -> str:
+    """:func:`encode_path` for the local-filesystem -> virtual boundary.
+
+    Collapses the double-encoding of segments materialized by
+    :func:`decode_path_local` (``%252F`` -> ``%2F``, ``%2500`` -> ``%00``)
+    so a local mirror path maps back to the exact virtual path it came
+    from. Inverse of :func:`decode_path_local`.
+    """
+    if path in ("", "/"):
+        return path
+    return "/".join(
+        _encode_segment_safe(p, _encode_name_local) for p in path.split("/")
+    )
 
 
 def fold_key(name: str) -> str:
