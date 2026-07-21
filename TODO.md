@@ -76,9 +76,12 @@ Everything automatable in this section was completed in the 2026-07-20 sweep,
 and the live-login checklist was run the same day against
 `bora-test@arko.net` (details below). The Google OAuth consent screen was
 published to production (unverified) on 2026-07-21, and Windows support was
-deferred past v0.1.0 the same day. What's left: the sharing 403 sub-check
-(needs a second account) and other release-time packaging steps — see the
-consolidated lists at the end of this section.
+deferred past v0.1.0 the same day. The sharing 403 sub-check closed
+2026-07-21 (real 403 verified live), and **v0.1.0 was released to GitHub on
+2026-07-21** (https://github.com/indirect/bora/releases/tag/v0.1.0, private
+repo). Still open: the Homebrew Mac pass (resource regeneration against the
+tag) and the deferred public-flip items (repo public, PyPI, full OAuth
+verification).
 
 ### Completed 2026-07-20
 
@@ -201,7 +204,8 @@ table, piped output, and the tty grid.
   full blocker list and the checklist to run once a port exists.
   **Decision (Andre, 2026-07-21): DEFERRED past v0.1.0** — v0.1.0 ships
   macOS/Linux only, consistent with `docs/windows-smoke-test.md`.
-- [ ] Publish to PyPI (optional).
+- [ ] Publish to PyPI (optional) — decided 2026-07-20: not for v0.1.0;
+  revisit at the public release.
 - [ ] Finalize the Homebrew formula at release time (real url/sha256,
   regenerate resources, `ruby -c`).
 

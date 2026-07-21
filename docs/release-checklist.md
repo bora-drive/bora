@@ -90,10 +90,13 @@ resolved as of 2026-07-20:
 
 ## Cut the release
 
-- [ ] Confirm the offline suite is green (`pytest tests/offline -m "not load"`)
-      and a clean-venv `pip install .` works with `bora --version` → 0.1.0
-      (verified during Stage 8 Task 10).
-- [ ] Bump the version if needed (`bump2version`); currently `0.1.0`.
-- [ ] Build artifacts: `python -m build` → sdist + wheel in `dist/`.
-- [ ] (Optional) Upload to PyPI; create a GitHub release using the CHANGELOG
-      v0.1.0 notes.
+- [x] Confirm the offline suite is green and a clean-venv `pip install .`
+      works with `bora --version` → 0.1.0. Done 2026-07-21: 850 passed
+      (`bin/test`), lint clean (`bin/lint`), clean-venv install verified.
+- [x] Bump the version if needed (`bump2version`); stayed `0.1.0`.
+- [x] Build artifacts: `python -m build` → `bora-0.1.0.tar.gz` +
+      `bora-0.1.0-py3-none-any.whl` in `dist/` (2026-07-21).
+- [x] GitHub release created 2026-07-21 with the CHANGELOG v0.1.0 notes and
+      both artifacts attached: https://github.com/indirect/bora/releases/tag/v0.1.0
+      (tag `v0.1.0` = `0a3294f`). PyPI upload deliberately skipped — deferred
+      to the public release along with the repo-visibility flip.
