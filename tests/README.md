@@ -114,14 +114,17 @@ using `bora link bora-test-config`), then extract the stored refresh
 token from the keyring. Record it as `BORA_TEST_REFRESH_TOKEN` in whatever
 CI secret store is in use.
 
-### 7-day token-expiry caveat
+### Token-expiry caveat
 
-The OAuth client is currently in **Testing mode**. Google expires refresh tokens
-for Testing-mode clients after 7 days. Until Stage 8 verification is complete and
-the app is promoted to Production mode, `BORA_TEST_REFRESH_TOKEN` must be
-re-minted weekly. Token expiry degrades gracefully: an expired token causes the
-`test_lock` session fixture to raise `AuthError`, which skips the session rather
-than producing spurious failures.
+The bundled `bora-500821` OAuth client's consent screen was published to "In
+production" (unverified) on 2026-07-21, so refresh tokens minted against it no
+longer expire on Google's 7-day Testing-mode cycle; `BORA_TEST_REFRESH_TOKEN`
+does not need routine re-minting on that account. If you mint a token against a
+client you've deliberately left in **Testing mode** (e.g. a personal dev OAuth
+client rather than the bundled one), the old 7-day expiry still applies and
+you'll need to re-mint weekly. Either way, token expiry degrades gracefully: an
+expired token causes the `test_lock` session fixture to raise `AuthError`,
+which skips the session rather than producing spurious failures.
 
 ---
 

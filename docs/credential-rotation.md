@@ -33,10 +33,9 @@ routine maintenance. The concrete triggers are:
 
 1. **Create a new OAuth client** in the `bora-500821` Google Cloud Console project
    (**APIs & Services > Credentials > Create Credentials > OAuth client ID**,
-   **Desktop app** type), following the same steps as
-   [Setup guide, section 4](setup.md#4-create-an-oauth-client-desktop-app). Run the
-   [pre-publish confirmation checklist](#pre-publish-confirmation-checklist) below
-   against it before it ships.
+   **Desktop app** type), following the same steps as section 4, "Create an OAuth
+   client (Desktop app)", in the [Setup guide](setup.md). Run the pre-publish
+   confirmation checklist below against it before it ships.
 2. **Ship the new `client_secret.json`** by replacing the bundled file at
    `src/bora/resources/client_secret.json` and releasing a patch version. This is the
    only way existing installs pick up the new client — Bora does not fetch credentials
