@@ -17,8 +17,11 @@ Then:
     export BORA_TEST_REFRESH_TOKEN='<the printed value>'
     python -m pytest tests/linked -q
 
-The token expires after ~7 days (the OAuth client is in Testing mode) — re-run
-this to re-mint until Stage 8 verification lifts that.
+The bundled OAuth client's consent screen is published to "In production"
+(unverified as of 2026-07-21), so the minted token no longer expires on a
+7-day cycle. Re-run this script if the account changes, the token is revoked,
+or the client is rotated (see docs/credential-rotation.md) — not on a routine
+schedule.
 """
 
 import os

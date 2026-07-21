@@ -17,8 +17,8 @@ a Google Cloud project named `bora-500821`, replacing the original
   `.dropbox` ignore-list entries in `constants.py`).
 - [x] **Phase 2 — Google Cloud project.** Desktop-app OAuth client committed at
   `src/bora/resources/client_secret.json`; contributor setup documented in
-  `docs/setup.md`. Consent screen is still in Testing mode (see release
-  checklist).
+  `docs/setup.md`. Consent screen was published to "In production"
+  (unverified) 2026-07-21 (see `docs/release-checklist.md`, item B2).
 - [x] **Phase 3 — Authentication.** OAuth flow (`get_auth_url`/`link`/`unlink`)
   via `google-auth-oauthlib`; refresh token in keyring; auto-refresh via
   `PersistingCredentials`; `linked` property. Covered by

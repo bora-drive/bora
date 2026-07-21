@@ -3,7 +3,8 @@
 This guide walks through setting up a Google Cloud project with OAuth credentials so
 you can run Bora (either from source or as a contributor). If you are installing Bora
 from PyPI for personal use, the bundled credentials in `src/bora/resources/client_secret.json`
-are used automatically and you can skip directly to the **Linking your account** section below.
+are used automatically and you can skip directly to the **Linking your account** section
+further down this page.
 
 ---
 
@@ -30,9 +31,9 @@ The consent screen for the bundled `client_secret.json` (Google Cloud project
 `bora-500821`, OAuth client "bora") is published to **In production**, but the
 underlying app is **unverified** by Google — verification of the restricted `drive`
 scope is deferred to the public release (see "Future: full verification" below). If
-you are using the bundled credentials, you can skip straight to
-[Linking your account](#linking-your-account); the rest of this section only applies
-if you are creating your own OAuth client.
+you are using the bundled credentials, you can skip straight to the **Linking your
+account** section further down this page; the rest of this section only applies if
+you are creating your own OAuth client.
 
 1. Go to **APIs & Services > OAuth consent screen**.
 2. Choose **External** (unless you are in a Google Workspace org and want to restrict
@@ -112,9 +113,9 @@ want to sync.
 Because the app is unverified, Google shows an **"unverified app"** warning screen
 before you can grant access. Click **Advanced**, then **Go to Bora (unsafe)**, to
 proceed — this is expected for every account until Bora completes verification (see
-[Future: full verification](#future-full-verification) above), not a sign that
-something is misconfigured. Grant the requested permissions and paste the
-authorization code back into the terminal.
+the "Future: full verification" note above), not a sign that something is
+misconfigured. Grant the requested permissions and paste the authorization code
+back into the terminal.
 
 On success, Bora stores a refresh token in your system keyring (macOS Keychain, GNOME
 Keyring, or equivalent) and is ready to sync. The token does not expire on a fixed
