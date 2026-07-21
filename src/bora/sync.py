@@ -1907,7 +1907,13 @@ class SyncEngine:
 
         printable_file_name = sanitize_string(osp.basename(err.remote_path))
 
-        self._logger.info("Could not sync %s", printable_file_name, exc_info=True)
+        # A SyncError here is an expected, already-converted condition (e.g. a
+        # 403 from Drive for a non-exportable file), not a crash. Keep the INFO
+        # line human-readable and reserve the traceback for DEBUG.
+        self._logger.info(
+            "Could not sync %s: %s. %s", printable_file_name, err.title, err.message
+        )
+        self._logger.debug("Could not sync %s", printable_file_name, exc_info=True)
 
         def callback() -> None:
             if err.local_path:

@@ -5075,3 +5075,47 @@ def test_remote_rename_of_parent_rewrites_excluded_child_entries(
     assert sync_engine.get_index_entry_by_remote_id(sub1) is None
     assert sync_engine.get_index_entry_by_remote_id(sub2) is None
     assert sync_engine.sync_errors == []
+
+
+# ==== Sync-error logging: handled errors must not dump tracebacks at INFO ==========
+
+
+def test_handle_sync_error_logs_cleanly_without_traceback(sync_engine, caplog):
+    """An expected SyncError is a handled condition, not a crash: the INFO
+    log line carries the error title and message, and the traceback is only
+    emitted at DEBUG level."""
+    import logging
+
+    from bora.exceptions import RestrictedContentError, SyncError
+
+    err = RestrictedContentError(
+        "Cannot export file",
+        "Google Drive refuses to export this file.",
+        remote_path="/Gambit Guide.md",
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        try:
+            raise err
+        except SyncError as caught:
+            sync_engine._handle_sync_error(caught, direction=SyncDirection.Down)
+
+    info_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO and "Could not sync" in r.getMessage()
+    ]
+    assert len(info_records) == 1
+    info = info_records[0]
+    assert info.exc_info is None, "INFO log must not include a traceback"
+    assert "Cannot export file" in info.getMessage()
+    assert "Google Drive refuses to export this file." in info.getMessage()
+
+    debug_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.DEBUG and "Could not sync" in r.getMessage()
+    ]
+    assert any(
+        r.exc_info for r in debug_records
+    ), "the traceback must still be available at DEBUG level"

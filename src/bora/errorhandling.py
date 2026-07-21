@@ -153,6 +153,22 @@ def http_error_to_bora(
                 remote_path=remote_path,
                 local_path=local_path,
             )
+        if reason == "cannotExportFile":
+            return RestrictedContentError(
+                "Cannot export file",
+                "Google Drive refuses to export this file. The owner may "
+                "have disabled downloading, printing, and copying for "
+                "viewers and commenters.",
+                remote_path=remote_path,
+                local_path=local_path,
+            )
+        if reason == "exportSizeLimitExceeded":
+            return RestrictedContentError(
+                "Cannot export file",
+                "This file is too large for Google Drive to export.",
+                remote_path=remote_path,
+                local_path=local_path,
+            )
         return InsufficientPermissionsError(
             "Insufficient permissions",
             "You do not have permission to access this item on Google Drive.",

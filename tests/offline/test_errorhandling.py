@@ -56,6 +56,8 @@ def test_extract_reason_empty_when_absent(make_http_error):
         (403, "storageQuotaExceeded", InsufficientSpaceError),
         (403, "dailyLimitExceeded", ConnectionError),
         (403, "cannotDownloadAbusiveFile", RestrictedContentError),
+        (403, "cannotExportFile", RestrictedContentError),
+        (403, "exportSizeLimitExceeded", RestrictedContentError),
         (403, "insufficientFilePermissions", InsufficientPermissionsError),
         (403, "someUnknownReason", InsufficientPermissionsError),
         (404, "", NotFoundError),
@@ -72,6 +74,17 @@ def test_http_error_mapping(make_http_error, status, reason, expected_cls):
     exc = make_http_error(status, reason=reason)
     result = http_error_to_bora(status, reason, exc)
     assert type(result) is expected_cls
+
+
+def test_http_error_403_cannot_export_has_export_message(make_http_error):
+    """cannotExportFile is not an access problem — the user can see the file,
+    Drive just refuses to export it. The message must say so instead of the
+    generic 'no permission' text."""
+    exc = make_http_error(403, reason="cannotExportFile")
+    out = http_error_to_bora(403, "cannotExportFile", exc, remote_path="/Gambit.md")
+    assert isinstance(out, RestrictedContentError)
+    assert "export" in out.message.lower()
+    assert "permission to access" not in out.message
 
 
 def test_convert_api_errors_wraps_http_error(make_http_error):
