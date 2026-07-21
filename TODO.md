@@ -74,9 +74,10 @@ a Google Cloud project named `bora-500821`, replacing the original
 
 Everything automatable in this section was completed in the 2026-07-20 sweep,
 and the live-login checklist was run the same day against
-`bora-test@arko.net` (details below). What's left: Google OAuth app
-verification (needs the Cloud Console), the sharing 403 sub-check (needs a
-second account), another OS, or a release-time decision — see the
+`bora-test@arko.net` (details below). The Google OAuth consent screen was
+published to production (unverified) on 2026-07-21, and Windows support was
+deferred past v0.1.0 the same day. What's left: the sharing 403 sub-check
+(needs a second account) and other release-time packaging steps — see the
 consolidated lists at the end of this section.
 
 ### Completed 2026-07-20
@@ -169,8 +170,15 @@ consolidated lists at the end of this section.
    Found and fixed a real CLI bug: piped (non-tty) `bora ls` printed nothing
    because it re-iterated an exhausted `list_folder_iterator` (regression
    test added in `tests/offline/test_cli.py`).
-6. **Google OAuth app verification** — consent screen is still in Testing
-   mode, so refresh tokens expire after 7 days.
+6. [x] **Google OAuth app verification** — DONE 2026-07-21: consent screen
+   for `bora-500821` published to "In production" (unverified), confirmed
+   restricted to the single `https://www.googleapis.com/auth/drive` scope
+   and the single "bora" Desktop client. Refresh tokens no longer expire
+   after 7 days; linking now shows Google's "unverified app" warning
+   (Advanced → continue) and the app is capped at 100 total users. Full
+   verification (public homepage + privacy policy, in-app scope
+   justification, demo video, annual CASA assessment) is deferred to the
+   public release — see `docs/setup.md` and `docs/credential-rotation.md`.
 
 Minor observation from the live runs (display-level, not a sync defect):
 `bora ls` showed native docs by their raw Drive `name` (`live-doc`) while the
@@ -182,14 +190,15 @@ table, piped output, and the tty grid.
 
 ### Needs another environment or a release decision
 
-- [ ] Windows is not currently supported — verified 2026-07-20 that
+- [x] Windows is not currently supported — verified 2026-07-20 that
   `bora --version` and every config-touching command fail outright
   (`fcntl`/`xattr` unconditional POSIX imports in `src/bora/utils/path.py`
   and `src/bora/daemon.py`; unconditional `xattr` dependency with no
   Windows wheel; `src/bora/utils/appdirs.py` raises `RuntimeError` for any
   platform but Darwin/Linux). See `docs/windows-smoke-test.md` for the
-  full blocker list and the checklist to run once a port exists. Needs a
-  release-time decision: defer Windows support, or scope and do the port.
+  full blocker list and the checklist to run once a port exists.
+  **Decision (Andre, 2026-07-21): DEFERRED past v0.1.0** — v0.1.0 ships
+  macOS/Linux only, consistent with `docs/windows-smoke-test.md`.
 - [ ] Publish to PyPI (optional).
 - [ ] Finalize the Homebrew formula at release time (real url/sha256,
   regenerate resources, `ruby -c`).

@@ -26,30 +26,46 @@ are used automatically and you can skip directly to the **Linking your account**
 
 ## 3. Configure the OAuth consent screen
 
+The consent screen for the bundled `client_secret.json` (Google Cloud project
+`bora-500821`, OAuth client "bora") is published to **In production**, but the
+underlying app is **unverified** by Google — verification of the restricted `drive`
+scope is deferred to the public release (see "Future: full verification" below). If
+you are using the bundled credentials, you can skip straight to
+[Linking your account](#linking-your-account); the rest of this section only applies
+if you are creating your own OAuth client.
+
 1. Go to **APIs & Services > OAuth consent screen**.
 2. Choose **External** (unless you are in a Google Workspace org and want to restrict
    access to that org).
 3. Fill in the required fields:
    - **App name**: anything recognisable, e.g., `Bora`.
    - **User support email** and **Developer contact**: your email.
-4. Click **Save and Continue** through the Scopes and Test Users steps (you will add a
-   test user in the next section).
-5. Leave the app in **Testing** mode for now. Apps in Testing mode can only be
-   authorized by accounts you explicitly add as test users; they do not go through
-   Google's full verification review.
+4. Click **Save and Continue** through the Scopes and Test Users steps.
+5. For your own testing you can leave the app in **Testing** mode (see "Add yourself
+   as a test user" below) or publish it to **In production**. Publishing removes the
+   test-user requirement and the 7-day refresh-token expiry that Testing mode
+   imposes, but an unverified published app is capped at **100 total users** and shows
+   Google's "unverified app" warning at link time (see next section) until it passes
+   verification.
 
 ### Add yourself as a test user
 
-While your app is unverified and in Testing mode, only accounts listed as test users
-can complete the OAuth flow:
+This only applies if you keep your own OAuth client in **Testing** mode. While an app
+is in Testing mode, only accounts listed as test users can complete the OAuth flow:
 
 1. On the **OAuth consent screen** page, scroll to **Test users**.
 2. Click **Add Users** and enter the Gmail/Google account you want to sync with Bora.
 3. Click **Save**.
 
-> **Note:** Production use (shipping to arbitrary end-users) requires completing
-> Google's app-verification review. Until that is done, keep the app in Testing mode
-> and maintain the test-user list. This is tracked in the release checklist as item B2.
+### Future: full verification
+
+Google's full verification review for the restricted `https://www.googleapis.com/auth/drive`
+scope requires, at minimum: a public app homepage and privacy policy, an in-product
+justification of why the broad `drive` scope is needed (a Loom/YouTube-style demo
+video walking through the OAuth consent flow and the scope's use), and passing an
+annual third-party CASA (Cloud Application Security Assessment) security review. This
+is deferred until Bora's public release; until then the app stays published-but-
+unverified as described above. Tracked in the release checklist as item B2.
 
 ---
 
@@ -90,11 +106,25 @@ Once credentials are in place, link Bora to your Google Drive account:
 $ bora auth link
 ```
 
-Bora will print a URL. Open it in a browser, sign in with a test-user account, grant
-the requested permissions, and paste the authorization code back into the terminal.
+Bora will print a URL. Open it in a browser and sign in with the Google account you
+want to sync.
+
+Because the app is unverified, Google shows an **"unverified app"** warning screen
+before you can grant access. Click **Advanced**, then **Go to Bora (unsafe)**, to
+proceed — this is expected for every account until Bora completes verification (see
+[Future: full verification](#future-full-verification) above), not a sign that
+something is misconfigured. Grant the requested permissions and paste the
+authorization code back into the terminal.
 
 On success, Bora stores a refresh token in your system keyring (macOS Keychain, GNOME
-Keyring, or equivalent) and is ready to sync.
+Keyring, or equivalent) and is ready to sync. The token does not expire on a fixed
+schedule; it remains valid until you unlink, revoke access from your Google Account
+settings, or the shipped OAuth client is rotated (see
+[Credential rotation policy](credential-rotation.md)).
+
+> **Note:** The bundled app is capped at 100 total linked users while unverified. If
+> you hit that cap, see [Credential rotation policy](credential-rotation.md) or build
+> your own OAuth client per the steps above.
 
 ### Headless / SSH environments
 

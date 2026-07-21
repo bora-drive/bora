@@ -19,6 +19,7 @@ Bora, start with the :doc:`userguide`.
    :maxdepth: 2
 
    setup
+   credential-rotation
    differences
    background/sync_logic
    background/logging
