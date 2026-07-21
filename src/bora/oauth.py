@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from importlib.resources import files
 from typing import Any
 
@@ -30,6 +31,7 @@ __all__ = [
     "PersistingCredentials",
     "wrap_persisting",
     "make_paste_flow",
+    "find_free_port",
     "run_local_flow",
 ]
 
@@ -153,6 +155,27 @@ def wrap_persisting(
         cred_storage=cred_storage,
         account_id=account_id,
     )
+
+
+def find_free_port(preferred: int = 8080, attempts: int = 20) -> int:
+    """Return `preferred` if nothing is listening on it, otherwise scan
+    upward (preferred+1, ...) for up to `attempts` ports, falling back to
+    an OS-assigned ephemeral port. Scanning near the preferred port keeps
+    'ssh -L <port>:localhost:<port>' guidance predictable.
+
+    No SO_REUSEADDR: run_local_server binds with allow_reuse_address=False,
+    so a port this probe can't bind wouldn't be usable there either.
+    """
+    for port in range(preferred, preferred + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("localhost", port))
+            except OSError:
+                continue
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("localhost", 0))
+        return int(s.getsockname()[1])
 
 
 def run_local_flow(open_browser: bool = True, port: int = 8080) -> Credentials:

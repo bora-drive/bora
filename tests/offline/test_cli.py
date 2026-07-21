@@ -413,6 +413,57 @@ def test_local_server_dialog_invokes_run_local_flow_and_passes_refresh_token():
     assert res == 0
 
 
+def test_local_server_dialog_scans_for_free_port_by_default(monkeypatch):
+    monkeypatch.delenv("BORA_AUTH_PORT", raising=False)
+    m = mock.Mock()
+    m.link = mock.Mock(return_value=0)
+
+    fake_creds = mock.Mock()
+    fake_creds.refresh_token = "rt"
+
+    with (
+        mock.patch(
+            "bora.cli.cli_core.oauth.find_free_port",
+            return_value=9123,
+        ) as find_port,
+        mock.patch(
+            "bora.cli.cli_core.oauth.run_local_flow",
+            return_value=fake_creds,
+        ) as run_flow,
+    ):
+        res = _local_server_dialog(m)
+
+    find_port.assert_called_once()
+    assert run_flow.call_args.kwargs.get("port") == 9123
+    assert res == 0
+
+
+def test_local_server_dialog_respects_explicit_port_env(monkeypatch):
+    # An explicit BORA_AUTH_PORT (e.g. matching an ssh tunnel) must be used
+    # as-is, without scanning for an alternative.
+    monkeypatch.setenv("BORA_AUTH_PORT", "9999")
+    m = mock.Mock()
+    m.link = mock.Mock(return_value=0)
+
+    fake_creds = mock.Mock()
+    fake_creds.refresh_token = "rt"
+
+    with (
+        mock.patch(
+            "bora.cli.cli_core.oauth.find_free_port",
+        ) as find_port,
+        mock.patch(
+            "bora.cli.cli_core.oauth.run_local_flow",
+            return_value=fake_creds,
+        ) as run_flow,
+    ):
+        res = _local_server_dialog(m)
+
+    find_port.assert_not_called()
+    assert run_flow.call_args.kwargs.get("port") == 9999
+    assert res == 0
+
+
 def test_local_server_dialog_returns_1_when_creds_lack_refresh_token():
     m = mock.Mock()
     m.config_name = "test-config"

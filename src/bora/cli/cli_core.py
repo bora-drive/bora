@@ -116,7 +116,13 @@ def _local_server_dialog(m: "BoraProxy | Bora") -> int:
     """
     import os as _os
 
-    port = int(_os.environ.get("BORA_AUTH_PORT", "8080"))
+    env_port = _os.environ.get("BORA_AUTH_PORT")
+    if env_port:
+        # An explicit port (usually matching an ssh tunnel) is used as-is;
+        # run_local_flow raises AuthError if it's busy.
+        port = int(env_port)
+    else:
+        port = oauth.find_free_port()
 
     info("Bora will print an authorization URL below.")
     info("Open it in your local browser to authorize access to your Google Drive.")

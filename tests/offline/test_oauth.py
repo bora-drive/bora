@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 from unittest import mock
 
@@ -208,6 +209,26 @@ def test_run_local_flow_returns_credentials(monkeypatch):
     fake_flow.run_local_server.assert_called_once()
     kwargs = fake_flow.run_local_server.call_args.kwargs
     assert kwargs.get("port") == 8080
+
+
+def test_find_free_port_returns_preferred_when_available():
+    # Grab an ephemeral port and release it — it's almost certainly free.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("localhost", 0))
+        preferred = s.getsockname()[1]
+    assert oauth.find_free_port(preferred) == preferred
+
+
+def test_find_free_port_skips_occupied_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("localhost", 0))
+        s.listen(1)
+        occupied = s.getsockname()[1]
+        port = oauth.find_free_port(occupied)
+        assert port != occupied
+        # The returned port must actually be bindable.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as check:
+            check.bind(("localhost", port))
 
 
 def test_run_local_flow_port_in_use_raises_auth_error(monkeypatch):
