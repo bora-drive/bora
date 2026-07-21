@@ -61,9 +61,8 @@ Dropbox API to the Google Drive API.
 
 ### Known limitations
 - Shared Drives (team drives) are not supported.
-- The OAuth app is unverified and its consent screen is still in Testing
-  mode, so refresh tokens expire after 7 days; add yourself as a test user
-  in the meantime (see `docs/setup.md`). Publishing the consent screen to
-  "In production" — planned before release — removes the 7-day expiry but
-  will show Google's "unverified app" warning during linking (100-user cap)
-  until verification clears.
+- The OAuth app's consent screen is published to "In production" but is
+  still unverified by Google, so linking shows Google's "unverified app"
+  warning (click Advanced → continue) and the app is capped at 100 total
+  users. Full verification is deferred to the public release (see
+  `docs/setup.md` and `docs/credential-rotation.md`).

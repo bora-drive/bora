@@ -30,17 +30,24 @@ resolved as of 2026-07-20:
 
 ## Pre-release — verification & accounts
 
-- [ ] **OAuth app verification (B2).** Submit the Google OAuth app for
-      verification. Until it clears, the consent screen stays in "Testing" mode
-      and refresh tokens expire after 7 days — document the
-      add-yourself-as-a-test-user workaround (already in `docs/setup.md`) for
-      contributors and early users.
-- [ ] **Credential rotation policy (D5).** Document how the shipped
-      `client_secret.json` will be rotated if needed (release note +
-      deprecation timeline) so an old shipped credential can be retired without
-      poisoning the project's abuse quota. Confirm the client is restricted to
-      the intended Drive scopes and project before publishing.
-- [ ] **Windows is not currently supported.** Verified 2026-07-20: Bora
+- [x] **OAuth app verification (B2).** Done 2026-07-21: the consent screen for
+      `bora-500821` was published to "In production" (unverified). Confirmed
+      in the console that it requests only the single
+      `https://www.googleapis.com/auth/drive` scope, and that the project has
+      only the one "bora" Desktop OAuth client — no extra clients or scopes.
+      Linking now shows Google's "unverified app" warning (Advanced →
+      continue) and the app is capped at 100 total users until full
+      verification. Full verification (public homepage + privacy policy,
+      in-app scope justification, demo video, annual CASA assessment) is
+      deferred to the public release — see `docs/setup.md`.
+- [x] **Credential rotation policy (D5).** Done 2026-07-21: rotation policy
+      documented in `docs/credential-rotation.md` (when to rotate, the
+      new-client → patch-release → deprecation-window → old-client-deletion
+      mechanics, and the pre-publish confirmation checklist). The console
+      confirmation itself — client belongs to `bora-500821`, only the `drive`
+      scope, no extra clients/scopes — was run as part of the B2 publish
+      above and matches the checklist in `docs/credential-rotation.md`.
+- [x] **Windows is not currently supported.** Verified 2026-07-20: Bora
       cannot install-and-run on Windows today — `fcntl`/`xattr` are
       imported unconditionally in `src/bora/utils/path.py` and
       `src/bora/daemon.py` (both POSIX-only), `xattr` is an unconditional
@@ -50,9 +57,10 @@ resolved as of 2026-07-20:
       This matches Bora's own declared platform support (pyproject
       classifiers, CLI `--help`). See `docs/windows-smoke-test.md` for the
       full blocker list, what a port would need, and the smoke-test
-      checklist to run once one exists. Needs a release-time decision:
-      ship v0.1.0 without Windows support (defer), or scope/do the port
-      first.
+      checklist to run once one exists. **Decision (Andre, 2026-07-21):
+      DEFERRED past v0.1.0** — v0.1.0 ships macOS/Linux only, consistent
+      with `docs/windows-smoke-test.md`; a Windows port is out of scope for
+      this release.
 - [x] **Real-account end-to-end smoke.** Done 2026-07-20 against
       `bora-test@arko.net` (config `smoke-test`): linked via `bora auth link
       --refresh-token`, synced a small tree both directions (local upload via
