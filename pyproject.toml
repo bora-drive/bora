@@ -31,7 +31,7 @@ dependencies = [
     "oauthlib",
     "fasteners>=0.15",
     "keyring>=22",
-    "keyrings.alt>=3.1.0",
+    "keyrings.alt>=5.0.2",
     "packaging",
     "pathspec>=0.5.8",
     "Pyro5>=5.10",
