@@ -7,12 +7,45 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import Callable, Sequence, TypeVar
+from typing import Any, Callable, Sequence, TypeVar
 
 from typing_extensions import ParamSpec
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+_survey_paste_fix_done = False
+
+
+def _import_survey():  # type: ignore[no-untyped-def]
+    """Import survey and, once per process, swap its POSIX terminal-mode
+    switching from tcsetattr(TCSAFLUSH) to TCSADRAIN.
+
+    TCSAFLUSH discards unread input, and survey re-enters raw mode many
+    times per keystroke. A paste that reaches the kernel in more than one
+    chunk (macOS ttys hand over 64 bytes per read) therefore loses
+    everything after the first chunk mid-prompt. TCSADRAIN flushes pending
+    output but keeps pending input.
+    """
+    global _survey_paste_fix_done
+    import survey
+
+    if not _survey_paste_fix_done:
+        _survey_paste_fix_done = True
+        try:
+            import termios
+
+            from survey._core import _io_os_posix
+
+            def _set(self, mode):  # type: ignore[no-untyped-def]
+                termios.tcsetattr(self._i_fd, termios.TCSADRAIN, mode)
+
+            _io_os_posix.IO._set = _set
+        except ImportError:
+            # Windows, or a survey release with reshaped internals — leave
+            # survey untouched rather than break every prompt.
+            pass
+    return survey
 
 
 def _style_message(message: str) -> str:
@@ -24,7 +57,7 @@ def _style_hint(hint: str) -> str:
 
 
 def _style_error(message: str) -> str:
-    import survey
+    survey = _import_survey()
 
     return survey.utils.paint(survey.colors.basic("red"), message)
 
@@ -32,7 +65,7 @@ def _style_error(message: str) -> str:
 def exit_on_keyboard_interrupt(func: Callable[P, T]) -> Callable[P, T]:
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        import survey
+        survey = _import_survey()
 
         try:
             return func(*args, **kwargs)
@@ -47,7 +80,7 @@ def prompt(
     message: str,
     validate: Callable[[str], bool] | None = None,
 ) -> str:
-    import survey
+    survey = _import_survey()
 
     def check(value: str) -> None:
         if validate is not None and not validate(value):
@@ -63,7 +96,7 @@ def prompt(
 
 @exit_on_keyboard_interrupt
 def confirm(message: str, default: bool | None = True) -> bool:
-    import survey
+    survey = _import_survey()
 
     default_to_str = {True: "y", False: "n", None: None}
 
@@ -77,7 +110,7 @@ def confirm(message: str, default: bool | None = True) -> bool:
 
 @exit_on_keyboard_interrupt
 def select(message: str, options: Sequence[str], hint: str | None = "") -> int:
-    import survey
+    survey = _import_survey()
 
     if hint is None:
         kwargs = {}
@@ -97,14 +130,14 @@ def select(message: str, options: Sequence[str], hint: str | None = "") -> int:
 def select_multiple(
     message: str, options: Sequence[str], hint: str | None = None
 ) -> list[int]:
-    import survey
+    survey = _import_survey()
 
     if hint is None:
         kwargs = {}
     else:
         kwargs = {"hint": _style_hint(hint)}
 
-    def reply(widget: survey.widgets.Widget, indices: set[int]) -> str:
+    def reply(widget: Any, indices: set[int]) -> str:
         chosen = [options[index] for index in indices]
         response = ", ".join(chosen)
 
@@ -134,7 +167,7 @@ def select_path(
     files_allowed: bool = True,
     dirs_allowed: bool = True,
 ) -> str:
-    import survey
+    survey = _import_survey()
 
     styled_message = _style_message(message)
 
@@ -158,7 +191,7 @@ def select_path(
         elif not validate(value):
             raise survey.widgets.Abort(_style_error(f"'{value}' is not allowed"))
 
-    def reply(widget: survey.widgets.Widget, value: str) -> str:
+    def reply(widget: Any, value: str) -> str:
         return survey.utils.paint(survey.colors.basic("cyan"), value or default)
 
     kwargs = {"hint": f"[{default}] "} if default else {}
