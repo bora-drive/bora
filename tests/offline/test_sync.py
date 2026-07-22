@@ -4945,6 +4945,89 @@ def test_genuine_url_file_pointing_at_same_doc_survives_export_success(
     assert _remote_names(fake) == remote_before
 
 
+# ==== Listing-time detection of download-disabled files (canDownload) =======
+
+
+def test_can_download_false_skips_export_attempt(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """A native doc whose metadata reports capabilities.canDownload=false
+    is recognised as download-disabled from the metadata alone: the engine
+    records DownloadDisabledError and writes the .url placeholder without
+    ever attempting the doomed files.export_media call."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    doc = fake.add_native(name="Guide", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Guide v1\n")
+    fake.files[doc]["capabilities"] = {"canEdit": True, "canDownload": False}
+    # Counter only: a correct engine never reaches export_media at all.
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "cannotExportFile"),
+        count=999,
+    )
+    attempts = lambda: 999 - fake._fail_rules[0]["remaining"]  # noqa: E731
+
+    mt_sync_engine.download_sync_cycle()
+
+    assert attempts() == 0
+    errors = mt_sync_engine.download_errors
+    assert errors[0].type == "DownloadDisabledError"
+    assert errors[0].remote_rev == "1"
+    placeholder = L("/Guide.url")
+    assert osp.isfile(placeholder)
+    assert f"id={doc}" in open(placeholder).read()
+
+    # Skip-until-remote-change applies just like a refused export: the
+    # startup retry pass must not probe the file again.
+    mt_sync_engine.get_remote_item(errors[0].remote_path_lower)
+    assert attempts() == 0
+
+    # Owner re-enables downloads and edits the doc -> real export.
+    fake._fail_rules.clear()
+    fake.files[doc]["capabilities"] = {"canEdit": True, "canDownload": True}
+    fake._record_change(doc, is_edit=True)
+    mt_sync_engine.download_sync_cycle()
+
+    assert osp.isfile(L("/Guide.md"))
+    assert open(L("/Guide.md"), "rb").read() == b"# Guide v1\n"
+    assert not osp.lexists(placeholder)
+    assert mt_sync_engine.download_errors == []
+
+
+def test_can_download_false_plain_file_writes_placeholder(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """canDownload=false on an ordinary binary file takes the same
+    placeholder path as a refused export, without attempting get_media
+    (real Drive would fail it with cannotDownloadFile)."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    fid = fake.add_file("/manual.pdf", content=b"%PDF-1.7")
+    fake.files[fid]["capabilities"] = {"canEdit": True, "canDownload": False}
+    # Counter only, as above.
+    fake.fail_next(
+        "files.get_media",
+        make_http_error(403, "cannotDownloadFile"),
+        count=999,
+    )
+    attempts = lambda: 999 - fake._fail_rules[0]["remaining"]  # noqa: E731
+
+    mt_sync_engine.download_sync_cycle()
+
+    assert attempts() == 0
+    errors = mt_sync_engine.download_errors
+    assert errors[0].type == "DownloadDisabledError"
+    assert not osp.lexists(L("/manual.pdf"))
+    placeholder = L("/manual.url")
+    assert osp.isfile(placeholder)
+    assert f"id={fid}" in open(placeholder).read()
+
+
 def test_placeholder_error_for_folds_case_only_rename(
     mt_sync_engine: SyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:

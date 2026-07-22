@@ -65,7 +65,7 @@ __all__ = [
 FILE_FIELDS = (
     "id, name, parents, mimeType, modifiedTime, size, md5Checksum, version, "
     "shared, headRevisionId, trashed, lastModifyingUser(permissionId), "
-    "sharedWithMeTime, ownedByMe, capabilities(canEdit), "
+    "sharedWithMeTime, ownedByMe, capabilities(canEdit, canDownload), "
     "shortcutDetails(targetId, targetMimeType)"
     # NB: "sharedWithMe" is only a search-query term in Drive v3, not a File
     # resource field — requesting it in a fields projection is a 400
@@ -144,7 +144,11 @@ def to_file_metadata(
         symlink_target=None,
         shared=bool(file.get("shared", False)),
         modified_by=last_user.get("permissionId"),
-        is_downloadable=True,
+        # Drive reports canDownload=false when the owner disabled
+        # downloading (and, for native docs, exporting) for viewers and
+        # commenters; absent means downloadable (items you own report no
+        # canDownload=false), matching the canEdit default below.
+        is_downloadable=bool(file.get("capabilities", {}).get("canDownload", True)),
         content_hash=content_hash,
         can_edit=bool(file.get("capabilities", {}).get("canEdit", True)),
         export_mime=export_mime,

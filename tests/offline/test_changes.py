@@ -63,6 +63,30 @@ def test_to_file_metadata_maps_all_fields():
     assert meta.modified == datetime(2026, 4, 30, 4, 32, 17, 43000, tzinfo=timezone.utc)
 
 
+def test_to_file_metadata_maps_can_download_false():
+    file = {**SAMPLE_FILE, "capabilities": {"canEdit": True, "canDownload": False}}
+    meta = to_file_metadata(file, "/report.pdf")
+    assert meta.is_downloadable is False
+    assert meta.can_edit is True
+
+
+def test_to_file_metadata_can_download_defaults_true():
+    # Absent capabilities, and capabilities without canDownload (items you
+    # own report no canDownload=false), both mean downloadable.
+    assert to_file_metadata(SAMPLE_FILE, "/report.pdf").is_downloadable is True
+    file = {**SAMPLE_FILE, "capabilities": {"canEdit": False}}
+    assert to_file_metadata(file, "/report.pdf").is_downloadable is True
+
+
+def test_file_fields_request_can_download():
+    # The fake's field projection returns nested selectors whole, so only
+    # the live request string can pin that the canDownload sub-field is
+    # actually requested from Drive.
+    from bora.changes import FILE_FIELDS
+
+    assert "capabilities(canEdit, canDownload)" in FILE_FIELDS
+
+
 def test_to_file_metadata_tolerates_missing_optional_fields():
     bare = {"id": "F2", "name": "x.bin", "mimeType": "application/octet-stream"}
     meta = to_file_metadata(bare, "/x.bin")

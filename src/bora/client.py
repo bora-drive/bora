@@ -70,6 +70,7 @@ from .exceptions import (
     ConnectionError,
     CursorResetError,
     DataCorruptionError,
+    DownloadDisabledError,
     FolderConflictError,
     NotFoundError,
     NotLinkedError,
@@ -809,6 +810,9 @@ class GoogleDriveClient:
         :raises NotFoundError: if *remote_path* is unknown to the cache.
         :raises UnsupportedFileError: if it resolves to a native doc that
             is not exportable, or is exportable but export is disabled.
+        :raises DownloadDisabledError: if the file's metadata reports
+            ``capabilities.canDownload == false`` (owner disabled
+            downloading), detected before any media request is made.
         :raises DataCorruptionError: on an MD5 mismatch (get_media path only).
         """
         self._ensure_root_id()
@@ -838,12 +842,34 @@ class GoogleDriveClient:
                     remote_path=remote_path,
                     local_path=local_path,
                 )
+            # Listing-time detection of download-disabled files: Drive
+            # reports capabilities.canDownload=false when the owner
+            # disabled downloading (which also refuses exports of native
+            # docs), so the doomed media request can be skipped entirely
+            # and the caller's DownloadDisabledError handling (.url
+            # placeholder, skip-until-remote-change) kicks in without a
+            # first failed attempt. Absent means downloadable, so an API
+            # that omits the field falls through to the media request and
+            # its existing 403 handling. Checked after the unsupported-
+            # native guards so their (more specific) errors keep
+            # precedence.
+            can_download = bool(
+                meta_file.get("capabilities", {}).get("canDownload", True)
+            )
             if is_exportable(mime):
                 if not self.export_opts.enabled:
                     raise UnsupportedFileError(
                         "Cannot download file",
                         "Google-native documents (Docs, Sheets, Slides, "
                         "etc.) cannot be synced as files.",
+                        remote_path=remote_path,
+                        local_path=local_path,
+                    )
+                if not can_download:
+                    raise DownloadDisabledError(
+                        "Cannot export file",
+                        "The owner of this file has disabled downloading, "
+                        "printing, and copying for viewers and commenters.",
                         remote_path=remote_path,
                         local_path=local_path,
                     )
@@ -855,6 +881,14 @@ class GoogleDriveClient:
                     local_path,
                     tmp_path,
                     sync_event,
+                )
+            if not can_download:
+                raise DownloadDisabledError(
+                    "Cannot download file",
+                    "The owner of this file has disabled downloading, "
+                    "printing, and copying for viewers and commenters.",
+                    remote_path=remote_path,
+                    local_path=local_path,
                 )
             request = self._get_service().files().get_media(fileId=file_id)
             try:
