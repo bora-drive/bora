@@ -98,14 +98,23 @@ Decision: write a link placeholder rather than skipping silently.
 
 - When a `cannotExportFile` refusal is recorded, write an
   `[InternetShortcut]`-format `.url` file (openable on macOS and Linux)
-  pointing at the doc's `webViewLink` (add to `FILE_FIELDS` if absent).
-  Name: the projected export leaf name with `.url` appended in place of
-  the export extension — `Gambit Guide.md` → `Gambit Guide.url` — so the
+  pointing at `https://drive.google.com/open?id=<remote_id>`. The
+  id-based URL needs no extra metadata fetch (no `webViewLink` field
+  added to `FILE_FIELDS`) and is stable across renames. Name: the
+  projected export leaf name with `.url` appended in place of the
+  export extension — `Gambit Guide.md` → `Gambit Guide.url` — so the
   placeholder never collides with a future real export of the same file.
-- Index the placeholder as the synced local representation of the
-  remote file: it must not upload back to Drive, must not register as a
-  local change, and is deleted when the remote file is deleted or when
-  it becomes exportable (rev change → fix 2 retries → the real export is
+- The placeholder is **not** indexed as a synced local representation of
+  the remote file. Instead, an upload-path guard
+  (`_placeholder_error_for`, mirroring `_download_only_entry_for`)
+  recognizes a local change under a placeholder's path — matched by
+  recomputing the placeholder path from the recorded
+  `DownloadDisabledError` entry's remote path rather than trusting an
+  index row — and treats it as never-uploaded. This keeps the "no
+  index row" invariant true for these paths while still preventing the
+  placeholder from being pushed back to Drive or registered as a local
+  change; it is deleted when the remote file is deleted or when it
+  becomes exportable (rev change → fix 2 retries → the real export is
   written and the placeholder removed).
 - Local edits/deletes of a placeholder are ignored (never pushed);
   a deleted placeholder is rewritten on the next cycle where the error
