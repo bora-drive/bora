@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A dropped network connection no longer pauses syncing permanently.
+- Unexportable files no longer retried on every sync cycle.
+- Docs/Sheets/Slides over the 10 MB export limit now sync via a docs.google.com fallback.
+- Files whose owner disabled downloading now appear as read-only .url shortcuts.
+
 ## v0.1.0 — Initial release (Bora, Google Drive)
 
 Bora is a Google Drive sync client for macOS and Linux, forked from
