@@ -8,6 +8,9 @@ Covers:
       is load-bearing (wrong_md5 mode + clean recovery after checksum restore).
   C — mid-stream fault on the 2nd chunk of a multi-chunk download → per-chunk
       _retry_transient recovers transparently; final file matches original MD5.
+  D — API export over the ~10 MB cap (403 exportSizeLimitExceeded) falls back
+      to the docs.google.com web export endpoint; a non-200 there degrades to
+      RestrictedContentError; any other export 403 never reaches the fallback.
 
 Sleep neutralisation
 --------------------
@@ -20,6 +23,7 @@ Returning False from ``wait`` means "not cancelled, proceed".  We monkeypatch
 from __future__ import annotations
 
 import hashlib
+import io
 import os.path as osp
 import sqlite3
 from unittest.mock import Mock
@@ -29,10 +33,12 @@ import pytest
 from bora.client import _DOWNLOAD_CHUNK_SIZE, GoogleDriveClient
 from bora.config import remove_configuration
 from bora.database.core import Database
-from bora.exceptions import DataCorruptionError
+from bora.exceptions import DataCorruptionError, RestrictedContentError
+from bora.export import ExportOptions
 from bora.keyring import CredentialStorage
+from bora.native_docs import EXPORT_MIME_MAP, MARKDOWN_MIME
 from bora.path_cache import PathIDCache
-from tests.fake_drive import ROOT_ID, FakeDrive, make_timeout
+from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error, make_timeout
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -265,3 +271,120 @@ def test_mid_chunk_timeout_teeth(cof, tmp_path):
         local
     ), "no file should be committed when all retries exhausted"
     assert not osp.exists(local + ".bora-part"), "sidecar must be cleaned up on error"
+
+
+# ===========================================================================
+# Scenario D — too-large export falls back to the docs.google.com endpoint
+# ===========================================================================
+
+
+class _FakeResp:
+    """Minimal stand-in for a ``requests.Response`` used with ``stream=True``."""
+
+    def __init__(self, status_code, content=b"", ctype="application/octet-stream"):
+        self.status_code = status_code
+        self._content = content
+        self.headers = {"content-type": ctype}
+
+    def iter_content(self, chunk_size):
+        buf = io.BytesIO(self._content)
+        while True:
+            chunk = buf.read(chunk_size)
+            if not chunk:
+                return
+            yield chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _enable_export(client: GoogleDriveClient) -> None:
+    client.export_opts = ExportOptions(enabled=True, markdown=True)
+    client._credentials = Mock(valid=True, token="fake-token")
+
+
+def test_too_large_export_falls_back_to_web(cof, monkeypatch, tmp_path):
+    """API export refuses with exportSizeLimitExceeded; the web endpoint
+    serves the same bytes with no size cap, and the download completes
+    transparently through it."""
+    client, fake = cof
+    _enable_export(client)
+    payload = b"x" * (3 * 1024 * 1024)
+    doc_id = fake.add_native(name="big", kind="presentation")
+    export_mime, _ext = EXPORT_MIME_MAP["application/vnd.google-apps.presentation"]
+    fake.set_export_bytes(doc_id, export_mime, b"stub")
+    # API export always refuses with the too-large reason.
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "exportSizeLimitExceeded"),
+        count=999,
+    )
+    seen = {}
+
+    def fake_get(url, headers=None, stream=None, timeout=None, **kw):
+        seen["url"] = url
+        seen["auth"] = headers.get("Authorization", "")
+        return _FakeResp(200, payload)
+
+    monkeypatch.setattr("bora.client.requests.get", fake_get)
+    local = str(tmp_path / "big.pptx")
+
+    md = client.download("/big.pptx", local, file_id=doc_id)
+
+    assert open(local, "rb").read() == payload
+    assert md.size == len(payload)
+    assert seen["url"] == (
+        f"https://docs.google.com/presentation/d/{doc_id}/export?format=pptx"
+    )
+    assert seen["auth"].startswith("Bearer ")
+
+
+def test_web_fallback_non_200_raises_restricted(cof, monkeypatch, tmp_path):
+    """A non-200 from the (unofficial) web endpoint degrades to
+    RestrictedContentError instead of crashing, and cleans up the sidecar."""
+    client, fake = cof
+    _enable_export(client)
+    doc_id = fake.add_native(name="big", kind="presentation")
+    export_mime, _ext = EXPORT_MIME_MAP["application/vnd.google-apps.presentation"]
+    fake.set_export_bytes(doc_id, export_mime, b"stub")
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "exportSizeLimitExceeded"),
+        count=999,
+    )
+    monkeypatch.setattr("bora.client.requests.get", lambda *a, **kw: _FakeResp(403))
+    local = str(tmp_path / "big.pptx")
+
+    with pytest.raises(RestrictedContentError):
+        client.download("/big.pptx", local, file_id=doc_id)
+    # sidecar cleaned up
+    assert not osp.exists(local + ".bora-part")
+
+
+def test_other_export_403_does_not_fall_back(cof, monkeypatch, tmp_path):
+    """Only exportSizeLimitExceeded triggers the fallback; other export 403s
+    (e.g. cannotExportFile) must never reach the web endpoint."""
+    client, fake = cof
+    _enable_export(client)
+    doc_id = fake.add_native(name="doc", kind="document")
+    # markdown=True on a Doc exports as text/markdown (see _enable_export).
+    fake.set_export_bytes(doc_id, MARKDOWN_MIME, b"stub")
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "cannotExportFile"),
+        count=999,
+    )
+    called = {"n": 0}
+
+    def fake_get(*a, **kw):
+        called["n"] += 1
+        return _FakeResp(200, b"nope")
+
+    monkeypatch.setattr("bora.client.requests.get", fake_get)
+
+    with pytest.raises(RestrictedContentError):
+        client.download("/doc.md", str(tmp_path / "doc.md"), file_id=doc_id)
+    assert called["n"] == 0

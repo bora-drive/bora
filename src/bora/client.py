@@ -72,6 +72,7 @@ from .exceptions import (
     FolderConflictError,
     NotFoundError,
     NotLinkedError,
+    RestrictedContentError,
     SharedLinkError,
     UnsupportedFileError,
 )
@@ -120,6 +121,18 @@ _LIST_PAGE_SIZE = 1000
 # Download chunk size — Google's recommended granularity for
 # MediaIoBaseDownload.
 _DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+
+# Browser-facing export endpoints. The Drive API's files.export caps
+# exports at ~10 MB (403 exportSizeLimitExceeded); these endpoints — the
+# route the Drive web UI itself uses — serve the same bytes with no such
+# cap and accept the same OAuth bearer token (live-verified 2026-07-22,
+# 23.6 MB pptx + markdown byte-identical to the API export). Unofficial:
+# every failure here must degrade to RestrictedContentError, never crash.
+_WEB_EXPORT_KIND = {
+    "application/vnd.google-apps.document": "document",
+    "application/vnd.google-apps.spreadsheet": "spreadsheets",
+    "application/vnd.google-apps.presentation": "presentation",
+}
 
 T = TypeVar("T")
 
@@ -895,26 +908,43 @@ class GoogleDriveClient:
         atomic-rename structure, but there is no server-side md5 for an
         export, so the content hash is computed locally from the
         downloaded bytes instead of being checked against Drive.
+
+        Exports over the API's ~10 MB cap (403 exportSizeLimitExceeded)
+        are retried once through the browser-facing docs.google.com
+        export endpoint, which has no such cap (see _WEB_EXPORT_KIND).
         """
-        export_mime, _ext = export_target(mime, self.export_opts.markdown)
+        export_mime, ext = export_target(mime, self.export_opts.markdown)
         request = (
             self._get_service()
             .files()
             .export_media(fileId=file_id, mimeType=export_mime)
         )
         try:
-            with open(tmp_path, "wb") as fh:
-                downloader = MediaIoBaseDownload(
-                    fh, request, chunksize=_DOWNLOAD_CHUNK_SIZE
-                )
-                done = False
-                while not done:
-                    status, done = self._retry_transient(
-                        lambda: downloader.next_chunk()
+            try:
+                with open(tmp_path, "wb") as fh:
+                    downloader = MediaIoBaseDownload(
+                        fh, request, chunksize=_DOWNLOAD_CHUNK_SIZE
                     )
-                    if sync_event is not None and status is not None:
-                        sync_event.completed = status.resumable_progress
-                    self._throttle_down(_DOWNLOAD_CHUNK_SIZE)
+                    done = False
+                    while not done:
+                        status, done = self._retry_transient(
+                            lambda: downloader.next_chunk()
+                        )
+                        if sync_event is not None and status is not None:
+                            sync_event.completed = status.resumable_progress
+                        self._throttle_down(_DOWNLOAD_CHUNK_SIZE)
+            except HttpError as exc:
+                if extract_http_reason(exc) != "exportSizeLimitExceeded":
+                    raise
+                self._export_via_web(
+                    file_id,
+                    mime,
+                    ext,
+                    remote_path,
+                    local_path,
+                    tmp_path,
+                    sync_event,
+                )
             self._count_request()
 
             hasher = hashlib.md5(usedforsecurity=False)
@@ -930,6 +960,55 @@ class GoogleDriveClient:
         md.content_hash = hasher.hexdigest()
         md.size = os.path.getsize(local_path)
         return md
+
+    def _export_via_web(
+        self,
+        file_id: str,
+        mime: str,
+        ext: str,
+        remote_path: str,
+        local_path: str,
+        tmp_path: str,
+        sync_event: SyncEvent | None,
+    ) -> None:
+        """Stream an export through the docs.google.com endpoint into
+        *tmp_path*. Fallback for exports over the API's size cap; raises
+        RestrictedContentError on any non-200 so the restricted-content
+        skip machinery takes over (the endpoint is unofficial)."""
+        kind = _WEB_EXPORT_KIND[mime]
+        creds = self._credentials
+        if creds is None or not creds.valid:
+            if creds is None or creds.refresh_token is None:
+                raise RestrictedContentError(
+                    "Cannot export file",
+                    "This file is too large for Google Drive to export.",
+                    remote_path=remote_path,
+                    local_path=local_path,
+                )
+            creds.refresh(_AuthRequest())
+        url = f"https://docs.google.com/{kind}/d/{file_id}/export?format={ext}"
+        resp = self._retry_transient(
+            lambda: requests.get(
+                url,
+                headers={"Authorization": f"Bearer {creds.token}"},
+                stream=True,
+                timeout=self._timeout,
+            )
+        )
+        with resp:
+            if resp.status_code != 200:
+                raise RestrictedContentError(
+                    "Cannot export file",
+                    "This file is too large for Google Drive to export.",
+                    remote_path=remote_path,
+                    local_path=local_path,
+                )
+            with open(tmp_path, "wb") as fh:
+                for chunk in resp.iter_content(_DOWNLOAD_CHUNK_SIZE):
+                    fh.write(chunk)
+                    if sync_event is not None:
+                        sync_event.completed += len(chunk)
+                    self._throttle_down(len(chunk))
 
     def _throttle_down(self, nbytes: int) -> None:
         """Crude download bandwidth throttle: sleep proportionally to the
