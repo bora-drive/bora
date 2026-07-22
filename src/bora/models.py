@@ -636,3 +636,9 @@ class SyncErrorEntry(Model):
     title = Column(SqlString())
     message = Column(SqlString())
     type = Column(SqlString())
+    remote_rev = Column(SqlString())
+    """Remote rev (Drive ``version`` for native docs) at the time the error
+    was recorded. Set only for restricted-content download errors; used to
+    skip pointless re-downloads until the remote file changes. Nullable —
+    schema drift on existing DBs is handled by Manager._guard_schema's
+    drop-and-recreate (derived cache)."""

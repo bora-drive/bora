@@ -39,7 +39,7 @@ from bora.path_codec import encode_path, fold_path
 from bora.sync import ActivityNode, ActivityTree, Conflict, SyncEngine
 from bora.utils.appdirs import get_home_dir
 from bora.utils.path import delete
-from tests.fake_drive import ROOT_ID, FakeDrive
+from tests.fake_drive import ROOT_ID, FakeDrive, make_http_error
 
 EVENT1 = SyncEvent(
     remote_path="/d0/file1.txt",
@@ -4669,6 +4669,42 @@ def test_docs_off_then_rebuild_uploads_stale_mirror(
     assert (
         _remote_names(fake) != remote_before
     ), "expected the stale mirror to be uploaded to Drive"
+
+
+def test_restricted_error_skipped_until_rev_changes(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """A cannotExportFile refusal is recorded with the remote rev and the
+    file is not re-downloaded until the rev changes."""
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    doc = fake.add_native(name="Report", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Report v1\n")
+    # Every export attempt is refused; `remaining` doubles as a counter.
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "cannotExportFile"),
+        count=999,
+    )
+    attempts = lambda: 999 - fake._fail_rules[0]["remaining"]  # noqa: E731
+
+    mt_sync_engine.download_sync_cycle()
+    errors = mt_sync_engine.download_errors
+    assert len(errors) == 1
+    assert errors[0].type in ("RestrictedContentError", "DownloadDisabledError")
+    assert errors[0].remote_rev == "1"
+    first = attempts()
+    assert first >= 1
+
+    # Same rev -> the retry pass must not attempt another export.
+    mt_sync_engine.get_remote_item(errors[0].remote_path_lower)
+    assert attempts() == first
+
+    # Remote edit bumps `version` -> retry for real.
+    fake._record_change(doc, is_edit=True)
+    mt_sync_engine.get_remote_item(errors[0].remote_path_lower)
+    assert attempts() > first
 
 
 # ==== Task 12 (export): full-cycle end-to-end integration test ==============

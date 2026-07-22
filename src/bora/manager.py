@@ -34,7 +34,7 @@ from .exceptions import (
 from .fsevents import Observer, ObserverType
 from .logging import scoped_logger
 from .notify import BoraDesktopNotifier
-from .sync import SyncEngine
+from .sync import SKIP_UNTIL_CHANGE_TYPES, SyncEngine
 from .utils.integration import check_connection, get_inotify_limits
 
 __all__ = ["SyncManager"]
@@ -520,10 +520,18 @@ class SyncManager:
                 return
 
             # Retry failed downloads.
-            if len(self.sync.download_errors) > 0:
+            errors = list(self.sync.download_errors)
+            restricted = [e for e in errors if e.type in SKIP_UNTIL_CHANGE_TYPES]
+            if restricted:
+                self._logger.info(
+                    "%s file(s) cannot be exported from Google Drive; "
+                    "retrying only when they change remotely.",
+                    len(restricted),
+                )
+            if errors:
                 self._logger.info("Retrying failed syncs...")
 
-            for error in list(self.sync.download_errors):
+            for error in errors:
                 self.sync.get_remote_item(error.remote_path_lower)
 
             # Resume interrupted downloads.

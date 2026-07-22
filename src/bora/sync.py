@@ -164,6 +164,11 @@ os.umask(umask)
 
 NUM_THREADS = min(24, CPU_CORE_COUNT)
 
+# Sync-error types that cannot succeed until the remote file itself
+# changes (export refused, export too large). Download retries for these
+# are skipped while the recorded remote_rev is unchanged.
+SKIP_UNTIL_CHANGE_TYPES = frozenset({"RestrictedContentError"})
+
 P = ParamSpec("P")
 T = TypeVar("T")
 
@@ -1895,13 +1900,21 @@ class SyncEngine:
 
         return not idle
 
-    def _handle_sync_error(self, err: SyncError, direction: SyncDirection) -> None:
+    def _handle_sync_error(
+        self,
+        err: SyncError,
+        direction: SyncDirection,
+        remote_rev: str | None = None,
+    ) -> None:
         """
         Handles a sync error. Fills out any missing path information and adds the error
         to the persistent state for later resync.
 
         :param err: The sync error to handle.
         :param direction: The sync direction (up or down) for which the error occurred.
+        :param remote_rev: The remote rev at the time of the error, recorded for
+            error types in :data:`SKIP_UNTIL_CHANGE_TYPES` so that pointless
+            re-downloads can be skipped until the remote file changes.
         """
         # Fill in missing remote_path or local_path.
         if err.remote_path and not err.local_path:
@@ -1967,6 +1980,7 @@ class SyncEngine:
                     title=err.title,
                     message=err.message,
                     type=err.__class__.__name__,
+                    remote_rev=remote_rev,
                 )
             )
 
@@ -4257,6 +4271,24 @@ class SyncEngine:
 
         self._slow_down()
 
+        if event.is_file and not event.is_deleted and event.rev:
+            with self._database_access():
+                err_entry = self._sync_errors_table.get(event.remote_path_lower)
+            if (
+                err_entry is not None
+                and err_entry.direction == SyncDirection.Down
+                and err_entry.type in SKIP_UNTIL_CHANGE_TYPES
+                and err_entry.remote_rev is not None
+                and err_entry.remote_rev == event.rev
+            ):
+                self._logger.debug(
+                    'Skipping "%s": Google Drive still refuses rev %s',
+                    event.remote_path,
+                    event.rev,
+                )
+                event.status = SyncStatus.Skipped
+                return event
+
         event.status = SyncStatus.Syncing
 
         try:
@@ -4272,7 +4304,12 @@ class SyncEngine:
             event.status = status
 
         except SyncError as e:
-            self._handle_sync_error(e, direction=SyncDirection.Down)
+            rev_for_skip = (
+                event.rev if type(e).__name__ in SKIP_UNTIL_CHANGE_TYPES else None
+            )
+            self._handle_sync_error(
+                e, direction=SyncDirection.Down, remote_rev=rev_for_skip
+            )
             event.status = SyncStatus.Failed
         else:
             self.clear_sync_errors_from_event(event)
