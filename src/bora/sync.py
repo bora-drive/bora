@@ -4594,7 +4594,17 @@ class SyncEngine:
         confirm a DownloadDisabledError entry for this exact remote path is
         still on record. That entry is only cleared by
         _create_local_entry's success branch AFTER _on_remote_deleted
-        returns, so it is still present at this point."""
+        returns, so it is still present at this point.
+
+        The index lookup is an independent guard, symmetric to the one in
+        _write_url_placeholder: a real synced file at the placeholder's
+        path (e.g. the user's own ``Guide.url`` shortcut pointing at the
+        very same doc id) passes both content checks, but deleting it
+        would propagate to Drive on the next upload cycle. A genuine
+        placeholder is never indexed, so any index entry here means the
+        file is not ours to delete."""
+        if self.get_index_entry(self._placeholder_path(event.remote_path_lower)):
+            return
         path = self._placeholder_path(event.local_path)
         if not osp.isfile(path):
             return

@@ -4897,6 +4897,54 @@ def test_genuine_url_file_at_placeholder_path_is_never_clobbered(
     assert mt_sync_engine.download_errors[0].type == "DownloadDisabledError"
 
 
+def test_genuine_url_file_pointing_at_same_doc_survives_export_success(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """A real, indexed remote ``Guide.url`` file whose content happens to
+    be an [InternetShortcut] pointing at the very same Drive doc id must
+    not be deleted by _remove_placeholder_if_any when the doc's export
+    later succeeds -- the content checks (signature + id) both pass for
+    such a file, so the index lookup must act as an independent guard,
+    symmetric to the one in _write_url_placeholder. Without it the user's
+    own synced shortcut is deleted locally and the deletion propagates to
+    Drive on the next upload cycle."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    doc = fake.add_native(name="Guide", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Guide v1\n")
+    genuine = (
+        f"[InternetShortcut]\r\nURL=https://drive.google.com/open?id={doc}\r\n"
+    ).encode()
+    fake.add_file("/Guide.url", content=genuine)
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "cannotExportFile"),
+        count=999,
+    )
+    mt_sync_engine.download_sync_cycle()
+    assert mt_sync_engine.get_index_entry("/guide.url") is not None
+    assert mt_sync_engine.download_errors[0].type == "DownloadDisabledError"
+
+    fake._fail_rules.clear()  # owner re-enabled downloads
+    fake._record_change(doc, is_edit=True)  # bumps version past remote_rev
+    mt_sync_engine.download_sync_cycle()
+
+    assert osp.isfile(L("/Guide.md"))
+    assert open(L("/Guide.md"), "rb").read() == b"# Guide v1\n"
+    # The user's own synced shortcut survives, stays indexed ...
+    assert osp.isfile(L("/Guide.url"))
+    assert open(L("/Guide.url"), "rb").read() == genuine
+    assert mt_sync_engine.get_index_entry("/guide.url") is not None
+
+    # ... and no deletion propagates to Drive.
+    remote_before = _remote_names(fake)
+    mt_sync_engine.upload_local_changes_while_inactive()
+    assert "Guide.url" in _remote_names(fake)
+    assert _remote_names(fake) == remote_before
+
+
 def test_placeholder_error_for_folds_case_only_rename(
     mt_sync_engine: SyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
