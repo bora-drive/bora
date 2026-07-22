@@ -91,6 +91,7 @@ from .exceptions import (
     CancelledError,
     DatabaseError,
     DataChangedError,
+    DownloadDisabledError,
     FileConflictError,
     FolderConflictError,
     InvalidDbidError,
@@ -167,7 +168,7 @@ NUM_THREADS = min(24, CPU_CORE_COUNT)
 # Sync-error types that cannot succeed until the remote file itself
 # changes (export refused, export too large). Download retries for these
 # are skipped while the recorded remote_rev is unchanged.
-SKIP_UNTIL_CHANGE_TYPES = frozenset({"RestrictedContentError"})
+SKIP_UNTIL_CHANGE_TYPES = frozenset({"RestrictedContentError", "DownloadDisabledError"})
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -2335,6 +2336,19 @@ class SyncEngine:
                 self._handle_download_only_local_change(event, dl_entry)
                 continue
 
+            ph_entry = self._placeholder_error_for(event)
+            if ph_entry is not None:
+                # A .url placeholder for a download-disabled file was
+                # changed locally. Placeholders are bora-owned decoration:
+                # never upload, never propagate deletes; a deleted
+                # placeholder is rewritten on the next download cycle
+                # while the error entry stands.
+                self._logger.debug(
+                    "Ignoring local change of placeholder: %s",
+                    event.local_path,
+                )
+                continue
+
             if event.is_deleted:
                 deleted.append(event)
             elif event.is_directory and event.is_moved:
@@ -4286,6 +4300,13 @@ class SyncEngine:
                     event.remote_path,
                     event.rev,
                 )
+                if err_entry.type == "DownloadDisabledError" and not osp.lexists(
+                    self._placeholder_path(event.local_path)
+                ):
+                    # The placeholder was manually deleted since it was last
+                    # written; re-arm it now instead of waiting for the
+                    # remote file to change.
+                    self._write_url_placeholder(event)
                 event.status = SyncStatus.Skipped
                 return event
 
@@ -4304,6 +4325,8 @@ class SyncEngine:
             event.status = status
 
         except SyncError as e:
+            if isinstance(e, DownloadDisabledError) and event.is_file:
+                self._write_url_placeholder(event)
             rev_for_skip = (
                 event.rev if type(e).__name__ in SKIP_UNTIL_CHANGE_TYPES else None
             )
@@ -4313,6 +4336,8 @@ class SyncEngine:
             event.status = SyncStatus.Failed
         else:
             self.clear_sync_errors_from_event(event)
+            if event.is_file and not event.is_deleted:
+                self._remove_placeholder_if_any(event)
             self.activity.discard(event)
 
         # Add events to history database.
@@ -4416,6 +4441,98 @@ class SyncEngine:
             if src_entry is not None and src_entry.is_download_only:
                 return src_entry
         return None
+
+    @staticmethod
+    def _placeholder_path(local_path: str) -> str:
+        """Map an export's local path to its .url placeholder path:
+        'Gambit Guide.md' -> 'Gambit Guide.url'. The names never collide
+        with a real export of the same file."""
+        return osp.splitext(local_path)[0] + ".url"
+
+    def _write_url_placeholder(self, event: SyncEvent) -> None:
+        """Write a read-only [InternetShortcut] .url placeholder for a
+        download-disabled file so it is reachable from the local folder.
+        Uses the id-based Drive URL so no extra metadata fetch is needed."""
+        path = self._placeholder_path(event.local_path)
+        content = (
+            "[InternetShortcut]\r\n"
+            f"URL=https://drive.google.com/open?id={event.remote_id}\r\n"
+        )
+        try:
+            with self.fs_events.ignore(FileCreatedEvent(path), recursive=False):
+                with self._writable_dir(osp.dirname(path)):
+                    if osp.lexists(path):
+                        self._restore_writable(path)
+                    with open(path, "w", newline="") as fh:
+                        fh.write(content)
+                    os.chmod(path, 0o444)
+        except OSError:
+            # The placeholder is best-effort decoration on an already-
+            # failed sync; never let it raise a second error.
+            self._logger.debug('Could not write placeholder "%s"', path, exc_info=True)
+
+    def _placeholder_error_for(self, event: SyncEvent) -> SyncErrorEntry | None:
+        """Return the DownloadDisabledError entry whose placeholder a
+        *local* change targets, else None. Mirrors
+        _download_only_entry_for for un-indexed .url placeholders.
+
+        Recomputes each candidate's local path from ``entry.remote_path``
+        rather than trusting ``entry.local_path``: for a download error,
+        that field is filled in from the *temporary* download path
+        (``client.download`` is always called with a ``.bora-part`` tmp
+        path as its ``local_path``, which is what ``convert_api_errors``
+        then stamps onto the raised error -- see ``_on_remote_file`` /
+        ``GoogleDriveClient.download``), not the file's real destination."""
+        candidates = [event.local_path]
+        if event.local_path_from:
+            candidates.append(event.local_path_from)
+        if not any(p.endswith(".url") for p in candidates):
+            return None
+        for entry in self.download_errors:
+            if entry.type != "DownloadDisabledError":
+                continue
+            entry_local_path = self.to_local_path_from_cased(entry.remote_path)
+            if self._placeholder_path(entry_local_path) in candidates:
+                return entry
+        return None
+
+    def _remove_placeholder_if_any(self, event: SyncEvent) -> None:
+        """Delete a stale .url placeholder for *event*'s file, verifying
+        it is ours before touching it.
+
+        Verification is by content signature ("[InternetShortcut]") plus
+        this file's remote id, when *event* carries one -- the case when
+        called from _create_local_entry's success branch after a download.
+        A remote-deletion event never carries a remote_id (``DeletedMetadata``
+        has no id field -- see changes.py:_emit_delete, which resolves the
+        id to a path and then discards it), so for that caller we instead
+        confirm a DownloadDisabledError entry for this exact remote path is
+        still on record. That entry is only cleared by
+        _create_local_entry's success branch AFTER _on_remote_deleted
+        returns, so it is still present at this point."""
+        path = self._placeholder_path(event.local_path)
+        if not osp.isfile(path):
+            return
+        try:
+            with open(path) as fh:
+                content = fh.read(1024)
+        except OSError:
+            return
+        if not content.startswith("[InternetShortcut]"):
+            return
+        if event.remote_id:
+            if f"id={event.remote_id}" not in content:
+                return
+        else:
+            with self._database_access():
+                err_entry = self._sync_errors_table.get(event.remote_path_lower)
+            if err_entry is None or err_entry.type != "DownloadDisabledError":
+                return
+        with self.fs_events.ignore(FileDeletedEvent(path), recursive=False):
+            self._restore_writable(path)
+            with self._writable_dir(osp.dirname(path)):
+                with convert_api_errors():
+                    delete(path, raise_error=False)
 
     def _handle_download_only_local_change(
         self, event: SyncEvent, entry: IndexEntry
@@ -4866,8 +4983,15 @@ class SyncEngine:
 
         if conflict_check is Conflict.Identical:
             self.update_index_from_sync_event(event)
+            self._remove_placeholder_if_any(event)
             return SyncStatus.Skipped
         elif conflict_check is Conflict.LocalNewerOrIdentical:
+            # A download-disabled file that was never actually downloaded
+            # has no rev on record (local_rev is None), which equals a
+            # deletion event's own rev (also None) -- so this is the branch
+            # a deleted placeholder-only file actually takes; there is no
+            # real local mirror to remove below, only its placeholder.
+            self._remove_placeholder_if_any(event)
             return SyncStatus.Skipped
 
         # A view-only shared item may have been left read-only on disk by a
@@ -4885,10 +5009,12 @@ class SyncEngine:
         if not exc:
             self.update_index_from_sync_event(event)
             self._logger.debug('Deleted local item "%s"', event.local_path)
+            self._remove_placeholder_if_any(event)
             return SyncStatus.Done
         elif isinstance(exc, (FileNotFoundError, NotADirectoryError)):
             self.update_index_from_sync_event(event)
             self._logger.debug('Deletion failed: "%s" not found', event.remote_path)
+            self._remove_placeholder_if_any(event)
             return SyncStatus.Skipped
         else:
             raise os_to_bora_error(exc, remote_path=event.remote_path)

@@ -4707,6 +4707,88 @@ def test_restricted_error_skipped_until_rev_changes(
     assert attempts() > first
 
 
+# ==== Task 4: .url placeholders for download-disabled files =================
+
+
+def _arrange_disabled_doc(engine: SyncEngine, fake: FakeDrive) -> str:
+    """One refused native doc, synced once -> placeholder expected."""
+    doc = fake.add_native(name="Guide", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Guide v1\n")
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "cannotExportFile"),
+        count=999,
+    )
+    engine.download_sync_cycle()
+    return doc
+
+
+def test_download_disabled_writes_url_placeholder(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+    doc = _arrange_disabled_doc(mt_sync_engine, fake)
+
+    placeholder = L("/Guide.url")
+    assert osp.isfile(placeholder)
+    content = open(placeholder).read()
+    assert content.startswith("[InternetShortcut]")
+    assert f"https://drive.google.com/open?id={doc}" in content
+    # read-only, like the export mirrors
+    assert not (os.stat(placeholder).st_mode & 0o222)
+    # error recorded as the distinguishing subclass
+    assert mt_sync_engine.download_errors[0].type == "DownloadDisabledError"
+
+
+def test_placeholder_is_never_uploaded(mt_sync_engine: SyncEngine) -> None:
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+    _arrange_disabled_doc(mt_sync_engine, fake)
+
+    remote_before = _remote_names(fake)
+    mt_sync_engine.upload_local_changes_while_inactive()
+    assert _remote_names(fake) == remote_before
+
+
+def test_placeholder_removed_when_remote_deleted(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+    doc = _arrange_disabled_doc(mt_sync_engine, fake)
+    assert osp.isfile(L("/Guide.url"))
+
+    # Adapted from neighboring deletion tests (e.g.
+    # test_crash_replayed_delete_with_evicted_cache_removes_stranded_item):
+    # FakeDrive has no top-level delete() helper, only the nested Files
+    # resource used through .service().files().delete(fileId=...).execute().
+    fake.service().files().delete(fileId=doc).execute()
+    mt_sync_engine.download_sync_cycle()
+    assert not osp.lexists(L("/Guide.url"))
+
+
+def test_placeholder_replaced_when_export_succeeds(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+    doc = _arrange_disabled_doc(mt_sync_engine, fake)
+    assert osp.isfile(L("/Guide.url"))
+
+    fake._fail_rules.clear()  # owner re-enabled downloads
+    fake._record_change(doc, is_edit=True)  # bumps version past remote_rev
+    mt_sync_engine.download_sync_cycle()
+
+    assert osp.isfile(L("/Guide.md"))
+    assert open(L("/Guide.md"), "rb").read() == b"# Guide v1\n"
+    assert not osp.lexists(L("/Guide.url"))
+    assert mt_sync_engine.download_errors == []
+
+
 # ==== Task 12 (export): full-cycle end-to-end integration test ==============
 #
 # Capstone verification for the Google Docs export feature. Unlike the

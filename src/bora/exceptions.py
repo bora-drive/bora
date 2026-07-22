@@ -114,6 +114,12 @@ class RestrictedContentError(SyncError):
     with a DMCA takedown notice to a public folder."""
 
 
+class DownloadDisabledError(RestrictedContentError):
+    """The owner disabled downloading, printing, and copying for viewers
+    and commenters (Drive 403 cannotExportFile). Bora represents such
+    files locally with an [InternetShortcut] .url placeholder."""
+
+
 class UnsupportedFileError(SyncError):
     """Raised when this file type cannot be downloaded but only exported. This is the
     case for certain cloud-native file types."""

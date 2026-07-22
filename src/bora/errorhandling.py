@@ -26,6 +26,7 @@ from .exceptions import (
     ConflictError,
     ConnectionError,
     DataChangedError,
+    DownloadDisabledError,
     FileReadError,
     FileSizeError,
     InsufficientPermissionsError,
@@ -166,7 +167,7 @@ def http_error_to_bora(
                 local_path=local_path,
             )
         if reason == "cannotExportFile":
-            return RestrictedContentError(
+            return DownloadDisabledError(
                 "Cannot export file",
                 "Google Drive refuses to export this file. The owner may "
                 "have disabled downloading, printing, and copying for "
