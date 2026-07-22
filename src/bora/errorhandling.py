@@ -8,11 +8,14 @@ from __future__ import annotations
 import builtins
 import contextlib
 import errno
+import http.client
 import json
 import os
+import socket
 from typing import Any, Callable, Iterator, TypeVar, Union
 
 import google.auth.exceptions
+import httplib2
 import requests
 from googleapiclient.errors import HttpError
 
@@ -55,6 +58,15 @@ CONNECTION_ERRORS = (
     requests.exceptions.ChunkedEncodingError,
     requests.exceptions.ConnectionError,
     builtins.ConnectionError,
+    # googleapiclient performs I/O through httplib2, not requests, so
+    # transport failures also surface as raw socket / http.client /
+    # httplib2 exceptions (found live 2026-07-21: an SSL read timeout
+    # escaped retry, mapped to a fatal BoraApiError, and paused sync
+    # without autostart).
+    builtins.TimeoutError,  # also covers socket.timeout on Python >= 3.10
+    http.client.HTTPException,  # IncompleteRead, BadStatusLine, ...
+    socket.gaierror,  # DNS failure while offline
+    httplib2.HttpLib2Error,  # ServerNotFoundError, ...
 )
 
 # 403 sub-reasons that mean "rate-limited, retry" rather than a hard

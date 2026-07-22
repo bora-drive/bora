@@ -170,3 +170,55 @@ def test_http_error_412_other_reason_falls_through(make_http_error):
     exc = make_http_error(412, reason="")
     out = http_error_to_bora(412, "", exc)
     assert isinstance(out, DataChangedError)
+
+
+# ---- Socket-level errors classification -----------------------------------
+
+
+import http.client
+import socket
+
+import httplib2
+
+from bora.errorhandling import CONNECTION_ERRORS
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        TimeoutError("The read operation timed out"),
+        socket.gaierror(8, "nodename nor servname provided"),
+        http.client.IncompleteRead(b"partial"),
+        httplib2.ServerNotFoundError("Unable to find the server"),
+    ],
+)
+def test_socket_level_errors_are_connection_errors(exc):
+    # Classification: the retry loop keys off this tuple.
+    assert isinstance(exc, CONNECTION_ERRORS)
+    # Conversion: convert_api_errors maps them to bora's ConnectionError,
+    # which the manager handles with DISCONNECTED + autostart (not a fatal
+    # BoraApiError pause).
+    with pytest.raises(ConnectionError):
+        with convert_api_errors():
+            raise exc
+
+
+def test_retry_transient_retries_timeout(client):
+    # A TimeoutError on the first attempt must be retried, not raised.
+    # `client` is the offline conftest fixture; neutralise backoff sleep.
+    from unittest.mock import Mock
+
+    client._poll_event = Mock()
+    client._poll_event.is_set = Mock(return_value=False)
+    client._poll_event.wait = Mock(return_value=False)
+
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("The read operation timed out")
+        return "ok"
+
+    assert client._retry_transient(flaky) == "ok"
+    assert calls["n"] == 2

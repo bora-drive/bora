@@ -53,8 +53,9 @@ def make_timeout(message: str = "fake timeout") -> Exception:
     """A transport-level timeout, shaped like the production retry path catches.
 
     Returns ``requests.exceptions.Timeout`` because ``CONNECTION_ERRORS`` in
-    ``src/bora/errorhandling.py`` includes that type (not ``socket.timeout``),
-    so downstream retry tests will exercise the real retry path.
+    ``src/bora/errorhandling.py`` includes that type and raw ``socket.timeout``
+    (via ``builtins.TimeoutError``), so downstream retry tests will exercise
+    the real retry path.
     """
     return requests.exceptions.Timeout(message)
 
