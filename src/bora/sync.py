@@ -170,6 +170,11 @@ NUM_THREADS = min(24, CPU_CORE_COUNT)
 # are skipped while the recorded remote_rev is unchanged.
 SKIP_UNTIL_CHANGE_TYPES = frozenset({"RestrictedContentError", "DownloadDisabledError"})
 
+# First line of a bora-written .url placeholder (see SyncEngine._write_url_
+# placeholder). Used to verify a file at a placeholder's path is ours
+# before overwriting or deleting it.
+PLACEHOLDER_SIGNATURE = b"[InternetShortcut]"
+
 P = ParamSpec("P")
 T = TypeVar("T")
 
@@ -4449,10 +4454,33 @@ class SyncEngine:
         with a real export of the same file."""
         return osp.splitext(local_path)[0] + ".url"
 
+    def _read_placeholder_signature(self, path: str) -> bytes | None:
+        """Read up to 1KB of *path* in binary mode for placeholder
+        verification, or ``None`` if it cannot be read as one of ours.
+
+        Binary mode is deliberate: a foreign file occupying a placeholder's
+        path is not guaranteed to be UTF-8 (or any text encoding at all),
+        and this must be a safe no-op for callers -- never raise, not even
+        ``UnicodeDecodeError`` (a ``ValueError``, not an ``OSError``, so a
+        text-mode ``open()`` here would escape a bare ``except OSError``)."""
+        try:
+            with open(path, "rb") as fh:
+                return fh.read(1024)
+        except OSError:
+            return None
+
     def _write_url_placeholder(self, event: SyncEvent) -> None:
         """Write a read-only [InternetShortcut] .url placeholder for a
         download-disabled file so it is reachable from the local folder.
-        Uses the id-based Drive URL so no extra metadata fetch is needed."""
+        Uses the id-based Drive URL so no extra metadata fetch is needed.
+
+        If some other file already occupies the placeholder path, it is
+        only overwritten when it carries our own signature (a placeholder
+        from a prior sync of the same file, or of the same doc before a
+        remote id change -- id is not checked here, only the prefix, so a
+        stale placeholder for the same path is still safely refreshed). A
+        genuine, unrelated file at that path (e.g. a user's own real
+        Windows/Internet shortcut) is left untouched."""
         path = self._placeholder_path(event.local_path)
         content = (
             "[InternetShortcut]\r\n"
@@ -4462,6 +4490,16 @@ class SyncEngine:
             with self.fs_events.ignore(FileCreatedEvent(path), recursive=False):
                 with self._writable_dir(osp.dirname(path)):
                     if osp.lexists(path):
+                        existing = self._read_placeholder_signature(path)
+                        if existing is None or not existing.startswith(
+                            PLACEHOLDER_SIGNATURE
+                        ):
+                            self._logger.debug(
+                                "Not overwriting foreign file at placeholder "
+                                'path "%s"',
+                                path,
+                            )
+                            return
                         self._restore_writable(path)
                     with open(path, "w", newline="") as fh:
                         fh.write(content)
@@ -4482,7 +4520,18 @@ class SyncEngine:
         (``client.download`` is always called with a ``.bora-part`` tmp
         path as its ``local_path``, which is what ``convert_api_errors``
         then stamps onto the raised error -- see ``_on_remote_file`` /
-        ``GoogleDriveClient.download``), not the file's real destination."""
+        ``GoogleDriveClient.download``), not the file's real destination.
+
+        On a case-insensitive file system a case-only local rename of the
+        placeholder must still match, or an edit under the new casing
+        would fall through to the normal upload path (violating "never
+        uploaded"). Comparison then folds both sides through
+        ``to_remote_path_lower``/``entry.remote_path_lower`` -- the same
+        folded-remote-path identity the rest of the engine resolves
+        through (e.g. ``_download_only_entry_for``'s ``remote_path_lower``
+        index lookups). On a case-sensitive file system the fold is
+        skipped and paths are compared as-is, so an unrelated file that
+        merely differs by case is correctly treated as a different item."""
         candidates = [event.local_path]
         if event.local_path_from:
             candidates.append(event.local_path_from)
@@ -4492,8 +4541,19 @@ class SyncEngine:
             if entry.type != "DownloadDisabledError":
                 continue
             entry_local_path = self.to_local_path_from_cased(entry.remote_path)
-            if self._placeholder_path(entry_local_path) in candidates:
-                return entry
+            entry_placeholder = self._placeholder_path(entry_local_path)
+            if self.is_fs_case_sensitive:
+                if entry_placeholder in candidates:
+                    return entry
+            else:
+                entry_placeholder_lower = self._placeholder_path(
+                    entry.remote_path_lower
+                )
+                if any(
+                    self.to_remote_path_lower(c) == entry_placeholder_lower
+                    for c in candidates
+                ):
+                    return entry
         return None
 
     def _remove_placeholder_if_any(self, event: SyncEvent) -> None:
@@ -4513,15 +4573,11 @@ class SyncEngine:
         path = self._placeholder_path(event.local_path)
         if not osp.isfile(path):
             return
-        try:
-            with open(path) as fh:
-                content = fh.read(1024)
-        except OSError:
-            return
-        if not content.startswith("[InternetShortcut]"):
+        content = self._read_placeholder_signature(path)
+        if content is None or not content.startswith(PLACEHOLDER_SIGNATURE):
             return
         if event.remote_id:
-            if f"id={event.remote_id}" not in content:
+            if f"id={event.remote_id}".encode() not in content:
                 return
         else:
             with self._database_access():

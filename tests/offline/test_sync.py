@@ -4789,6 +4789,111 @@ def test_placeholder_replaced_when_export_succeeds(
     assert mt_sync_engine.download_errors == []
 
 
+def test_foreign_file_at_placeholder_path_is_not_overwritten(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """A genuine, unrelated file already occupying the placeholder path
+    (e.g. the user's own real Windows/Internet shortcut) must never be
+    destroyed by _write_url_placeholder: only a file that already carries
+    our own [InternetShortcut] signature is refreshed in place."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    doc = fake.add_native(name="Guide", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Guide v1\n")
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "cannotExportFile"),
+        count=999,
+    )
+
+    foreign_path = L("/Guide.url")
+    foreign_content = "Not a bora placeholder.\n"
+    with open(foreign_path, "w") as fh:
+        fh.write(foreign_content)
+
+    mt_sync_engine.download_sync_cycle()
+
+    # The foreign file must survive untouched, and the export failure is
+    # still recorded normally -- the placeholder write is best-effort
+    # decoration and its refusal must not derail error handling.
+    assert open(foreign_path).read() == foreign_content
+    assert mt_sync_engine.download_errors[0].type == "DownloadDisabledError"
+
+
+def test_foreign_binary_file_survives_placeholder_cleanup_on_remote_delete(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """_remove_placeholder_if_any must be a safe no-op -- and must not
+    destroy a foreign file -- when a non-UTF-8, non-bora file occupies the
+    placeholder's path at delete time (e.g. the user deleted bora's
+    placeholder and dropped an unrelated binary file at the same path)."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+    doc = _arrange_disabled_doc(mt_sync_engine, fake)
+
+    placeholder = L("/Guide.url")
+    assert osp.isfile(placeholder)
+
+    os.chmod(placeholder, 0o644)
+    binary_content = b"\xff\xfe\x00\x01not a placeholder"
+    with open(placeholder, "wb") as fh:
+        fh.write(binary_content)
+
+    fake.service().files().delete(fileId=doc).execute()
+    mt_sync_engine.download_sync_cycle()  # must not raise (e.g. UnicodeDecodeError)
+
+    assert osp.isfile(placeholder)
+    assert open(placeholder, "rb").read() == binary_content
+
+
+def test_placeholder_error_for_folds_case_only_rename(
+    mt_sync_engine: SyncEngine,
+) -> None:
+    """A case-only local rename of the placeholder must still match on a
+    case-insensitive file system (or an edit under the new casing would
+    fall through to the normal upload path, violating "never uploaded").
+    On a case-sensitive file system the same rename is a genuinely
+    different, unrelated file and must NOT match. Both branches are forced
+    explicitly (rather than relying on the test host's real file system)
+    so this test is deterministic everywhere."""
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+    _arrange_disabled_doc(mt_sync_engine, fake)
+
+    L = mt_sync_engine.to_local_path_from_cased
+    placeholder = L("/Guide.url")
+    renamed = osp.join(osp.dirname(placeholder), "GUIDE.url")
+
+    def _event_for(path: str) -> SyncEvent:
+        return SyncEvent(
+            direction=SyncDirection.Up,
+            item_type=ItemType.File,
+            sync_time=datetime.today().timestamp(),
+            remote_path="/GUIDE.url",
+            remote_path_lower="/guide.url",
+            remote_id=None,
+            local_path=path,
+            rev=None,
+            content_hash=None,
+            symlink_target=None,
+            change_type=ChangeType.Modified,
+            status=SyncStatus.Queued,
+            size=0,
+            completed=0,
+        )
+
+    mt_sync_engine._is_fs_case_sensitive = True
+    assert mt_sync_engine._placeholder_error_for(_event_for(renamed)) is None
+
+    mt_sync_engine._is_fs_case_sensitive = False
+    entry = mt_sync_engine._placeholder_error_for(_event_for(renamed))
+    assert entry is not None
+    assert entry.type == "DownloadDisabledError"
+
+
 # ==== Task 12 (export): full-cycle end-to-end integration test ==============
 #
 # Capstone verification for the Google Docs export feature. Unlike the
