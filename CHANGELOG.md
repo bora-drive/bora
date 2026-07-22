@@ -7,6 +7,13 @@
 - Unexportable files no longer retried on every sync cycle.
 - Docs/Sheets/Slides over the 10 MB export limit now sync via a docs.google.com fallback.
 - Files whose owner disabled downloading now appear as read-only .url shortcuts.
+- A synced .url shortcut of your own that points at the same document is no
+  longer deleted when that document becomes downloadable again.
+
+### Changed
+- Download-disabled files are now recognised from Drive metadata
+  (`capabilities.canDownload`) before any download or export is attempted,
+  instead of only after a refused request.
 
 ## v0.1.0 — Initial release (Bora, Google Drive)
 
