@@ -902,5 +902,5 @@ git commit -m "docs: changelog for sync error resilience fixes"
 
 ## Future work (explicitly out of scope)
 
-- Listing-time detection of download-disabled files via `capabilities(canDownload)` in `FILE_FIELDS` would avoid even the first failed export attempt and let the placeholder participate in normal move/rename semantics — needs live verification with a second account's download-disabled share (only bora-test@arko.net is linked on this VM).
+- ~~Listing-time detection of download-disabled files via `capabilities(canDownload)` in `FILE_FIELDS`~~ — DONE on this branch (commit 8615903) and live-verified 2026-07-22 against download-disabled shares from andre@arko.net (a binary file and a native Doc, shared view-only into bora-test@arko.net with "viewers can download" off). Verified live: listing projects `is_downloadable=False`; `client.download` raises DownloadDisabledError after exactly 1 API request (metadata only — no export_media/get_media attempt; the error text is the pre-emptive message, not the legacy 403 one); the daemon writes both `.url` placeholders; and neither subsequent cycles nor a daemon restart re-probe the files (skip-until-remote-change via `SyncErrorEntry.remote_rev`). Placeholder participation in move/rename semantics remains future work.
 - Placeholders for other unsyncable classes (abusive-file flag, unsupported native types).
