@@ -4701,6 +4701,16 @@ def test_restricted_error_skipped_until_rev_changes(
     mt_sync_engine.get_remote_item(errors[0].remote_path_lower)
     assert attempts() == first
 
+    # The skip path must not leak a permanent entry into the activity
+    # tree: each skipped startup retry pass discards its event just like
+    # the success path does, so repeated retries never grow the tree
+    # (regression test for the leak fixed in _create_local_entry's
+    # skip-until-change early return).
+    assert len(mt_sync_engine.activity.sync_events) == 0
+    for _ in range(3):
+        mt_sync_engine.get_remote_item(errors[0].remote_path_lower)
+        assert len(mt_sync_engine.activity.sync_events) == 0
+
     # Remote edit bumps `version` -> retry for real.
     fake._record_change(doc, is_edit=True)
     mt_sync_engine.get_remote_item(errors[0].remote_path_lower)
@@ -4849,8 +4859,46 @@ def test_foreign_binary_file_survives_placeholder_cleanup_on_remote_delete(
     assert open(placeholder, "rb").read() == binary_content
 
 
-def test_placeholder_error_for_folds_case_only_rename(
+def test_genuine_url_file_at_placeholder_path_is_never_clobbered(
     mt_sync_engine: SyncEngine,
+) -> None:
+    """A real, indexed remote file at the placeholder's path (e.g. the
+    user genuinely synced a bookmark file named ``Guide.url``) must never
+    be overwritten by _write_url_placeholder -- even when its content
+    happens to start with the [InternetShortcut] signature, which would
+    otherwise fool the foreign-file *content* check. The index lookup is
+    an independent guard: a real synced file must never be clobbered just
+    because a download-disabled doc of the same base name collides with
+    its path."""
+    L = mt_sync_engine.to_local_path_from_cased
+    fake = FakeDrive()
+    _wire_export_cycle(mt_sync_engine, fake)
+
+    genuine_content = b"[InternetShortcut]\r\nURL=https://example.com/real-bookmark\r\n"
+    fake.add_file("/Guide.url", content=genuine_content)
+    mt_sync_engine.download_sync_cycle()
+    assert open(L("/Guide.url"), "rb").read() == genuine_content
+    assert mt_sync_engine.get_index_entry("/guide.url") is not None
+
+    doc = fake.add_native(name="Guide", kind="document")
+    fake.set_export_bytes(doc, _MD_MIME, b"# Guide v1\n")
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "cannotExportFile"),
+        count=999,
+    )
+    mt_sync_engine.download_sync_cycle()
+
+    # The genuine file must survive completely untouched, and the export
+    # failure is still recorded normally -- the placeholder write is
+    # best-effort decoration and refusing it must not derail error
+    # handling.
+    assert open(L("/Guide.url"), "rb").read() == genuine_content
+    assert mt_sync_engine.download_errors[0].type == "DownloadDisabledError"
+
+
+def test_placeholder_error_for_folds_case_only_rename(
+    mt_sync_engine: SyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A case-only local rename of the placeholder must still match on a
     case-insensitive file system (or an edit under the new casing would
@@ -4885,10 +4933,10 @@ def test_placeholder_error_for_folds_case_only_rename(
             completed=0,
         )
 
-    mt_sync_engine._is_fs_case_sensitive = True
+    monkeypatch.setattr(mt_sync_engine, "_is_fs_case_sensitive", True)
     assert mt_sync_engine._placeholder_error_for(_event_for(renamed)) is None
 
-    mt_sync_engine._is_fs_case_sensitive = False
+    monkeypatch.setattr(mt_sync_engine, "_is_fs_case_sensitive", False)
     entry = mt_sync_engine._placeholder_error_for(_event_for(renamed))
     assert entry is not None
     assert entry.type == "DownloadDisabledError"

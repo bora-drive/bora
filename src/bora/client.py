@@ -67,6 +67,7 @@ from .errorhandling import (
 from .exceptions import (
     BoraApiError,
     CancelledError,
+    ConnectionError,
     CursorResetError,
     DataCorruptionError,
     FolderConflictError,
@@ -973,18 +974,25 @@ class GoogleDriveClient:
     ) -> None:
         """Stream an export through the docs.google.com endpoint into
         *tmp_path*. Fallback for exports over the API's size cap; raises
-        RestrictedContentError on any non-200 so the restricted-content
-        skip machinery takes over (the endpoint is unofficial)."""
+        RestrictedContentError on a non-200 refusal so the restricted-
+        content skip machinery takes over (the endpoint is unofficial),
+        except for a transient server error (429/5xx), which raises a
+        connection error instead so the file is retried rather than
+        parked indefinitely as a restricted download."""
+
+        def restricted_error() -> RestrictedContentError:
+            return RestrictedContentError(
+                "Cannot export file",
+                "This file is too large for Google Drive to export.",
+                remote_path=remote_path,
+                local_path=local_path,
+            )
+
         kind = _WEB_EXPORT_KIND[mime]
         creds = self._credentials
         if creds is None or not creds.valid:
             if creds is None or creds.refresh_token is None:
-                raise RestrictedContentError(
-                    "Cannot export file",
-                    "This file is too large for Google Drive to export.",
-                    remote_path=remote_path,
-                    local_path=local_path,
-                )
+                raise restricted_error()
             creds.refresh(_AuthRequest())
         url = f"https://docs.google.com/{kind}/d/{file_id}/export?format={ext}"
         resp = self._retry_transient(
@@ -997,12 +1005,12 @@ class GoogleDriveClient:
         )
         with resp:
             if resp.status_code != 200:
-                raise RestrictedContentError(
-                    "Cannot export file",
-                    "This file is too large for Google Drive to export.",
-                    remote_path=remote_path,
-                    local_path=local_path,
-                )
+                if resp.status_code in RETRYABLE_HTTP_STATUS:
+                    raise ConnectionError(
+                        "Cannot connect to Google Drive",
+                        "Please check your internet connection and try again later.",
+                    )
+                raise restricted_error()
             with open(tmp_path, "wb") as fh:
                 for chunk in resp.iter_content(_DOWNLOAD_CHUNK_SIZE):
                     fh.write(chunk)

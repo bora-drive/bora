@@ -9,8 +9,12 @@ Covers:
   C — mid-stream fault on the 2nd chunk of a multi-chunk download → per-chunk
       _retry_transient recovers transparently; final file matches original MD5.
   D — API export over the ~10 MB cap (403 exportSizeLimitExceeded) falls back
-      to the docs.google.com web export endpoint; a non-200 there degrades to
-      RestrictedContentError; any other export 403 never reaches the fallback.
+      to the docs.google.com web export endpoint; a non-200 refusal there
+      degrades to RestrictedContentError; a transient 429/5xx there instead
+      surfaces as a Bora connection error so the file is retried rather than
+      parked; a mid-stream network drop is likewise a connection error, with
+      the sidecar cleaned up; any other export 403 never reaches the
+      fallback.
 
 Sleep neutralisation
 --------------------
@@ -29,10 +33,12 @@ import sqlite3
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from bora.client import _DOWNLOAD_CHUNK_SIZE, GoogleDriveClient
 from bora.config import remove_configuration
 from bora.database.core import Database
+from bora.exceptions import ConnectionError as BoraConnectionError
 from bora.exceptions import DataCorruptionError, RestrictedContentError
 from bora.export import ExportOptions
 from bora.keyring import CredentialStorage
@@ -362,6 +368,74 @@ def test_web_fallback_non_200_raises_restricted(cof, monkeypatch, tmp_path):
         client.download("/big.pptx", local, file_id=doc_id)
     # sidecar cleaned up
     assert not osp.exists(local + ".bora-part")
+
+
+def test_web_fallback_5xx_raises_connection_not_restricted(cof, monkeypatch, tmp_path):
+    """A transient 503 from the (unofficial) web endpoint must not be
+    treated as a permanent refusal: unlike a genuine non-200 refusal, it
+    must surface as a Bora connection error so the sync engine retries the
+    file instead of recording it as a restricted download and skipping it
+    until the next remote edit (see sync.py's SKIP_UNTIL_CHANGE_TYPES)."""
+    client, fake = cof
+    _enable_export(client)
+    doc_id = fake.add_native(name="big", kind="presentation")
+    export_mime, _ext = EXPORT_MIME_MAP["application/vnd.google-apps.presentation"]
+    fake.set_export_bytes(doc_id, export_mime, b"stub")
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "exportSizeLimitExceeded"),
+        count=999,
+    )
+    monkeypatch.setattr("bora.client.requests.get", lambda *a, **kw: _FakeResp(503))
+    local = str(tmp_path / "big.pptx")
+
+    with pytest.raises(BoraConnectionError) as exc_info:
+        client.download("/big.pptx", local, file_id=doc_id)
+
+    assert not isinstance(exc_info.value, RestrictedContentError)
+    # sidecar cleaned up
+    assert not osp.exists(local + ".bora-part")
+
+
+class _FakeRespStreamError(_FakeResp):
+    """Like ``_FakeResp`` but drops the connection mid-stream, simulating a
+    network failure after headers were already received."""
+
+    def __init__(self) -> None:
+        super().__init__(200, b"partial-bytes")
+
+    def iter_content(self, chunk_size):
+        yield self._content
+        raise requests.exceptions.ConnectionError("connection reset")
+
+
+def test_web_fallback_mid_stream_connection_error_cleans_sidecar(
+    cof, monkeypatch, tmp_path
+):
+    """A network drop mid-download through the web endpoint must clean up
+    the .bora-part sidecar and surface as a connection error, not
+    RestrictedContentError."""
+    client, fake = cof
+    _enable_export(client)
+    doc_id = fake.add_native(name="big", kind="presentation")
+    export_mime, _ext = EXPORT_MIME_MAP["application/vnd.google-apps.presentation"]
+    fake.set_export_bytes(doc_id, export_mime, b"stub")
+    fake.fail_next(
+        "files.export_media",
+        make_http_error(403, "exportSizeLimitExceeded"),
+        count=999,
+    )
+    monkeypatch.setattr(
+        "bora.client.requests.get", lambda *a, **kw: _FakeRespStreamError()
+    )
+    local = str(tmp_path / "big.pptx")
+
+    with pytest.raises(BoraConnectionError) as exc_info:
+        client.download("/big.pptx", local, file_id=doc_id)
+
+    assert not isinstance(exc_info.value, RestrictedContentError)
+    assert not osp.exists(local + ".bora-part")
+    assert not osp.exists(local)
 
 
 def test_other_export_403_does_not_fall_back(cof, monkeypatch, tmp_path):

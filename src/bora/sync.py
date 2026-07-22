@@ -4313,6 +4313,7 @@ class SyncEngine:
                     # remote file to change.
                     self._write_url_placeholder(event)
                 event.status = SyncStatus.Skipped
+                self.activity.discard(event)
                 return event
 
         event.status = SyncStatus.Syncing
@@ -4480,7 +4481,22 @@ class SyncEngine:
         remote id change -- id is not checked here, only the prefix, so a
         stale placeholder for the same path is still safely refreshed). A
         genuine, unrelated file at that path (e.g. a user's own real
-        Windows/Internet shortcut) is left untouched."""
+        Windows/Internet shortcut) is left untouched.
+
+        Guards against a genuine remote file that happens to live at the
+        placeholder's path (e.g. a real synced ``Guide.url``) by checking
+        the index first: a real synced file must never be clobbered, even
+        if its content happens to carry our own [InternetShortcut]
+        signature (see the fold-path derivation used by
+        ``_placeholder_error_for`` for why the remote path, not the local
+        one, is the safe identity to check here)."""
+        placeholder_remote_path_lower = self._placeholder_path(event.remote_path_lower)
+        if self.get_index_entry(placeholder_remote_path_lower) is not None:
+            self._logger.debug(
+                'Not writing placeholder: a real synced file already exists at "%s"',
+                placeholder_remote_path_lower,
+            )
+            return
         path = self._placeholder_path(event.local_path)
         content = (
             "[InternetShortcut]\r\n"
@@ -4531,11 +4547,20 @@ class SyncEngine:
         through (e.g. ``_download_only_entry_for``'s ``remote_path_lower``
         index lookups). On a case-sensitive file system the fold is
         skipped and paths are compared as-is, so an unrelated file that
-        merely differs by case is correctly treated as a different item."""
+        merely differs by case is correctly treated as a different item.
+
+        Note: a remote move/rename of a download-disabled file leaves the
+        old-path placeholder and its error entry stale for the rest of
+        the session -- this method only matches placeholders that still
+        have a live ``DownloadDisabledError`` entry, so a rename does not
+        misattribute a local edit under the old path. It self-heals on
+        the next startup retry pass: ``get_remote_item(old_path)`` then
+        resolves to ``NotFound``, and the synthesized deletion event
+        cleans up both the stale placeholder and its error entry."""
         candidates = [event.local_path]
         if event.local_path_from:
             candidates.append(event.local_path_from)
-        if not any(p.endswith(".url") for p in candidates):
+        if not any(p.lower().endswith(".url") for p in candidates):
             return None
         for entry in self.download_errors:
             if entry.type != "DownloadDisabledError":
