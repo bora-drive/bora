@@ -124,8 +124,12 @@ Decision: write a link placeholder rather than skipping silently.
   abort.
 - Unit: placeholder write, no-upload, ignore-local-edit, cleanup on
   remote delete, replacement on successful export.
-- Live (linked test): upload >10 MB native file, full sync, assert the
-  exported file lands locally with correct content.
+- Live: verified manually 2026-07-22 (22 MiB deck/doc uploaded to the
+  linked test account; API export 403s, fallback returns full valid
+  content). No automated linked test — generating a >10 MB native file
+  needs image libraries that are not test dependencies, and a 22 MB
+  upload per suite run is not worth it; the offline tests cover the
+  fallback mechanism.
 
 Ordering: fix 1 → 2 → 3 → 4, one commit each, `bin/test` + `bin/lint`
 green at each step.
