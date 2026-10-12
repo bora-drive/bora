@@ -35,7 +35,7 @@ dependencies = [
     "packaging",
     "pathspec>=0.5.8",
     "Pyro5>=5.10",
-    "requests>=2.16.2",
+    "requests>=2.34.2",
     "rich",
     "rubicon-objc>=0.4.1;sys_platform=='darwin'",
     "setuptools",
